@@ -128,6 +128,59 @@ function isServerAdmin(server, userId) {
   return r === 'owner' || r === 'admin';
 }
 
+/* ---------------- Server settings / roles / bans ---------------- */
+
+const SETTINGS_DEFAULTS = {
+  verification_level: 'none',
+  explicit_filter: 0,
+  allow_everyone: 1,
+  default_notifications: 'all',
+  slow_mode: 0,
+  system_channel_id: null
+};
+
+/* Fetch a server's settings row, creating it (with defaults) on first use.
+   Purely additive — never touches existing data. */
+function getServerSettings(serverId) {
+  let row = db.prepare('SELECT * FROM server_settings WHERE server_id = ?').get(serverId);
+  if (!row) {
+    db.prepare(`INSERT OR IGNORE INTO server_settings
+      (server_id, verification_level, explicit_filter, allow_everyone, default_notifications, slow_mode, system_channel_id, updated_at)
+      VALUES (?,?,?,?,?,?,?,?)`).run(
+        serverId, SETTINGS_DEFAULTS.verification_level, SETTINGS_DEFAULTS.explicit_filter,
+        SETTINGS_DEFAULTS.allow_everyone, SETTINGS_DEFAULTS.default_notifications,
+        SETTINGS_DEFAULTS.slow_mode, SETTINGS_DEFAULTS.system_channel_id, Date.now());
+    row = db.prepare('SELECT * FROM server_settings WHERE server_id = ?').get(serverId);
+  }
+  return Object.assign({}, SETTINGS_DEFAULTS, row);
+}
+
+function listServerRoles(serverId) {
+  return db.prepare('SELECT * FROM server_roles WHERE server_id = ? ORDER BY position ASC, created_at ASC').all(serverId);
+}
+
+function isBanned(serverId, userId) {
+  return !!db.prepare('SELECT 1 FROM server_bans WHERE server_id = ? AND user_id = ?').get(serverId, userId);
+}
+
+function addAudit(serverId, actorId, action, targetId, detail) {
+  try {
+    db.prepare('INSERT INTO server_audit (id, server_id, actor_id, action, target_id, detail, created_at) VALUES (?,?,?,?,?,?,?)')
+      .run(newId(), serverId, actorId || null, action, targetId || null, detail || '', Date.now());
+  } catch (e) { /* audit is best-effort */ }
+}
+
+/* Remove a member from a server (used by kick + ban). Returns true if removed. */
+function removeMember(serverId, userId) {
+  const info = db.prepare('DELETE FROM server_members WHERE server_id = ? AND user_id = ?').run(serverId, userId);
+  return info.changes > 0;
+}
+
+/* Notify every connected client that a server's member list changed. */
+function broadcastMembers(serverId) {
+  io.emit('server_members_update', { server_id: serverId });
+}
+
 /* Push the current channel list for a server to every connected client so
    channel changes appear instantly everywhere (clients filter by server id). */
 function broadcastChannels(serverId) {
@@ -743,6 +796,7 @@ app.post('/api/servers/join', auth, (req, res) => {
     if (found.maxed) return res.status(410).json({ error: 'This invite has reached its maximum uses' });
     srv = db.prepare('SELECT * FROM servers WHERE id = ?').get(found.invite.server_id);
     if (!srv) return res.status(404).json({ error: 'Invalid invite code' });
+    if (isBanned(srv.id, req.user.id)) return res.status(403).json({ error: 'You are banned from this server' });
     const already = db.prepare('SELECT 1 FROM server_members WHERE server_id = ? AND user_id = ?').get(srv.id, req.user.id);
     if (!already) {
       db.prepare('INSERT INTO server_members (server_id, user_id, joined_at, role) VALUES (?,?,?,?)').run(srv.id, req.user.id, Date.now(), 'member');
@@ -754,6 +808,7 @@ app.post('/api/servers/join', auth, (req, res) => {
   // 2) Legacy: raw server id (or a link ending in the server id).
   srv = db.prepare('SELECT * FROM servers WHERE id = ?').get(code);
   if (!srv) return res.status(404).json({ error: 'Invalid invite code' });
+  if (isBanned(srv.id, req.user.id)) return res.status(403).json({ error: 'You are banned from this server' });
   const existing = db.prepare('SELECT 1 FROM server_members WHERE server_id = ? AND user_id = ?').get(srv.id, req.user.id);
   if (!existing) {
     db.prepare('INSERT INTO server_members (server_id, user_id, joined_at, role) VALUES (?,?,?,?)').run(srv.id, req.user.id, Date.now(), 'member');
@@ -766,10 +821,15 @@ app.get('/api/servers/:id', auth, (req, res) => {
   if (!srv) return res.status(404).json({ error: 'Server not found' });
   const channels = db.prepare('SELECT * FROM channels WHERE server_id = ? ORDER BY position ASC, created_at ASC').all(srv.id);
   const members = db.prepare(`
-    SELECT u.*, m.role AS member_role FROM users u JOIN server_members m ON m.user_id = u.id
+    SELECT u.*, m.role AS member_role, m.custom_role_id AS member_custom_role, m.timeout_until AS member_timeout
+    FROM users u JOIN server_members m ON m.user_id = u.id
     WHERE m.server_id = ? ORDER BY m.joined_at ASC`).all(srv.id)
-    .map(u => Object.assign(publicUser(u), { role: u.member_role || (srv.owner_id === u.id ? 'owner' : 'member') }));
-  res.json({ server: publicServer(srv), channels, members });
+    .map(u => Object.assign(publicUser(u), {
+      role: u.member_role || (srv.owner_id === u.id ? 'owner' : 'member'),
+      custom_role_id: u.member_custom_role || null,
+      timeout_until: u.member_timeout || null
+    }));
+  res.json({ server: publicServer(srv), channels, members, settings: getServerSettings(srv.id), roles: listServerRoles(srv.id) });
 });
 
 app.post('/api/servers/:id/channels', auth, (req, res) => {
@@ -829,19 +889,40 @@ app.delete('/api/servers/:id/channels/:cid', auth, (req, res) => {
   res.json({ ok: true, id: ch.id });
 });
 
-/* Promote / demote a member to admin (owner only). Body: { role: 'admin'|'member' } */
+/* Update a member: role (owner only), custom role, or timeout (owner + admins). */
 app.patch('/api/servers/:id/members/:uid', auth, (req, res) => {
   const srv = db.prepare('SELECT * FROM servers WHERE id = ?').get(req.params.id);
   if (!srv) return res.status(404).json({ error: 'Server not found' });
-  if (srv.owner_id !== req.user.id) return res.status(403).json({ error: 'Only the owner can manage member roles' });
+  if (!isServerAdmin(srv, req.user.id)) return res.status(403).json({ error: 'Only the owner and admins can manage members' });
   const target = req.params.uid;
-  if (target === srv.owner_id) return res.status(400).json({ error: 'The owner role cannot be changed' });
-  const member = db.prepare('SELECT 1 FROM server_members WHERE server_id = ? AND user_id = ?').get(srv.id, target);
+  if (target === srv.owner_id) return res.status(400).json({ error: 'The owner cannot be modified' });
+  const member = db.prepare('SELECT * FROM server_members WHERE server_id = ? AND user_id = ?').get(srv.id, target);
   if (!member) return res.status(404).json({ error: 'Member not found' });
-  const role = req.body && req.body.role === 'admin' ? 'admin' : 'member';
-  db.prepare('UPDATE server_members SET role = ? WHERE server_id = ? AND user_id = ?').run(role, srv.id, target);
-  io.emit('server_members_update', { server_id: srv.id });
-  res.json({ ok: true, role });
+  const iAmOwner = srv.owner_id === req.user.id;
+  const body = req.body || {};
+  const updates = []; const values = [];
+  if ('role' in body) {
+    if (!iAmOwner) return res.status(403).json({ error: 'Only the owner can change admin roles' });
+    const role = body.role === 'admin' ? 'admin' : 'member';
+    updates.push('role = ?'); values.push(role);
+  }
+  if ('custom_role_id' in body) {
+    const rid = body.custom_role_id || null;
+    if (rid) {
+      const roleRow = db.prepare('SELECT 1 FROM server_roles WHERE id = ? AND server_id = ?').get(rid, srv.id);
+      if (!roleRow) return res.status(400).json({ error: 'Role not found' });
+    }
+    updates.push('custom_role_id = ?'); values.push(rid);
+  }
+  if ('timeout_until' in body) {
+    updates.push('timeout_until = ?'); values.push(body.timeout_until || null);
+  }
+  if (updates.length) {
+    values.push(srv.id, target);
+    db.prepare(`UPDATE server_members SET ${updates.join(', ')} WHERE server_id = ? AND user_id = ?`).run(...values);
+  }
+  broadcastMembers(srv.id);
+  res.json({ ok: true });
 });
 
 /* Update server name / icon / banner / description (owner only). */
@@ -864,6 +945,176 @@ app.patch('/api/servers/:id', auth, (req, res) => {
   const updated = publicServer(db.prepare('SELECT * FROM servers WHERE id = ?').get(srv.id));
   io.emit('server_update', updated);
   res.json({ server: updated });
+});
+
+/* ---------------- Server settings (safety / moderation defaults) ---------------- */
+
+/* Read a server's settings (any member). */
+app.get('/api/servers/:id/settings', auth, (req, res) => {
+  const srv = getServerForUser(req.params.id, req.user.id);
+  if (!srv) return res.status(404).json({ error: 'Server not found' });
+  res.json({ settings: getServerSettings(srv.id) });
+});
+
+/* Update a server's settings (owner + admins). */
+app.patch('/api/servers/:id/settings', auth, (req, res) => {
+  const srv = db.prepare('SELECT * FROM servers WHERE id = ?').get(req.params.id);
+  if (!srv) return res.status(404).json({ error: 'Server not found' });
+  if (!isServerAdmin(srv, req.user.id)) return res.status(403).json({ error: 'Only the owner and admins can edit settings' });
+  const cur = getServerSettings(srv.id);
+  const body = req.body || {};
+  const next = {
+    verification_level: ['none', 'low', 'medium', 'high'].includes(body.verification_level) ? body.verification_level : cur.verification_level,
+    explicit_filter: 'explicit_filter' in body ? (body.explicit_filter ? 1 : 0) : cur.explicit_filter,
+    allow_everyone: 'allow_everyone' in body ? (body.allow_everyone ? 1 : 0) : cur.allow_everyone,
+    default_notifications: ['all', 'mentions', 'none'].includes(body.default_notifications) ? body.default_notifications : cur.default_notifications,
+    slow_mode: 'slow_mode' in body ? Math.max(0, Math.min(21600, parseInt(body.slow_mode, 10) || 0)) : cur.slow_mode,
+    system_channel_id: 'system_channel_id' in body ? (body.system_channel_id || null) : cur.system_channel_id
+  };
+  db.prepare(`UPDATE server_settings SET verification_level=?, explicit_filter=?, allow_everyone=?, default_notifications=?, slow_mode=?, system_channel_id=?, updated_at=? WHERE server_id=?`)
+    .run(next.verification_level, next.explicit_filter, next.allow_everyone, next.default_notifications, next.slow_mode, next.system_channel_id, Date.now(), srv.id);
+  addAudit(srv.id, req.user.id, 'settings_update', null, '');
+  io.emit('server_settings_update', { server_id: srv.id, settings: getServerSettings(srv.id) });
+  res.json({ settings: getServerSettings(srv.id) });
+});
+
+/* ---------------- Moderation: kick / ban / timeout ---------------- */
+
+/* Kick a member (owner + admins). They can rejoin with a valid invite. */
+app.post('/api/servers/:id/kick', auth, (req, res) => {
+  const srv = db.prepare('SELECT * FROM servers WHERE id = ?').get(req.params.id);
+  if (!srv) return res.status(404).json({ error: 'Server not found' });
+  if (!isServerAdmin(srv, req.user.id)) return res.status(403).json({ error: 'Only the owner and admins can kick members' });
+  const target = (req.body && req.body.user_id) || '';
+  if (!target) return res.status(400).json({ error: 'user_id required' });
+  if (target === srv.owner_id) return res.status(400).json({ error: 'You cannot kick the server owner' });
+  const tRole = memberRole(srv.id, target);
+  if (tRole === 'admin' && srv.owner_id !== req.user.id) return res.status(403).json({ error: 'Only the owner can kick admins' });
+  if (!removeMember(srv.id, target)) return res.status(404).json({ error: 'Member not found' });
+  addAudit(srv.id, req.user.id, 'kick', target, (req.body && req.body.reason) || '');
+  broadcastMembers(srv.id);
+  res.json({ ok: true });
+});
+
+/* Ban a member (owner + admins): removes them and blocks rejoin. */
+app.post('/api/servers/:id/bans', auth, (req, res) => {
+  const srv = db.prepare('SELECT * FROM servers WHERE id = ?').get(req.params.id);
+  if (!srv) return res.status(404).json({ error: 'Server not found' });
+  if (!isServerAdmin(srv, req.user.id)) return res.status(403).json({ error: 'Only the owner and admins can ban members' });
+  const target = (req.body && req.body.user_id) || '';
+  if (!target) return res.status(400).json({ error: 'user_id required' });
+  if (target === srv.owner_id) return res.status(400).json({ error: 'You cannot ban the server owner' });
+  const tRole = memberRole(srv.id, target);
+  if (tRole === 'admin' && srv.owner_id !== req.user.id) return res.status(403).json({ error: 'Only the owner can ban admins' });
+  const reason = String((req.body && req.body.reason) || '').slice(0, 300);
+  db.prepare('INSERT OR REPLACE INTO server_bans (server_id, user_id, moderator_id, reason, created_at) VALUES (?,?,?,?,?)')
+    .run(srv.id, target, req.user.id, reason, Date.now());
+  removeMember(srv.id, target);
+  addAudit(srv.id, req.user.id, 'ban', target, reason);
+  broadcastMembers(srv.id);
+  res.json({ ok: true });
+});
+
+/* List bans (owner + admins). */
+app.get('/api/servers/:id/bans', auth, (req, res) => {
+  const srv = db.prepare('SELECT * FROM servers WHERE id = ?').get(req.params.id);
+  if (!srv) return res.status(404).json({ error: 'Server not found' });
+  if (!isServerAdmin(srv, req.user.id)) return res.status(403).json({ error: 'Only the owner and admins can view bans' });
+  const rows = db.prepare(`SELECT b.*, u.username, u.discriminator, u.display_name, u.avatar, u.avatar_url, u.accent_color
+    FROM server_bans b LEFT JOIN users u ON u.id = b.user_id WHERE b.server_id = ? ORDER BY b.created_at DESC`).all(srv.id);
+  const bans = rows.map(r => ({
+    user_id: r.user_id,
+    reason: r.reason || '',
+    created_at: r.created_at,
+    moderator_id: r.moderator_id,
+    user: { id: r.user_id, username: r.username || 'Unknown', discriminator: r.discriminator || '0000', display_name: r.display_name || null, avatar: r.avatar || null, avatar_url: r.avatar_url || null, accent_color: r.accent_color || '#5865f2' }
+  }));
+  res.json({ bans });
+});
+
+/* Unban a user (owner + admins). */
+app.delete('/api/servers/:id/bans/:uid', auth, (req, res) => {
+  const srv = db.prepare('SELECT * FROM servers WHERE id = ?').get(req.params.id);
+  if (!srv) return res.status(404).json({ error: 'Server not found' });
+  if (!isServerAdmin(srv, req.user.id)) return res.status(403).json({ error: 'Only the owner and admins can manage bans' });
+  db.prepare('DELETE FROM server_bans WHERE server_id = ? AND user_id = ?').run(srv.id, req.params.uid);
+  addAudit(srv.id, req.user.id, 'unban', req.params.uid, '');
+  res.json({ ok: true });
+});
+
+/* Timeout (mute) a member for N minutes (owner + admins). */
+app.post('/api/servers/:id/members/:uid/timeout', auth, (req, res) => {
+  const srv = db.prepare('SELECT * FROM servers WHERE id = ?').get(req.params.id);
+  if (!srv) return res.status(404).json({ error: 'Server not found' });
+  if (!isServerAdmin(srv, req.user.id)) return res.status(403).json({ error: 'Only the owner and admins can time out members' });
+  const target = req.params.uid;
+  if (target === srv.owner_id) return res.status(400).json({ error: 'You cannot time out the server owner' });
+  const member = db.prepare('SELECT 1 FROM server_members WHERE server_id = ? AND user_id = ?').get(srv.id, target);
+  if (!member) return res.status(404).json({ error: 'Member not found' });
+  const mins = Math.max(0, Math.min(10080, parseInt((req.body && req.body.minutes), 10) || 0));
+  const until = mins > 0 ? Date.now() + mins * 60000 : null;
+  db.prepare('UPDATE server_members SET timeout_until = ? WHERE server_id = ? AND user_id = ?').run(until, srv.id, target);
+  addAudit(srv.id, req.user.id, mins > 0 ? 'timeout' : 'timeout_remove', target, String(mins));
+  broadcastMembers(srv.id);
+  res.json({ ok: true, timeout_until: until });
+});
+
+/* ---------------- Custom roles ---------------- */
+
+/* List roles + how many members hold each (any member). */
+app.get('/api/servers/:id/roles', auth, (req, res) => {
+  const srv = getServerForUser(req.params.id, req.user.id);
+  if (!srv) return res.status(404).json({ error: 'Server not found' });
+  const roles = listServerRoles(srv.id).map(r => Object.assign({}, r, {
+    member_count: db.prepare('SELECT COUNT(*) AS c FROM server_members WHERE server_id = ? AND custom_role_id = ?').get(srv.id, r.id).c
+  }));
+  res.json({ roles });
+});
+
+/* Create a custom role (owner + admins). */
+app.post('/api/servers/:id/roles', auth, (req, res) => {
+  const srv = db.prepare('SELECT * FROM servers WHERE id = ?').get(req.params.id);
+  if (!srv) return res.status(404).json({ error: 'Server not found' });
+  if (!isServerAdmin(srv, req.user.id)) return res.status(403).json({ error: 'Only the owner and admins can manage roles' });
+  const name = String((req.body && req.body.name) || '').trim().slice(0, 32);
+  if (!name) return res.status(400).json({ error: 'Role name required' });
+  const color = /^#[0-9a-fA-F]{6}$/.test((req.body && req.body.color) || '') ? req.body.color : '#5865F2';
+  const maxPos = db.prepare('SELECT MAX(position) AS p FROM server_roles WHERE server_id = ?').get(srv.id).p || 0;
+  const id = newId();
+  db.prepare('INSERT INTO server_roles (id, server_id, name, color, position, created_at) VALUES (?,?,?,?,?,?)')
+    .run(id, srv.id, name, color, maxPos + 1, Date.now());
+  addAudit(srv.id, req.user.id, 'role_create', id, name);
+  const role = db.prepare('SELECT * FROM server_roles WHERE id = ?').get(id);
+  io.emit('server_roles_update', { server_id: srv.id });
+  res.json({ role: Object.assign({}, role, { member_count: 0 }) });
+});
+
+/* Update a custom role (owner + admins). */
+app.patch('/api/servers/:id/roles/:rid', auth, (req, res) => {
+  const srv = db.prepare('SELECT * FROM servers WHERE id = ?').get(req.params.id);
+  if (!srv) return res.status(404).json({ error: 'Server not found' });
+  if (!isServerAdmin(srv, req.user.id)) return res.status(403).json({ error: 'Only the owner and admins can manage roles' });
+  const role = db.prepare('SELECT * FROM server_roles WHERE id = ? AND server_id = ?').get(req.params.rid, srv.id);
+  if (!role) return res.status(404).json({ error: 'Role not found' });
+  const updates = []; const values = [];
+  if (req.body && typeof req.body.name === 'string' && req.body.name.trim()) { updates.push('name = ?'); values.push(req.body.name.trim().slice(0, 32)); }
+  if (req.body && /^#[0-9a-fA-F]{6}$/.test(req.body.color || '')) { updates.push('color = ?'); values.push(req.body.color); }
+  if (updates.length) { values.push(role.id); db.prepare(`UPDATE server_roles SET ${updates.join(', ')} WHERE id = ?`).run(...values); }
+  io.emit('server_roles_update', { server_id: srv.id });
+  res.json({ role: db.prepare('SELECT * FROM server_roles WHERE id = ?').get(role.id) });
+});
+
+/* Delete a custom role (owner + admins). Members keep their membership. */
+app.delete('/api/servers/:id/roles/:rid', auth, (req, res) => {
+  const srv = db.prepare('SELECT * FROM servers WHERE id = ?').get(req.params.id);
+  if (!srv) return res.status(404).json({ error: 'Server not found' });
+  if (!isServerAdmin(srv, req.user.id)) return res.status(403).json({ error: 'Only the owner and admins can manage roles' });
+  db.prepare('UPDATE server_members SET custom_role_id = NULL WHERE server_id = ? AND custom_role_id = ?').run(srv.id, req.params.rid);
+  db.prepare('DELETE FROM server_roles WHERE id = ? AND server_id = ?').run(req.params.rid, srv.id);
+  addAudit(srv.id, req.user.id, 'role_delete', req.params.rid, '');
+  io.emit('server_roles_update', { server_id: srv.id });
+  broadcastMembers(srv.id);
+  res.json({ ok: true });
 });
 
 /* ---------------- Server invites ---------------- */

@@ -159,6 +159,49 @@ CREATE TABLE IF NOT EXISTS notifications (
   created_at INTEGER NOT NULL
 );
 
+/* Per-server configuration (safety, moderation defaults, system channel). */
+CREATE TABLE IF NOT EXISTS server_settings (
+  server_id TEXT PRIMARY KEY,
+  verification_level TEXT DEFAULT 'none',
+  explicit_filter INTEGER DEFAULT 0,
+  allow_everyone INTEGER DEFAULT 1,
+  default_notifications TEXT DEFAULT 'all',
+  slow_mode INTEGER DEFAULT 0,
+  system_channel_id TEXT,
+  updated_at INTEGER
+);
+
+/* Banned members. A ban removes the member and blocks them from rejoining. */
+CREATE TABLE IF NOT EXISTS server_bans (
+  server_id TEXT NOT NULL,
+  user_id TEXT NOT NULL,
+  moderator_id TEXT,
+  reason TEXT DEFAULT '',
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY (server_id, user_id)
+);
+
+/* Custom server roles (name + colour), assignable to members. */
+CREATE TABLE IF NOT EXISTS server_roles (
+  id TEXT PRIMARY KEY,
+  server_id TEXT NOT NULL,
+  name TEXT NOT NULL,
+  color TEXT DEFAULT '#5865F2',
+  position INTEGER DEFAULT 0,
+  created_at INTEGER NOT NULL
+);
+
+/* Lightweight moderation audit trail. */
+CREATE TABLE IF NOT EXISTS server_audit (
+  id TEXT PRIMARY KEY,
+  server_id TEXT NOT NULL,
+  actor_id TEXT,
+  action TEXT NOT NULL,
+  target_id TEXT,
+  detail TEXT DEFAULT '',
+  created_at INTEGER NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_messages_channel ON messages(channel_id);
 CREATE INDEX IF NOT EXISTS idx_messages_dm ON messages(dm_id);
 CREATE INDEX IF NOT EXISTS idx_reactions_message ON reactions(message_id);
@@ -169,6 +212,9 @@ CREATE INDEX IF NOT EXISTS idx_notes_owner ON notes(owner_id);
 CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_id);
 CREATE INDEX IF NOT EXISTS idx_invites_server ON invites(server_id);
 CREATE INDEX IF NOT EXISTS idx_dm_hidden_user ON dm_hidden(user_id);
+CREATE INDEX IF NOT EXISTS idx_server_bans_server ON server_bans(server_id);
+CREATE INDEX IF NOT EXISTS idx_server_roles_server ON server_roles(server_id);
+CREATE INDEX IF NOT EXISTS idx_server_audit_server ON server_audit(server_id);
 `);
 
 /* ---------------- Migrations ----------------
@@ -223,6 +269,14 @@ function migrate() {
   const memCols = db.prepare('PRAGMA table_info(server_members)').all().map(c => c.name);
   if (!memCols.includes('role')) {
     try { db.exec("ALTER TABLE server_members ADD COLUMN role TEXT DEFAULT 'member'"); } catch (e) {}
+  }
+  // 1d-2. Additive migration: optional custom role assignment per member.
+  if (!memCols.includes('custom_role_id')) {
+    try { db.exec('ALTER TABLE server_members ADD COLUMN custom_role_id TEXT'); } catch (e) {}
+  }
+  // 1d-3. Additive migration: per-member timeout (moderation).
+  if (!memCols.includes('timeout_until')) {
+    try { db.exec('ALTER TABLE server_members ADD COLUMN timeout_until INTEGER'); } catch (e) {}
   }
   // Backfill: make sure every server owner is marked as 'owner' (never destructive).
   try {

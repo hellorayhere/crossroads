@@ -27,6 +27,8 @@ const state = {
   notifications: [],
   unread: 0,
   settings: {},
+  serverSettings: null,
+  roles: [],
   mention: { active: false, query: '', items: [], sel: 0, start: 0 }
 };
 
@@ -533,6 +535,21 @@ function connectSocket() {
     if (!data || !state.server || data.server_id !== state.server.id) return;
     reloadServerMembers();
   });
+  /* Server safety settings changed. */
+  socket.on('server_settings_update', (data) => {
+    if (!data || !state.server || data.server_id !== state.server.id) return;
+    state.serverSettings = data.settings || state.serverSettings;
+    if (document.querySelector('.ss-tab.active')?.dataset.tab === 'safety') renderServerTab('safety', state.server, state.server.owner_id === me.id);
+  });
+  /* Custom roles changed. */
+  socket.on('server_roles_update', (data) => {
+    if (!data || !state.server || data.server_id !== state.server.id) return;
+    refreshRoles().then(() => {
+      const t = document.querySelector('.ss-tab.active')?.dataset.tab;
+      if (t === 'roles') renderServerTab('roles', state.server, state.server.owner_id === me.id);
+      else renderMembers();
+    });
+  });
   socket.on('friend_update', (data) => {
     loadFriends();
     if (data.type === 'request') toast((data.user.display_name || data.user.username) + ' sent you a friend request', 'alert');
@@ -621,7 +638,7 @@ function showHome() {
   $('chat-hash').style.display = 'none';
   $('chat-title').textContent = t('Direct Messages');
   $('chat-topic').textContent = '';
-  $('members').innerHTML = '';
+  closeMembersPanel();
   $('composer').classList.add('hidden');
   renderDMList();
   renderEmptyChat();
@@ -682,7 +699,7 @@ async function openDM(d) {
   $('chat-title').style.cursor = 'pointer';
   $('chat-title').onclick = () => openProfile(d.user);
   $('chat-topic').textContent = '';
-  $('members').innerHTML = '';
+  closeMembersPanel();
   socket.emit('join_dm', d.id);
   const { messages } = await api('/api/dms/' + d.id + '/messages');
   state.messages = messages;
@@ -701,6 +718,7 @@ function openDMContextMenu(x, y, dmid) {
   const isFriend = !!(state.friends && state.friends.friends.some(f => f.id === u.id));
   const isBlocked = !!(state.friends && state.friends.blocked.some(f => f.id === u.id));
   const items = [
+    { label: 'Open Profile', icon: 'id-badge', onClick: () => openProfile(u) },
     { label: 'Mark As Read', icon: 'check', onClick: () => { toast('Marked as read', 'success'); } },
     { label: 'Close DM', icon: 'xmark', onClick: () => closeDM(d) },
     { sep: true },
@@ -756,7 +774,7 @@ async function openFriends() {
   $('chat-hash').style.display = 'none';
   $('chat-title').textContent = 'Friends';
   $('chat-topic').textContent = '';
-  $('members').innerHTML = '';
+  closeMembersPanel();
   $('composer').classList.add('hidden');
   await loadFriends();
   renderDMList();
@@ -1033,6 +1051,8 @@ async function openServer(id) {
   state.server = data.server;
   state.channels = data.channels;
   state.members = data.members;
+  state.serverSettings = data.settings || null;
+  state.roles = data.roles || [];
   state.dm = null;
   setReplyTo(null);
   for (const m of data.members) state.usersCache[m.id] = m;
@@ -1041,10 +1061,13 @@ async function openServer(id) {
   $('sidebar-name').textContent = data.server.name;
   syncSidebarBanner(true);
   renderChannelList();
+  // Automatically reveal the member list when a server is opened.
+  state.showMembers = true;
   renderMembers();
   const firstText = state.channels.find(c => c.type === 'text');
   if (firstText) openChannel(firstText.id);
   else { state.channel = null; renderEmptyChat('No text channels yet'); $('composer').classList.add('hidden'); }
+  animateView();
 }
 
 /* Show the server's banner directly under the server name in the sidebar. */
@@ -1136,7 +1159,8 @@ async function openChannel(cid) {
 
 function renderMembers() {
   const wrap = $('members');
-  if (!state.showMembers || !state.server) { wrap.innerHTML = ''; return; }
+  if (!state.server) { wrap.classList.add('closed'); wrap.innerHTML = ''; return; }
+  wrap.classList.toggle('closed', !state.showMembers);
   wrap.innerHTML = '';
   const online = state.members.filter(m => m.status !== 'offline');
   const offline = state.members.filter(m => m.status === 'offline');
@@ -1151,13 +1175,23 @@ function renderMembers() {
       row.className = 'member' + (m.status === 'offline' ? ' offline' : '');
       row.dataset.uid = m.id;
       const crown = (state.server.owner_id === m.id) ? `<span class="owner-crown">${icon('crown')}</span>` : '';
-      row.innerHTML = `${avatarHTML(m, 32, m.status || 'offline')}<span class="mname">${escapeHtml(m.display_name || m.username)}${crown}</span>`;
+      const role = state.server.owner_id === m.id ? 'owner' : (m.role || 'member');
+      const roleTag = role === 'admin' ? '<span class="member-role-tag admin">ADMIN</span>' : '';
+      const crole = (m.custom_role_id && state.roles) ? state.roles.find(r => r.id === m.custom_role_id) : null;
+      const croleTag = crole ? `<span class="member-role-tag" style="color:${crole.color};border-color:${crole.color}">${escapeHtml(crole.name)}</span>` : '';
+      row.innerHTML = `${avatarHTML(m, 32, m.status || 'offline')}<span class="mname">${escapeHtml(m.display_name || m.username)}${crown}${roleTag}${croleTag}</span>`;
       row.addEventListener('click', () => openProfile(m));
       wrap.appendChild(row);
     }
   };
   addCat('ONLINE', online);
   addCat('OFFLINE', offline);
+}
+
+/* Collapse the member list with a slide animation. */
+function closeMembersPanel() {
+  const wrap = $('members');
+  if (wrap) { wrap.classList.add('closed'); wrap.innerHTML = ''; }
 }
 
 /* ============================================================
@@ -1286,19 +1320,91 @@ function userByName(name) {
 function formatContent(text) {
   if (!text) return '';
   let html = escapeHtml(text);
+
+  /* --- 1. Pull out the pieces that must never be touched by inline markdown --- */
+  const codeBlocks = [];
+  html = html.replace(/```([\s\S]*?)```/g, (m, code) => {
+    codeBlocks.push(code.replace(/^\n/, ''));
+    return `\u0000C${codeBlocks.length - 1}\u0000`;
+  });
+  const inlineCode = [];
+  html = html.replace(/`([^`\n]+)`/g, (m, code) => {
+    inlineCode.push(code);
+    return `\u0000I${inlineCode.length - 1}\u0000`;
+  });
   const links = [];
   html = html.replace(/(https?:\/\/[^\s<]+)/g, (u) => { links.push(u); return `\u0000L${links.length - 1}\u0000`; });
-  html = html.replace(/(^|[\s(])(gg\/[A-Za-z0-9_-]{4,64})/g, '$1<span class="invite-code">$2</span>');
-  html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
-  html = html.replace(/@([a-zA-Z0-9._]+)/g, (mt, name) => {
-    const u = userByName(name);
-    const isMe = u ? u.id === me.id : (name.toLowerCase() === (me.username || '').toLowerCase());
-    const uidAttr = u ? ` data-uid="${u.id}"` : '';
-    return `<span class="mention${isMe ? ' me' : ''}"${uidAttr}>@${name}</span>`;
-  });
-  html = html.replace(/(^|[\s(])#([a-z0-9-]+)/g, '$1<span class="mention" data-channel="$2">#$2</span>');
-  html = html.replace(/\u0000L(\d+)\u0000/g, (mt, i) => `<a href="${links[i]}" target="_blank" rel="noopener">${links[i]}</a>`);
-  return html;
+
+  /* --- 2. Inline markdown (Discord-style) --- */
+  function renderInline(s) {
+    // Spoilers ||hidden||
+    s = s.replace(/\|\|([\s\S]+?)\|\|/g, '<span class="spoiler">$1</span>');
+    // Bold + italic, bold, italic
+    s = s.replace(/\*\*\*([^*\n]+)\*\*\*/g, '<strong><em>$1</em></strong>');
+    s = s.replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>');
+    s = s.replace(/(^|[^*\w])\*([^*\n]+)\*(?!\*)/g, '$1<em>$2</em>');
+    // Underline __text__ (before single-underscore italic)
+    s = s.replace(/__([^_\n]+)__/g, '<u>$1</u>');
+    // Italic _text_
+    s = s.replace(/(^|[\s(])_([^_\n]+)_(?=[\s).,!?]|$)/g, '$1<em>$2</em>');
+    // Strikethrough ~~text~~
+    s = s.replace(/~~([^~\n]+)~~/g, '<s>$1</s>');
+    // Invite codes gg/xxxx
+    s = s.replace(/(^|[\s(])(gg\/[A-Za-z0-9_-]{4,64})/g, '$1<span class="invite-code">$2</span>');
+    // @mentions
+    s = s.replace(/@([a-zA-Z0-9._]+)/g, (mt, name) => {
+      const u = userByName(name);
+      const isMe = u ? u.id === me.id : (name.toLowerCase() === (me.username || '').toLowerCase());
+      const uidAttr = u ? ` data-uid="${u.id}"` : '';
+      const special = /^(everyone|here)$/i.test(name) ? ' special' : '';
+      return `<span class="mention${isMe ? ' me' : ''}${special}"${uidAttr}>@${name}</span>`;
+    });
+    // #channel links
+    s = s.replace(/(^|[\s(])#([a-z0-9-]+)/g, '$1<span class="mention" data-channel="$2">#$2</span>');
+    return s;
+  }
+
+  /* --- 3. Block-level markdown, line by line --- */
+  const lines = html.split('\n');
+  const blocks = [];
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i];
+    // Blockquote  > text
+    if (/^\s*&gt;\s?/.test(line)) {
+      const q = [];
+      while (i < lines.length && /^\s*&gt;\s?/.test(lines[i])) { q.push(renderInline(lines[i].replace(/^\s*&gt;\s?/, ''))); i++; }
+      blocks.push(`<blockquote class="md-quote">${q.join('\n')}</blockquote>`);
+      continue;
+    }
+    // Heading  # / ## / ###
+    const h = line.match(/^\s*(#{1,3})\s+(.+)$/);
+    if (h) { blocks.push(`<div class="md-h md-h${h[1].length}">${renderInline(h[2])}</div>`); i++; continue; }
+    // Unordered list  - / * / +
+    if (/^\s*[-*+]\s+/.test(line)) {
+      const items = [];
+      while (i < lines.length && /^\s*[-*+]\s+/.test(lines[i])) { items.push(`<li>${renderInline(lines[i].replace(/^\s*[-*+]\s+/, ''))}</li>`); i++; }
+      blocks.push(`<ul class="md-ul">${items.join('')}</ul>`);
+      continue;
+    }
+    // Ordered list  1. 2. 3.
+    if (/^\s*\d+\.\s+/.test(line)) {
+      const items = [];
+      while (i < lines.length && /^\s*\d+\.\s+/.test(lines[i])) { items.push(`<li>${renderInline(lines[i].replace(/^\s*\d+\.\s+/, ''))}</li>`); i++; }
+      blocks.push(`<ol class="md-ol">${items.join('')}</ol>`);
+      continue;
+    }
+    // Plain line
+    blocks.push(renderInline(line));
+    i++;
+  }
+  let result = blocks.join('\n');
+
+  /* --- 4. Restore extracted pieces --- */
+  result = result.replace(/\u0000L(\d+)\u0000/g, (mt, idx) => `<a href="${links[idx]}" target="_blank" rel="noopener">${links[idx]}</a>`);
+  result = result.replace(/\u0000I(\d+)\u0000/g, (mt, idx) => `<code>${inlineCode[idx]}</code>`);
+  result = result.replace(/\u0000C(\d+)\u0000/g, (mt, idx) => `<pre class="md-pre"><code>${codeBlocks[idx]}</code></pre>`);
+  return result;
 }
 
 function extractUrls(text) {
@@ -1455,6 +1561,14 @@ function animateView() {
   box.classList.remove('view-enter');
   void box.offsetWidth;
   box.classList.add('view-enter');
+}
+
+/* Re-trigger a CSS entrance animation on an element that already exists. */
+function replayAnim(el, cls) {
+  if (!el) return;
+  el.classList.remove(cls);
+  void el.offsetWidth;
+  el.classList.add(cls);
 }
 
 function flashMessage(mid) {
@@ -2648,6 +2762,7 @@ function renderSettings(section) {
   document.querySelectorAll('#settings-nav .sn-item[data-sec]').forEach(el => el.classList.toggle('active', el.dataset.sec === section));
   const panel = $('settings-panel');
   panel.innerHTML = settingsPanelHTML(section);
+  replayAnim(panel, 'anim-in');
   hydrateIcons(panel);
   if (section === 'account') wireAccountPanel();
   if (section === 'profiles') wireProfilesPanel();
@@ -3217,8 +3332,11 @@ function openServerSettings() {
     </div>
     <div class="ss-tabs">
       <button class="ss-tab active" data-tab="overview">${icon('server')} Overview</button>
-      <button class="ss-tab" data-tab="invites">${icon('link')} Invites</button>
+      <button class="ss-tab" data-tab="roles">${icon('shield')} Roles</button>
       <button class="ss-tab" data-tab="members">${icon('users')} Members</button>
+      <button class="ss-tab" data-tab="moderation">${icon('ban')} Moderation</button>
+      <button class="ss-tab" data-tab="safety">${icon('lock')} Safety</button>
+      <button class="ss-tab" data-tab="invites">${icon('link')} Invites</button>
     </div>
     <div class="ss-body" id="ss-body"></div>`, { modalClass: 'ss-modal' });
   $('ss-close-x').addEventListener('click', closeModal);
@@ -3233,6 +3351,7 @@ function openServerSettings() {
 function renderServerTab(tab, s, isOwner) {
   const body = $('ss-body');
   if (!body) return;
+  replayAnim(body, 'anim-in');
   if (tab === 'invites') {
     body.innerHTML = `<div class="invite-panel">${invitePanelHTML(s)}</div>`;
     hydrateIcons(body);
@@ -3242,30 +3361,62 @@ function renderServerTab(tab, s, isOwner) {
   if (tab === 'members') {
     const members = state.members || [];
     const iAmOwner = s.owner_id === me.id;
+    const admin = amIAdmin();
+    const roles = state.roles || [];
     body.innerHTML = `
       <div class="ss-section-title">Members \u2014 ${members.length}</div>
       <div class="ss-members">${members.map(m => {
         const isOwner = m.id === s.owner_id;
         const role = isOwner ? 'owner' : (m.role || 'member');
         const badge = isOwner ? '<span class="role-badge owner">Owner</span>' : (role === 'admin' ? '<span class="role-badge admin">Admin</span>' : '');
-        let action = '';
-        if (iAmOwner && !isOwner) {
-          action = role === 'admin'
-            ? `<button class="ss-member-role-btn" data-demote="${m.id}">Demote</button>`
-            : `<button class="ss-member-role-btn promote" data-promote="${m.id}">Make Admin</button>`;
+        const crole = (m.custom_role_id && roles.find(r => r.id === m.custom_role_id)) || null;
+        const croleBadge = crole ? `<span class="role-badge custom" style="background:${crole.color}22;color:${crole.color};border-color:${crole.color}66">${escapeHtml(crole.name)}</span>` : '';
+        let actions = '';
+        if (admin && !isOwner) {
+          const roleBtn = iAmOwner
+            ? (role === 'admin'
+                ? `<button class="ss-member-role-btn" data-demote="${m.id}">Demote</button>`
+                : `<button class="ss-member-role-btn promote" data-promote="${m.id}">Make Admin</button>`)
+            : '';
+          const roleSelect = roles.length
+            ? `<select class="ss-role-select" data-role-for="${m.id}">
+                 <option value="">No role</option>
+                 ${roles.map(r => `<option value="${r.id}"${m.custom_role_id === r.id ? ' selected' : ''}>${escapeHtml(r.name)}</option>`).join('')}
+               </select>`
+            : '';
+          actions = `${roleSelect}${roleBtn}
+            <button class="ss-member-role-btn ghost" data-timeout="${m.id}" title="Time out member">${icon('clock')}</button>
+            <button class="ss-member-role-btn" data-kick="${m.id}" title="Kick member">${icon('user-minus')}</button>
+            <button class="ss-member-role-btn danger" data-ban="${m.id}" title="Ban member">${icon('ban')}</button>`;
         }
         return `<div class="ss-member-row">
           ${avatarHTML(m, 36, m.status || 'offline')}
           <div class="ss-member-info">
-            <div class="ss-member-name">${escapeHtml(m.display_name || m.username)}${badge}</div>
+            <div class="ss-member-name">${escapeHtml(m.display_name || m.username)}${badge}${croleBadge}</div>
             <div class="ss-member-tag">${escapeHtml(fullTag(m))}</div>
           </div>
-          ${action}
+          <div class="ss-member-actions">${actions}</div>
         </div>`;
       }).join('') || '<div class="inv-empty">No members.</div>'}</div>`;
     hydrateIcons(body);
     body.querySelectorAll('[data-promote]').forEach(b => b.addEventListener('click', () => setMemberRole(s, b.dataset.promote, 'admin')));
     body.querySelectorAll('[data-demote]').forEach(b => b.addEventListener('click', () => setMemberRole(s, b.dataset.demote, 'member')));
+    body.querySelectorAll('[data-role-for]').forEach(sel => sel.addEventListener('change', () => assignCustomRole(s, sel.dataset.roleFor, sel.value || null)));
+    body.querySelectorAll('[data-kick]').forEach(b => b.addEventListener('click', () => kickMember(s, b.dataset.kick)));
+    body.querySelectorAll('[data-ban]').forEach(b => b.addEventListener('click', () => banMember(s, b.dataset.ban)));
+    body.querySelectorAll('[data-timeout]').forEach(b => b.addEventListener('click', () => timeoutMember(s, b.dataset.timeout)));
+    return;
+  }
+  if (tab === 'roles') {
+    renderRolesTab(body, s);
+    return;
+  }
+  if (tab === 'moderation') {
+    renderModerationTab(body, s);
+    return;
+  }
+  if (tab === 'safety') {
+    renderSafetyTab(body, s);
     return;
   }
   // Overview
@@ -3294,8 +3445,9 @@ function renderServerTab(tab, s, isOwner) {
           <button class="ss-banner-btn" id="ss-banner-upload">${icon('image')} ${s.banner_url ? 'Change Banner' : 'Upload Banner'}</button>
           ${s.banner_url ? `<button class="ss-banner-btn ghost" id="ss-banner-remove">${icon('trash')} Remove</button>` : ''}
         </div>
-        <input type="file" id="ss-banner-file" accept="image/*" class="hidden">
+        <input type="file" id="ss-banner-file" accept="image/*,image/gif" class="hidden">
       </div>
+      <div class="ss-banner-hint">${icon('image')} Recommended 960&times;240. Animated GIFs are supported and will play in the sidebar.</div>
       <div class="ss-fields">
         <div class="field"><label>Server Description</label>
           <div class="ss-desc-wrap">
@@ -3370,6 +3522,213 @@ function renderServerTab(tab, s, isOwner) {
 }
 
 /* ============================================================
+   SERVER SETTINGS — Roles / Moderation / Safety tabs
+   ============================================================ */
+async function refreshRoles() {
+  if (!state.server) return;
+  try { const { roles } = await api('/api/servers/' + state.server.id + '/roles'); state.roles = roles || []; } catch (e) { /* ignore */ }
+}
+
+function renderRolesTab(body, s) {
+  const admin = amIAdmin();
+  const roles = state.roles || [];
+  const members = state.members || [];
+  const builtins = [
+    { name: 'Owner', color: '#f0b232', desc: 'Full access. The owner cannot be removed or demoted.', count: 1 },
+    { name: 'Admin', color: '#f23f43', desc: 'Can manage channels, roles, members and moderation.', count: members.filter(m => m.role === 'admin' && m.id !== s.owner_id).length },
+    { name: 'Member', color: '#949ba4', desc: 'Standard access to channels and conversations.', count: members.filter(m => m.id !== s.owner_id && (m.role || 'member') === 'member').length }
+  ];
+  body.innerHTML = `
+    <div class="ss-section-title">Built-in Roles</div>
+    <div class="ss-roles">
+      ${builtins.map(r => `<div class="ss-role-card">
+        <span class="role-dot" style="background:${r.color}"></span>
+        <div class="ss-role-info"><div class="ss-role-name">${r.name}</div><div class="ss-role-desc">${r.desc}</div></div>
+        <span class="ss-role-count">${r.count}</span>
+      </div>`).join('')}
+    </div>
+    <div class="ss-section-title">Custom Roles \u2014 ${roles.length}</div>
+    <div class="ss-roles" id="ss-custom-roles">
+      ${roles.map(r => `<div class="ss-role-card">
+        <span class="role-dot" style="background:${r.color}"></span>
+        <div class="ss-role-info"><div class="ss-role-name" style="color:${r.color}">${escapeHtml(r.name)}</div><div class="ss-role-desc">${r.member_count || 0} member(s)</div></div>
+        ${admin ? `<div class="ss-role-actions"><button class="ss-member-role-btn ghost" data-edit-role="${r.id}" title="Edit">${icon('pencil')}</button><button class="ss-member-role-btn danger" data-del-role="${r.id}" title="Delete">${icon('trash')}</button></div>` : ''}
+      </div>`).join('') || '<div class="inv-empty">No custom roles yet. Create one to tag members with a name and colour.</div>'}
+    </div>
+    ${admin ? `<div class="ss-actions"><button class="btn" id="ss-add-role">${icon('plus')} Create Role</button></div>` : '<div class="ss-note">Only the owner and admins can manage roles.</div>'}
+  `;
+  hydrateIcons(body);
+  const addBtn = $('ss-add-role');
+  if (addBtn) addBtn.addEventListener('click', () => openRoleEditor(s, null));
+  body.querySelectorAll('[data-del-role]').forEach(b => b.addEventListener('click', () => deleteServerRole(s, b.dataset.delRole)));
+  body.querySelectorAll('[data-edit-role]').forEach(b => b.addEventListener('click', () => { const r = (state.roles || []).find(x => x.id === b.dataset.editRole); if (r) openRoleEditor(s, r); }));
+}
+
+function openRoleEditor(s, role) {
+  const colors = PALETTE;
+  const cur = role ? role.color : '#5865F2';
+  const wrap = document.createElement('div');
+  wrap.className = 'confirm-overlay';
+  wrap.innerHTML = `<div class="confirm-box">
+    <h3>${role ? 'Edit Role' : 'Create Role'}</h3>
+    <div class="field"><label>Role Name</label><input id="role-name" maxlength="32" value="${escapeHtml(role ? role.name : '')}" placeholder="e.g. Moderator, VIP, Artist"></div>
+    <div class="field"><label>Role Colour</label><div class="role-color-row">${colors.map(c => `<button class="role-swatch${c === cur ? ' sel' : ''}" data-color="${c}" style="background:${c}"></button>`).join('')}</div></div>
+    <div class="confirm-actions"><button class="btn ghost" id="role-cancel">Cancel</button><button class="btn" id="role-save">${role ? 'Save' : 'Create'}</button></div>
+  </div>`;
+  document.body.appendChild(wrap);
+  let chosen = cur;
+  wrap.querySelectorAll('.role-swatch').forEach(b => b.addEventListener('click', () => { chosen = b.dataset.color; wrap.querySelectorAll('.role-swatch').forEach(x => x.classList.toggle('sel', x === b)); }));
+  const done = () => wrap.remove();
+  wrap.querySelector('#role-cancel').addEventListener('click', done);
+  wrap.addEventListener('click', (e) => { if (e.target === wrap) done(); });
+  wrap.querySelector('#role-save').addEventListener('click', async () => {
+    const name = wrap.querySelector('#role-name').value.trim();
+    if (!name) { toast('Role name required', 'error'); return; }
+    try {
+      if (role) await api('/api/servers/' + s.id + '/roles/' + role.id, { method: 'PATCH', body: JSON.stringify({ name, color: chosen }) });
+      else await api('/api/servers/' + s.id + '/roles', { method: 'POST', body: JSON.stringify({ name, color: chosen }) });
+      done();
+      toast(role ? 'Role updated' : 'Role created', 'success');
+      await refreshRoles();
+      renderServerTab('roles', state.server, state.server.owner_id === me.id);
+    } catch (e) { toast(e.message, 'error'); }
+  });
+}
+
+async function deleteServerRole(s, rid) {
+  const ok = await confirmDialog({ title: 'Delete Role', body: 'Delete this role? Members who have it keep their membership.', confirmText: 'Delete', danger: true });
+  if (!ok) return;
+  try {
+    await api('/api/servers/' + s.id + '/roles/' + rid, { method: 'DELETE' });
+    toast('Role deleted', 'success');
+    await refreshRoles();
+    renderServerTab('roles', state.server, state.server.owner_id === me.id);
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+async function assignCustomRole(s, uid, rid) {
+  try {
+    await api('/api/servers/' + s.id + '/members/' + uid, { method: 'PATCH', body: JSON.stringify({ custom_role_id: rid }) });
+    toast('Role updated', 'success');
+    reloadServerMembers();
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+function renderModerationTab(body, s) {
+  if (!amIAdmin()) { body.innerHTML = '<div class="ss-note">Only the owner and admins can view moderation.</div>'; return; }
+  body.innerHTML = `
+    <div class="ss-section-title">Banned Members</div>
+    <div id="ss-bans"><div class="inv-empty">Loading\u2026</div></div>
+    <div class="ss-note">Kick and ban members from the <b>Members</b> tab. Banned members cannot rejoin even with a valid invite.</div>`;
+  loadBans(s);
+}
+
+async function loadBans(s) {
+  try {
+    const { bans } = await api('/api/servers/' + s.id + '/bans');
+    const el = $('ss-bans'); if (!el) return;
+    el.innerHTML = bans.length ? bans.map(b => `<div class="ss-member-row">
+      ${avatarHTML(b.user, 36)}
+      <div class="ss-member-info"><div class="ss-member-name">${escapeHtml(b.user.display_name || b.user.username)}</div>
+      <div class="ss-member-tag">${escapeHtml(fullTag(b.user))}${b.reason ? ' \u2014 ' + escapeHtml(b.reason) : ''}</div></div>
+      <div class="ss-member-actions"><button class="ss-member-role-btn" data-unban="${b.user_id}">${icon('unlock')} Unban</button></div>
+    </div>`).join('') : '<div class="inv-empty">No banned members.</div>';
+    hydrateIcons(el);
+    el.querySelectorAll('[data-unban]').forEach(btn => btn.addEventListener('click', () => unbanMember(s, btn.dataset.unban)));
+  } catch (e) { const el = $('ss-bans'); if (el) el.innerHTML = '<div class="inv-empty">' + escapeHtml(e.message) + '</div>'; }
+}
+
+function renderSafetyTab(body, s) {
+  const admin = amIAdmin();
+  const st = state.serverSettings || {};
+  const channels = (state.channels || []).filter(c => c.type === 'text');
+  body.innerHTML = `
+    <div class="ss-section-title">Safety & Moderation</div>
+    <div class="ss-field-grid">
+      <div class="field"><label>Verification Level</label>
+        <select id="ss-verif" ${admin ? '' : 'disabled'}>
+          ${['none','low','medium','high'].map(v => `<option value="${v}"${st.verification_level === v ? ' selected' : ''}>${{none:'None',low:'Low',medium:'Medium',high:'Highest'}[v]}</option>`).join('')}
+        </select>
+        <div class="hint">How strict membership checks are before members can chat.</div>
+      </div>
+      <div class="field"><label>Default Notifications</label>
+        <select id="ss-notif" ${admin ? '' : 'disabled'}>
+          ${['all','mentions','none'].map(v => `<option value="${v}"${st.default_notifications === v ? ' selected' : ''}>${{all:'All Messages',mentions:'Only @mentions',none:'Nothing'}[v]}</option>`).join('')}
+        </select>
+        <div class="hint">What new members are notified about by default.</div>
+      </div>
+      <div class="field"><label>Slow Mode (seconds between messages)</label>
+        <input type="number" id="ss-slow" min="0" max="21600" value="${st.slow_mode || 0}" ${admin ? '' : 'disabled'}>
+        <div class="hint">0 = off. Members must wait this long between messages.</div>
+      </div>
+      <div class="field"><label>System Messages Channel</label>
+        <select id="ss-sys" ${admin ? '' : 'disabled'}>
+          <option value="">None</option>
+          ${channels.map(c => `<option value="${c.id}"${st.system_channel_id === c.id ? ' selected' : ''}>#${escapeHtml(c.name)}</option>`).join('')}
+        </select>
+        <div class="hint">Where join and moderation notices are posted.</div>
+      </div>
+    </div>
+    <div class="set-row"><div><div class="sr-title">Explicit Content Filter</div><div class="sr-desc">Scan and block messages containing explicit media.</div></div><div class="toggle${st.explicit_filter ? ' on' : ''}" data-ss-toggle="explicit_filter"></div></div>
+    <div class="set-row"><div><div class="sr-title">Allow @everyone / @here</div><div class="sr-desc">Let members ping the whole server or everyone online.</div></div><div class="toggle${st.allow_everyone ? ' on' : ''}" data-ss-toggle="allow_everyone"></div></div>
+    ${admin ? `<div class="ss-actions"><button class="btn" id="ss-save-settings">${icon('check')} Save Settings</button></div>` : '<div class="ss-note">Only the owner and admins can edit these settings.</div>'}
+  `;
+  hydrateIcons(body);
+  if (!admin) return;
+  body.querySelectorAll('[data-ss-toggle]').forEach(t => t.addEventListener('click', () => t.classList.toggle('on')));
+  $('ss-save-settings').addEventListener('click', () => saveServerSettings(s));
+}
+
+async function saveServerSettings(s) {
+  const body = $('ss-body');
+  const payload = {
+    verification_level: $('ss-verif').value,
+    default_notifications: $('ss-notif').value,
+    slow_mode: parseInt($('ss-slow').value, 10) || 0,
+    system_channel_id: $('ss-sys').value || null,
+    explicit_filter: body.querySelector('[data-ss-toggle="explicit_filter"]').classList.contains('on'),
+    allow_everyone: body.querySelector('[data-ss-toggle="allow_everyone"]').classList.contains('on')
+  };
+  try {
+    const { settings } = await api('/api/servers/' + s.id + '/settings', { method: 'PATCH', body: JSON.stringify(payload) });
+    state.serverSettings = settings;
+    toast('Server settings saved', 'success');
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+async function kickMember(s, uid) {
+  const m = state.members.find(x => x.id === uid);
+  const ok = await confirmDialog({ title: 'Kick Member', body: `Kick <b>${escapeHtml(m ? (m.display_name || m.username) : 'this member')}</b> from the server? They can rejoin with an invite.`, confirmText: 'Kick', danger: true });
+  if (!ok) return;
+  try { await api('/api/servers/' + s.id + '/kick', { method: 'POST', body: JSON.stringify({ user_id: uid }) }); toast('Member kicked', 'success'); reloadServerMembers(); }
+  catch (e) { toast(e.message, 'error'); }
+}
+
+async function banMember(s, uid) {
+  const m = state.members.find(x => x.id === uid);
+  const reason = await promptDialog({ title: 'Ban Member', label: 'Reason (optional)', placeholder: `Why are you banning ${m ? (m.display_name || m.username) : 'this member'}?`, confirmText: 'Ban', value: '' });
+  if (reason === null) return;
+  try { await api('/api/servers/' + s.id + '/bans', { method: 'POST', body: JSON.stringify({ user_id: uid, reason }) }); toast('Member banned', 'success'); reloadServerMembers(); }
+  catch (e) { toast(e.message, 'error'); }
+}
+
+async function unbanMember(s, uid) {
+  try {
+    await api('/api/servers/' + s.id + '/bans/' + uid, { method: 'DELETE' });
+    toast('Member unbanned', 'success');
+    if (document.querySelector('.ss-tab.active')?.dataset.tab === 'moderation') renderServerTab('moderation', s, s.owner_id === me.id);
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+async function timeoutMember(s, uid) {
+  const mins = await promptDialog({ title: 'Time Out Member', label: 'Duration in minutes', value: '10', placeholder: '10', confirmText: 'Time Out' });
+  if (mins === null) return;
+  const n = Math.max(0, parseInt(mins, 10) || 0);
+  try { await api('/api/servers/' + s.id + '/members/' + uid + '/timeout', { method: 'POST', body: JSON.stringify({ minutes: n }) }); toast(n > 0 ? `Member timed out for ${n} min` : 'Timeout removed', 'success'); }
+  catch (e) { toast(e.message, 'error'); }
+}
+
+/* ============================================================
    REALTIME REFRESH HELPERS
    ============================================================ */
 /* Re-paint the avatar + author name on every rendered message from a user. */
@@ -3400,9 +3759,13 @@ async function reloadServerMembers() {
     state.server = Object.assign({}, state.server, data.server);
     if (data.channels) state.channels = data.channels;
     state.members = data.members || [];
+    if (data.settings) state.serverSettings = data.settings;
+    if (data.roles) state.roles = data.roles;
     renderMembers();
     const activeTab = document.querySelector('.ss-tab.active');
-    if (activeTab && activeTab.dataset.tab === 'members') renderServerTab('members', state.server, state.server.owner_id === me.id);
+    if (activeTab && ['members', 'roles', 'moderation'].includes(activeTab.dataset.tab)) {
+      renderServerTab(activeTab.dataset.tab, state.server, state.server.owner_id === me.id);
+    }
   } catch (e) { /* ignore */ }
 }
 
@@ -3659,7 +4022,7 @@ function bindGlobalEvents() {
   $('btn-settings').addEventListener('click', () => openSettings('account'));
   $('btn-mic').addEventListener('click', () => openSettings('voice'));
   $('hdr-notifs').addEventListener('click', (e) => { e.stopPropagation(); openNotifPanel(); });
-  $('hdr-members').addEventListener('click', () => { saveSetting('showMembers', !state.showMembers); });
+  $('hdr-members').addEventListener('click', () => { saveSetting('showMembers', !state.showMembers); renderMembers(); });
   $('hdr-pins').addEventListener('click', (e) => { e.stopPropagation(); openPinsPanel(); });
   $('hdr-search').addEventListener('click', () => toast('Search is not available yet'));
   const ec = $('empty-create'); if (ec) ec.addEventListener('click', openCreateServer);
@@ -3699,6 +4062,8 @@ function bindGlobalEvents() {
 
   /* Mentions inside messages: click to open a profile. */
   $('messages').addEventListener('click', (e) => {
+    const sp = e.target.closest('.spoiler');
+    if (sp) { sp.classList.toggle('revealed'); return; }
     const men = e.target.closest('.mention');
     if (!men) return;
     if (men.dataset.uid) {
