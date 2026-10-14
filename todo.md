@@ -11,10 +11,10 @@
 - [x] db.js: restore from remote BEFORE opening the DB (sync child process)
 - [x] server.js: start auto-backup + back up new uploads
 - [x] Verify GitHub token works (repo scope)
-- [ ] Create private repo `hellorayhere/crossroads-data`
-- [ ] Commit + push code changes (persist.js, db.js, server.js, favicon, html)
-- [ ] Set Render env vars (GH_DATA_TOKEN, GH_DATA_REPO, GH_DATA_BRANCH, DATA_DIR, UPLOAD_DIR)
-- [ ] Deploy / trigger redeploy
+- [x] Create private repo `hellorayhere/crossroads-data`
+- [x] Commit + push code changes (persist.js, db.js, server.js, favicon, html)
+- [x] Set Render env vars (GH_DATA_TOKEN, GH_DATA_REPO, GH_DATA_BRANCH, JWT_SECRET)
+- [x] Deploy / trigger redeploy (dep-db7emf5g1s2s73a8gvh0 @ cd8eb66)
 - [ ] Confirm boot logs show durable storage active + restore
 
 ## Favicon

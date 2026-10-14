@@ -24,6 +24,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 
 const TOKEN = process.env.GH_DATA_TOKEN || '';
 const REPO = process.env.GH_DATA_REPO || '';
@@ -84,6 +85,18 @@ async function downloadBlob(sha, destPath) {
   return buf.length;
 }
 
+/* SHA-256 of a file, or null if it does not exist. Used to skip no-op backups
+   so the data repo does not accumulate thousands of identical commits. */
+function hashFile(p) {
+  try {
+    return crypto.createHash('sha256').update(fs.readFileSync(p)).digest('hex');
+  } catch (e) {
+    return null;
+  }
+}
+
+let lastDbHash = null;
+
 /* Commit a set of files (path -> Buffer) in a single commit. */
 async function commitFiles(files, message) {
   const { baseCommitSha, baseTreeSha } = await getTree();
@@ -134,6 +147,7 @@ async function restore() {
     try {
       const n = await downloadBlob(dbEntry.sha, DB_PATH);
       dbOk = true;
+      lastDbHash = hashFile(DB_PATH);
       console.log(`[persist] restored database (${n} bytes)`);
     } catch (e) {
       console.error('[persist] db restore failed:', e.message);
@@ -172,7 +186,10 @@ async function backupDb(db, reason) {
     }
     if (!fs.existsSync(DB_PATH)) return;
     const buf = fs.readFileSync(DB_PATH);
+    const h = crypto.createHash('sha256').update(buf).digest('hex');
+    if (h === lastDbHash) return; // nothing changed since the last backup
     await commitFiles({ 'db/crossroads.db': buf }, `backup db (${reason}) ${new Date().toISOString()}`);
+    lastDbHash = h;
     console.log(`[persist] db backed up (${reason}, ${buf.length} bytes)`);
   } catch (e) {
     console.error('[persist] db backup failed:', e.message);
