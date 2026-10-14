@@ -1,39 +1,29 @@
-# Crossroads — UI/UX Revamp Task List
+# Crossroads — Round 2 Task List
 
-## 1. Status icons from uploaded images ✅
-- [x] online.png / idle.png / dnd.png placed in public/img/ (status-online/idle/dnd.png)
-- [x] CSS wired for avatar dots, mini status, profile pills
+## 1. Auth: "Reset password" option under Create account
+- [x] Add reset link on login card
+- [x] Build reset flow UI + backend
+- [x] Wire in auth.js + server.js
+- [x] Verify in browser (link, form, validation, success, restore)
 
-## 2. Auth UI revamp (less cartoony, no emojis/SVG icons) ✅
-- [x] Redesign public/index.html (clean, professional)
-- [x] Rewrite public/css/auth.css
-- [x] Keep all element IDs so auth.js still works
-- [x] Verify locally with screenshot
+## 2. Server create: better name/description placeholders (not plain white)
+- [x] Improve placeholder + input styling (name input was still white — fixed with .ss-overview selectors)
 
-## 3. Navigation animation on server/DM click ✅
-- [x] view-enter + navPop animations wired on server/DM/channel/friends open
+## 3. Server banner shows under server name
+- [x] Render uploaded banner under server name
 
-## 4. DM right-click dropdown (Close, Unfriend, Block, etc.) ✅
-- [x] Context menu verified (Mark As Read, Close DM, Copy User ID, Unfriend, Block)
+## 4. "Join a Server" — add more details
+- [x] Enrich join-a-server panel
 
-## 5. Friends: include tag number (test#6842) ✅
-- [x] Live search + tag display verified via API
+## 5. File/GIF/video messages: remove outer embed
+- [x] Media sends under message without embed wrapper (files keep embed)
 
-## 6. Performance / lag fixes ✅
-- [x] Parallel init, debounced rerenders, lazy images
+## 6. Friend requests require # tag
+- [x] Enforce tag in add-friend input
 
-## 7. Pinned messages system ✅
-- [x] Pin/unpin + panel verified via API + UI
+## 7. Friends layout revamp (unique, not basic/cartoony)
+- [x] Redesign Friends view (two-column nav + main)
 
-## 8. Settings fixes ✅
-- [x] Language applies, desktop notifications, friend-request toggle
-- [x] Remove Change Password SVG icon
-- [x] Save button, single white Log Out with confirm
-
-## 9. Profile pic/banner scale control ✅
-- [x] Image editor zoom slider + drag verified
-
-## 10. Deploy
-- [ ] Commit + push to GitHub main
-- [ ] Verify Render redeploy + live site
-- [ ] Confirm data preserved (never wipe)
+## 8. Deploy
+- [ ] Commit + push, verify Render redeploy + live site
+- [ ] Confirm data preserved

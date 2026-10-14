@@ -438,6 +438,37 @@ app.post('/api/login', (req, res) => {
   res.json({ token, user: publicUser(user) });
 });
 
+/* Password reset (unauthenticated). Requires the exact username#tag so a user
+   who has forgotten their password can regain access. */
+app.post('/api/password/reset', (req, res) => {
+  let { identifier, new_password } = req.body || {};
+  identifier = (identifier || '').trim();
+  if (!identifier || !new_password) {
+    return res.status(400).json({ error: 'Your username tag and a new password are required' });
+  }
+  if (!identifier.includes('#')) {
+    return res.status(400).json({ error: 'Enter your full tag, for example username#0000' });
+  }
+  const [uname, disc] = identifier.split('#');
+  if (!uname.trim() || !disc.trim()) {
+    return res.status(400).json({ error: 'Enter your full tag, for example username#0000' });
+  }
+  const user = db.prepare('SELECT * FROM users WHERE LOWER(username) = LOWER(?) AND discriminator = ?')
+    .get(uname.trim(), disc.trim());
+  if (!user) {
+    return res.status(404).json({ error: 'No account matches that username and tag' });
+  }
+  if (String(new_password).length < 6) {
+    return res.status(400).json({ error: 'Password must be at least 6 characters' });
+  }
+  if (String(new_password).length > 128) {
+    return res.status(400).json({ error: 'Password is too long' });
+  }
+  const hash = bcrypt.hashSync(String(new_password), 10);
+  db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(hash, user.id);
+  res.json({ ok: true });
+});
+
 app.get('/api/me', auth, (req, res) => {
   res.json({ user: publicUser(req.user) });
 });

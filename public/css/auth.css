@@ -310,6 +310,9 @@ body {
   transition: color 0.15s;
 }
 .switch a:hover { color: #b3c1ff; text-decoration: underline; text-underline-offset: 2px; }
+.switch.subtle { margin-top: 9px; font-size: 12.5px; }
+.switch.subtle a { color: var(--muted); font-weight: 500; }
+.switch.subtle a:hover { color: #b3c1ff; }
 
 /* ---------------- Global error ---------------- */
 .global-error {
@@ -324,6 +327,12 @@ body {
   animation: shake 0.4s var(--ease);
 }
 .global-error.show { display: block; }
+.global-error.ok {
+  background: rgba(47, 191, 113, 0.1);
+  border-color: rgba(47, 191, 113, 0.4);
+  color: #9fe6c0;
+  animation: fade-in 0.25s var(--ease);
+}
 
 .hidden { display: none !important; }
 

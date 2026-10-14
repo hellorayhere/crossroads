@@ -17,18 +17,25 @@
 
   const loginForm = document.getElementById('login-form');
   const registerForm = document.getElementById('register-form');
+  const resetForm = document.getElementById('reset-form');
   const formTitle = document.getElementById('form-title');
   const formSubtitle = document.getElementById('form-subtitle');
   const globalError = document.getElementById('global-error');
 
   function showError(msg) {
     globalError.textContent = msg;
-    globalError.classList.remove('show');
+    globalError.classList.remove('show', 'ok');
     // retrigger shake animation
     void globalError.offsetWidth;
     globalError.classList.add('show');
   }
-  function clearError() { globalError.classList.remove('show'); globalError.textContent = ''; }
+  function showNotice(msg) {
+    globalError.textContent = msg;
+    globalError.classList.remove('show');
+    void globalError.offsetWidth;
+    globalError.classList.add('show', 'ok');
+  }
+  function clearError() { globalError.classList.remove('show', 'ok'); globalError.textContent = ''; }
   function markInvalid(id, invalid) { document.getElementById(id).classList.toggle('invalid', invalid); }
 
   /* ---------------- Button ripple ---------------- */
@@ -59,17 +66,19 @@
   });
 
   /* ---------------- Form switching ---------------- */
+  const FORMS = { login: loginForm, register: registerForm, reset: resetForm };
   function swapForms(show) {
-    const from = show === 'register' ? loginForm : registerForm;
-    const to = show === 'register' ? registerForm : loginForm;
-    from.classList.add('hidden');
-    from.classList.remove('swap-in');
+    const to = FORMS[show] || loginForm;
+    [loginForm, registerForm, resetForm].forEach((f) => { f.classList.add('hidden'); f.classList.remove('swap-in'); });
     to.classList.remove('hidden');
     void to.offsetWidth;
     to.classList.add('swap-in');
     if (show === 'register') {
       formTitle.textContent = 'Create your account';
       formSubtitle.textContent = 'Pick a username and set a password to get started.';
+    } else if (show === 'reset') {
+      formTitle.textContent = 'Reset your password';
+      formSubtitle.textContent = 'Enter your username and tag, then choose a new password.';
     } else {
       formTitle.textContent = 'Welcome back';
       formSubtitle.textContent = 'Sign in to continue to your workspace.';
@@ -78,10 +87,17 @@
   }
   const toRegister = document.getElementById('to-register');
   const toLogin = document.getElementById('to-login');
-  toRegister.addEventListener('click', () => swapForms('register'));
-  toRegister.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); swapForms('register'); } });
-  toLogin.addEventListener('click', () => swapForms('login'));
-  toLogin.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); swapForms('login'); } });
+  const toReset = document.getElementById('to-reset');
+  const toLogin2 = document.getElementById('to-login-2');
+  function wireSwitch(el, target) {
+    if (!el) return;
+    el.addEventListener('click', () => swapForms(target));
+    el.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); swapForms(target); } });
+  }
+  wireSwitch(toRegister, 'register');
+  wireSwitch(toLogin, 'login');
+  wireSwitch(toReset, 'reset');
+  wireSwitch(toLogin2, 'login');
 
   /* ---------------- Fetch helper ---------------- */
   async function post(url, body) {
@@ -102,6 +118,7 @@
   }
   document.getElementById('login-btn').dataset.label = 'Sign In';
   document.getElementById('register-btn').dataset.label = 'Create Account';
+  document.getElementById('reset-btn').dataset.label = 'Reset Password';
 
   /* ---------------- Username availability ---------------- */
   const usernameInput = document.getElementById('reg-username');
@@ -186,6 +203,40 @@
       window.location.href = '/app.html';
     } catch (err) {
       showError(err.message);
+      setLoading(btn, false);
+    }
+  });
+
+  /* ---------------- Reset password ---------------- */
+  const resetIdInput = document.getElementById('reset-identifier');
+  const resetPassInput = document.getElementById('reset-password');
+  const resetPass2Input = document.getElementById('reset-password2');
+  resetForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    clearError();
+    const identifier = resetIdInput.value.trim();
+    const pw = resetPassInput.value;
+    const pw2 = resetPass2Input.value;
+    let ok = true;
+    if (!identifier || !identifier.includes('#')) { markInvalid('f-reset-id', true); ok = false; } else markInvalid('f-reset-id', false);
+    if (pw.length < 6) { markInvalid('f-reset-pass', true); ok = false; } else markInvalid('f-reset-pass', false);
+    if (pw !== pw2) { markInvalid('f-reset-pass2', true); ok = false; } else markInvalid('f-reset-pass2', false);
+    if (!ok) return;
+
+    const btn = document.getElementById('reset-btn');
+    setLoading(btn, true, 'Resetting\u2026');
+    try {
+      await post('/api/password/reset', { identifier, new_password: pw });
+      resetPassInput.value = '';
+      resetPass2Input.value = '';
+      swapForms('login');
+      document.getElementById('login-identifier').value = identifier;
+      document.getElementById('login-password').value = '';
+      showNotice('Password updated. Sign in with your new password.');
+      document.getElementById('login-password').focus();
+    } catch (err) {
+      showError(err.message);
+    } finally {
       setLoading(btn, false);
     }
   });

@@ -76,6 +76,7 @@
 
         <button type="submit" class="btn" id="login-btn"><span class="btn-label">Sign In</span></button>
         <p class="switch">Need an account? <a id="to-register" role="button" tabindex="0">Create one</a></p>
+        <p class="switch subtle"><a id="to-reset" role="button" tabindex="0">Forgot your password? Reset it</a></p>
       </form>
 
       <!-- REGISTER -->
@@ -102,6 +103,38 @@
 
         <button type="submit" class="btn" id="register-btn"><span class="btn-label">Create Account</span></button>
         <p class="switch"><a id="to-login" role="button" tabindex="0">Already have an account? Sign in</a></p>
+      </form>
+
+      <!-- RESET PASSWORD -->
+      <form id="reset-form" class="hidden" autocomplete="off" novalidate>
+        <div class="field" id="f-reset-id">
+          <label for="reset-identifier">Username or Tag <span class="req">*</span></label>
+          <div class="input-wrap">
+            <input type="text" id="reset-identifier" placeholder="username#0000" autocomplete="username" />
+          </div>
+          <div class="msg error">Enter your full tag, for example username#0000.</div>
+        </div>
+
+        <div class="field" id="f-reset-pass">
+          <label for="reset-password">New Password <span class="req">*</span></label>
+          <div class="input-wrap">
+            <input type="password" id="reset-password" placeholder="At least 6 characters" autocomplete="new-password" />
+            <button type="button" class="peek" data-target="reset-password" aria-label="Show password">Show</button>
+          </div>
+          <div class="msg error">Password must be at least 6 characters.</div>
+        </div>
+
+        <div class="field" id="f-reset-pass2">
+          <label for="reset-password2">Confirm Password <span class="req">*</span></label>
+          <div class="input-wrap">
+            <input type="password" id="reset-password2" placeholder="Re-enter your new password" autocomplete="new-password" />
+            <button type="button" class="peek" data-target="reset-password2" aria-label="Show password">Show</button>
+          </div>
+          <div class="msg error">The two passwords do not match.</div>
+        </div>
+
+        <button type="submit" class="btn" id="reset-btn"><span class="btn-label">Reset Password</span></button>
+        <p class="switch"><a id="to-login-2" role="button" tabindex="0">Back to sign in</a></p>
       </form>
 
       <p class="footer-note">By continuing, you agree to the Crossroads Terms of Service and Privacy Policy.</p>

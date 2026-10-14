@@ -766,6 +766,7 @@ function emptyFriends(msg) { return `<div class="fr-empty">${msg}</div>`; }
 function friendRow(u, kind) {
   const name = escapeHtml(u.display_name || u.username);
   const status = u.status === 'offline' ? 'Offline' : statusLabel(u.status);
+  const statusClass = u.status || 'offline';
   let actions = '';
   if (kind === 'friend') {
     actions = `<button class="fr-act" data-fr-msg="${u.id}" title="Message">${icon('comment')}</button>
@@ -779,8 +780,11 @@ function friendRow(u, kind) {
     actions = `<button class="fr-act ok" data-fr-act="unblock" data-uid="${u.id}" title="Unblock">${icon('unlock')}</button>`;
   }
   return `<div class="fr-row" data-uid="${u.id}">
-    ${avatarHTML(u, 32, u.status || 'offline')}
-    <div class="fr-info"><div class="fr-name">${name}<span class="fr-tag">#${u.discriminator}</span></div><div class="fr-status">${status}</div></div>
+    <div class="fr-avatar">${avatarHTML(u, 42, u.status || 'offline')}</div>
+    <div class="fr-info">
+      <div class="fr-name">${name}<span class="fr-tag">#${u.discriminator}</span></div>
+      <div class="fr-status ${statusClass}"><span class="fr-dot"></span>${status}</div>
+    </div>
     <div class="fr-actions">${actions}</div>
   </div>`;
 }
@@ -789,23 +793,35 @@ function renderFriendsView() {
   const box = $('messages');
   box.style.padding = ''; box.style.overflow = '';
   const f = state.friends || { friends: [], incoming: [], outgoing: [], blocked: [] };
-  const tab = state.friendsTab;
+  const tab = state.friendsTab || 'online';
   const counts = {
     online: f.friends.filter(x => x.status !== 'offline').length,
     all: f.friends.length,
     pending: f.incoming.length + f.outgoing.length,
     blocked: f.blocked.length
   };
-  const tabBtn = (id, label, count) =>
-    `<div class="fr-tab${tab === id ? ' active' : ''}" data-tab="${id}">${label}${count != null ? `<span class="fr-count">${count}</span>` : ''}</div>`;
+
+  const navItem = (id, label, count) =>
+    `<button class="fr-nav-item${tab === id ? ' active' : ''}" data-tab="${id}">
+       <span class="fr-nav-lbl">${label}</span>
+       ${count ? `<span class="fr-nav-count">${count}</span>` : ''}
+     </button>`;
+
+  const HEADINGS = {
+    online: ['Online', 'Friends who are around right now.'],
+    all: ['All Friends', 'Everyone in your network.'],
+    pending: ['Pending', 'Requests waiting to be accepted or sent.'],
+    blocked: ['Blocked', 'People who can no longer reach you.'],
+    add: ['Add Friend', 'Send a request using a full username and tag.']
+  };
 
   let body = '';
   if (tab === 'add') {
     body = `<div class="fr-add-wrap">
-      <h4>${t('Add Friend')}</h4>
-      <p>You can add friends with their username and tag. Type a full tag like <b>test#6842</b>, or search by username to pick from the list below.</p>
+      <p class="fr-add-lead">Add friends by entering their <b>full tag</b> \u2014 a username followed by the four-digit number after the <b>#</b>. For example, <b>test#6842</b>.</p>
       <div class="fr-add-row">
-        <input id="fr-add-input" placeholder="Enter a username or tag, e.g. test#6842" autocomplete="off">
+        <span class="fr-add-hash">#</span>
+        <input id="fr-add-input" placeholder="username#0000" autocomplete="off" spellcheck="false">
         <button class="btn" id="fr-add-btn">${t('Send Friend Request')}</button>
       </div>
       <div class="fr-add-hint" id="fr-add-hint"></div>
@@ -814,8 +830,8 @@ function renderFriendsView() {
   } else if (tab === 'pending') {
     const inc = f.incoming.map(u => friendRow(u, 'incoming')).join('');
     const out = f.outgoing.map(u => friendRow(u, 'outgoing')).join('');
-    body = `<div class="fr-cat">Incoming Requests \u2014 ${f.incoming.length}</div>${inc || emptyFriends('No incoming requests.')}
-            <div class="fr-cat">Outgoing Requests \u2014 ${f.outgoing.length}</div>${out || emptyFriends('No outgoing requests.')}`;
+    body = `<div class="fr-cat">Incoming \u2014 ${f.incoming.length}</div>${inc || emptyFriends('No incoming requests.')}
+            <div class="fr-cat">Outgoing \u2014 ${f.outgoing.length}</div>${out || emptyFriends('No outgoing requests.')}`;
   } else if (tab === 'blocked') {
     body = f.blocked.length ? f.blocked.map(u => friendRow(u, 'blocked')).join('') : emptyFriends('No blocked users.');
   } else {
@@ -825,20 +841,29 @@ function renderFriendsView() {
       : emptyFriends(tab === 'online' ? 'No one is online right now.' : 'No friends yet. Add some!');
   }
 
+  const heading = HEADINGS[tab] || HEADINGS.all;
+
   box.innerHTML = `<div class="friends-view">
-    <div class="fr-head">
-      <div class="fr-tabs">
-        ${tabBtn('online', t('Online'), counts.online)}
-        ${tabBtn('all', t('All'), counts.all)}
-        ${tabBtn('pending', t('Pending'), counts.pending)}
-        ${tabBtn('blocked', t('Blocked'), counts.blocked)}
-      </div>
-      <button class="fr-add-friend${tab === 'add' ? ' active' : ''}" data-tab="add">${icon('user-plus')} ${t('Add Friend')}</button>
-    </div>
-    <div class="fr-body">${body}</div>
+    <aside class="fr-nav">
+      <div class="fr-nav-head">${t('Friends')}</div>
+      <button class="fr-nav-add${tab === 'add' ? ' active' : ''}" data-tab="add">${icon('user-plus')} ${t('Add Friend')}</button>
+      <nav class="fr-nav-list">
+        ${navItem('online', t('Online'), counts.online)}
+        ${navItem('all', t('All'), counts.all)}
+        ${navItem('pending', t('Pending'), counts.pending)}
+        ${navItem('blocked', t('Blocked'), counts.blocked)}
+      </nav>
+    </aside>
+    <section class="fr-main">
+      <header class="fr-main-head">
+        <h3>${heading[0]}</h3>
+        <p>${heading[1]}</p>
+      </header>
+      <div class="fr-body">${body}</div>
+    </section>
   </div>`;
 
-  box.querySelectorAll('.fr-tab, .fr-add-friend').forEach(el =>
+  box.querySelectorAll('.fr-nav-item, .fr-nav-add').forEach(el =>
     el.addEventListener('click', () => { state.friendsTab = el.dataset.tab; renderFriendsView(); }));
   box.querySelectorAll('.fr-info').forEach(el =>
     el.addEventListener('click', () => { const u = state.usersCache[el.closest('.fr-row').dataset.uid]; if (u) openProfile(u); }));
@@ -907,17 +932,25 @@ function refreshFriendCounts() {
     pending: f.incoming.length + f.outgoing.length,
     blocked: f.blocked.length
   };
-  document.querySelectorAll('.fr-tab').forEach(el => {
-    const c = el.querySelector('.fr-count');
+  document.querySelectorAll('.fr-nav-item').forEach(el => {
+    const c = el.querySelector('.fr-nav-count');
     if (c && counts[el.dataset.tab] != null) c.textContent = counts[el.dataset.tab];
   });
 }
 
 async function addFriendByTag(tag) {
   const hint = $('fr-add-hint');
-  if (!tag) { if (hint) hint.textContent = 'Enter a username to add a friend.'; return; }
+  const clean = (tag || '').trim();
+  if (!clean) {
+    if (hint) { hint.textContent = 'Enter a full username and tag, for example test#6842.'; hint.className = 'fr-add-hint bad'; }
+    return;
+  }
+  if (!/^[^#\s]+#\d{2,8}$/.test(clean)) {
+    if (hint) { hint.textContent = 'Include the tag after the #, for example test#6842.'; hint.className = 'fr-add-hint bad'; }
+    return;
+  }
   try {
-    const res = await api('/api/friends/request', { method: 'POST', body: JSON.stringify({ tag }) });
+    const res = await api('/api/friends/request', { method: 'POST', body: JSON.stringify({ tag: clean }) });
     const msg = res.status === 'friends' ? 'You are now friends!' : 'Friend request sent!';
     if (hint) { hint.textContent = msg; hint.className = 'fr-add-hint ok'; }
     toast(msg, 'success');
@@ -1256,12 +1289,19 @@ function attachmentNode(m) {
   wrap.className = 'attachment';
   const t = (m.attachment_type || '').toLowerCase();
   const url = m.attachment_url;
+  const isGif = t === 'image/gif' || /\.gif(\?|$)/i.test(url || '');
   if (t.startsWith('image/')) {
-    wrap.innerHTML = `<img src="${escapeHtml(url)}" alt="${escapeHtml(m.attachment_name || '')}">`;
+    /* Images and GIFs render as bare media directly under the message. */
+    wrap.classList.add('media');
+    if (isGif) wrap.classList.add('gif');
+    wrap.innerHTML = `<img src="${escapeHtml(url)}" alt="${escapeHtml(m.attachment_name || '')}" loading="lazy" decoding="async">`;
     wrap.querySelector('img').addEventListener('click', () => lightbox(url, 'image'));
   } else if (t.startsWith('video/')) {
-    wrap.innerHTML = `<video src="${escapeHtml(url)}" controls></video>`;
+    /* Videos render as bare media directly under the message, no embed box. */
+    wrap.classList.add('media');
+    wrap.innerHTML = `<video src="${escapeHtml(url)}" controls preload="metadata"></video>`;
   } else if (t.startsWith('audio/')) {
+    wrap.classList.add('media');
     wrap.innerHTML = `<audio src="${escapeHtml(url)}" controls style="width:320px"></audio>`;
   } else {
     wrap.innerHTML = `<div class="file-card"><div class="fi">${icon('file')}</div><div><a href="${escapeHtml(url)}" target="_blank" rel="noopener">${escapeHtml(m.attachment_name || 'file')}</a><div class="fsize">Click to download</div></div></div>`;
@@ -2112,15 +2152,38 @@ function openCreateServer() {
 
 function openJoinServer(prefill) {
   openModal(`
-    <h3>Join a Server</h3>
-    <p class="msub">Enter an invite code or link below to join an existing server. Invites look like <b>gg/AbC123xYz</b>.</p>
-    <div class="field"><label>Invite Code or Link</label>
-      <input id="js-invite" placeholder="Paste an invite code like gg/AbC123xYz\u2026 or a full link" value="${escapeHtml(prefill || '')}"></div>
+    <div class="js-head">
+      <h3>Join a Server</h3>
+      <p class="msub">Paste an invite below to hop straight into an existing community.</p>
+    </div>
+    <div class="field">
+      <label>Invite Code or Link</label>
+      <input id="js-invite" placeholder="gg/AbC123xYz or a full invite link" value="${escapeHtml(prefill || '')}">
+      <div class="hint">Invites look like <b>gg/AbC123xYz</b>. Ask a member of the server to share one with you.</div>
+    </div>
+    <div class="js-details">
+      <div class="js-detail">
+        <span class="js-detail-ico">${icon('hash')}</span>
+        <div class="js-detail-txt"><strong>Jump right in</strong><p>You will land in the server's text and voice channels instantly.</p></div>
+      </div>
+      <div class="js-detail">
+        <span class="js-detail-ico">${icon('users')}</span>
+        <div class="js-detail-txt"><strong>Meet the community</strong><p>See members, roles and conversations as they happen in real time.</p></div>
+      </div>
+      <div class="js-detail">
+        <span class="js-detail-ico">${icon('shield')}</span>
+        <div class="js-detail-txt"><strong>Come and go freely</strong><p>You can leave a server at any time from its settings.</p></div>
+      </div>
+    </div>
+    <p class="js-alt">No invite yet? <a id="js-create" role="button" tabindex="0">Create your own server</a> instead.</p>
     <div class="modal-actions">
       <button class="btn secondary" id="js-cancel">Cancel</button>
       <button class="btn" id="js-join">Join Server</button>
-    </div>`);
+    </div>`, { modalClass: 'join-modal' });
+  hydrateIcons($('modal'));
   $('js-cancel').addEventListener('click', closeModal);
+  const jsCreate = $('js-create');
+  if (jsCreate) jsCreate.addEventListener('click', () => { closeModal(); openCreateServer(); });
   $('js-join').addEventListener('click', async () => {
     const invite = $('js-invite').value.trim();
     if (!invite) { toast('Invite required', 'error'); return; }
@@ -3163,28 +3226,32 @@ function renderServerTab(tab, s, isOwner) {
     : `background:linear-gradient(135deg, var(--brand), color-mix(in srgb, var(--brand) 40%, #000))`;
   const created = new Date(s.created_at).toLocaleDateString([], { year: 'numeric', month: 'long', day: 'numeric' });
   body.innerHTML = `
-    <div class="ss-banner" id="ss-banner" style="${bannerStyle}">
-      <div class="ss-banner-shade"></div>
-      <div class="ss-banner-actions">
-        <button class="ss-banner-btn" id="ss-banner-upload">${icon('image')} ${s.banner_url ? 'Change Banner' : 'Upload Banner'}</button>
-        ${s.banner_url ? `<button class="ss-banner-btn ghost" id="ss-banner-remove">${icon('trash')} Remove</button>` : ''}
-      </div>
-      <input type="file" id="ss-banner-file" accept="image/*" class="hidden">
-    </div>
     <div class="ss-overview">
-      <div class="ss-icon-col">
-        <div class="ss-icon-drop" id="ss-icon-drop" title="Upload server icon">
-          ${s.icon_url ? `<img src="${escapeHtml(s.icon_url)}" alt="">` : `<span class="ss-icon-fallback">${escapeHtml((s.name || '?')[0].toUpperCase())}</span>`}
-          <div class="ss-icon-overlay">${icon('upload')}</div>
+      <div class="ss-top">
+        <div class="ss-icon-col">
+          <div class="ss-icon-drop" id="ss-icon-drop" title="Upload server icon">
+            ${s.icon_url ? `<img src="${escapeHtml(s.icon_url)}" alt="">` : `<span class="ss-icon-fallback">${escapeHtml((s.name || '?')[0].toUpperCase())}</span>`}
+            <div class="ss-icon-overlay">${icon('upload')}</div>
+          </div>
+          <div class="ss-icon-hint">${isOwner ? `Click to ${s.icon_url ? 'change' : 'upload'} icon` : 'Server icon'}</div>
+          <input type="file" id="ss-icon-file" accept="image/*" class="hidden">
         </div>
-        <div class="ss-icon-hint">${isOwner ? `Click to ${s.icon_url ? 'change' : 'upload'} icon` : 'Server icon'}</div>
-        <input type="file" id="ss-icon-file" accept="image/*" class="hidden">
+        <div class="ss-name-col">
+          <div class="field"><label>Server Name</label><input id="ss-name" value="${escapeHtml(s.name)}" maxlength="40" ${isOwner ? '' : 'disabled'} placeholder="e.g. Pixel Lounge, Study Group, Game Night"></div>
+        </div>
+      </div>
+      <div class="ss-banner" id="ss-banner" style="${bannerStyle}">
+        <div class="ss-banner-shade"></div>
+        <div class="ss-banner-actions">
+          <button class="ss-banner-btn" id="ss-banner-upload">${icon('image')} ${s.banner_url ? 'Change Banner' : 'Upload Banner'}</button>
+          ${s.banner_url ? `<button class="ss-banner-btn ghost" id="ss-banner-remove">${icon('trash')} Remove</button>` : ''}
+        </div>
+        <input type="file" id="ss-banner-file" accept="image/*" class="hidden">
       </div>
       <div class="ss-fields">
-        <div class="field"><label>Server Name</label><input id="ss-name" value="${escapeHtml(s.name)}" maxlength="40" ${isOwner ? '' : 'disabled'} placeholder="Give your server a memorable name"></div>
         <div class="field"><label>Server Description</label>
           <div class="ss-desc-wrap">
-            <textarea id="ss-desc" maxlength="500" ${isOwner ? '' : 'disabled'} placeholder="Tell people what your server is about, who it is for, and what to expect when they join\u2026">${escapeHtml(s.description || '')}</textarea>
+            <textarea id="ss-desc" maxlength="500" ${isOwner ? '' : 'disabled'} placeholder="Tell people what your server is about, who it is for, and what to expect when they join.">${escapeHtml(s.description || '')}</textarea>
             <div class="ss-desc-count" id="ss-desc-count">${(s.description || '').length}/500</div>
           </div>
         </div>
