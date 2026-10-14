@@ -42,6 +42,9 @@ const EMOJIS = ['\u{1F600}','\u{1F602}','\u{1F972}','\u{1F60D}','\u{1F60E}','\u{
 
 /* Palette used for banner / accent selection. */
 const PALETTE = ['#5865F2','#3BA55D','#FAA81A','#ED4245','#EB459E','#9B59B6','#1ABC9C','#E67E22','#3498DB','#95A5A6','#2B2D31','#111214'];
+/* Accent palette = the standard swatches plus pure black, so a user can make
+   the whole profile black with one click (the custom picker covers everything else). */
+const ACCENT_PALETTE = PALETTE.concat(['#000000']);
 
 /* The website background colours (dark theme). */
 const BG_COLORS = [
@@ -367,6 +370,32 @@ function setupColorWheel(root, initialHex, onChange) {
   }
   render(false);
   return { get: () => hslToHex(h, s, l), set: (hex) => { const hsl = hexToHsl(hex); h = hsl.h; s = hsl.s; l = hsl.l; render(false); } };
+}
+
+/* Decide a readable ink (text) colour for a given accent background, so a light
+   accent (e.g. yellow) gets dark text and a dark accent (e.g. black) gets light text. */
+function accentInk(hex) {
+  const { r, g, b } = hexToRgb(hex);
+  const lum = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
+  const light = lum > 0.62;
+  return {
+    ink: light ? '#0b0b0e' : '#ffffff',
+    ink2: light ? 'rgba(11,11,14,.66)' : 'rgba(255,255,255,.78)',
+    edge: light ? 'rgba(0,0,0,.18)' : 'rgba(255,255,255,.18)',
+    shade: light ? '#ffffff' : '#000000'
+  };
+}
+
+/* Apply an accent colour (and its matching ink/edge variables) to a container. */
+function applyAccent(el, hex) {
+  if (!el) return;
+  const c = (hex && /^#[0-9a-fA-F]{3,8}$/.test(hex)) ? hex : '#5865F2';
+  const k = accentInk(c);
+  el.style.setProperty('--accent', c);
+  el.style.setProperty('--accent-ink', k.ink);
+  el.style.setProperty('--accent-ink-2', k.ink2);
+  el.style.setProperty('--accent-edge', k.edge);
+  el.style.setProperty('--accent-shade', k.shade);
 }
 
 function formatTime(ts) {
@@ -2224,7 +2253,7 @@ function openModal(html, opts = {}) {
   overlay.classList.remove('hidden');
   hydrateIcons(modal);
 }
-function closeModal() { modalCloseGuard = null; $('modal-overlay').classList.add('hidden'); $('modal').innerHTML = ''; $('modal').className = 'modal'; $('modal').style.removeProperty('--accent'); }
+function closeModal() { modalCloseGuard = null; $('modal-overlay').classList.add('hidden'); $('modal').innerHTML = ''; $('modal').className = 'modal'; ['--accent','--accent-ink','--accent-ink-2','--accent-edge'].forEach(v => $('modal').style.removeProperty(v)); }
 
 let modalCloseGuard = null;
 function requestCloseModal() {
@@ -2648,7 +2677,7 @@ function renderOwnProfile(user) {
       </div>
     </div>`, { modalClass: 'profile-modal' });
 
-  const _pm = $('modal'); if (_pm) _pm.style.setProperty('--accent', user.accent_color || '#5865F2');
+  const _pm = $('modal'); applyAccent(_pm, user.accent_color);
   $('pf-x').addEventListener('click', closeModal);
   $('pf-edit').addEventListener('click', () => openSettings('account'));
   $('pf-banner').addEventListener('click', () => openSettings('account'));
@@ -2737,6 +2766,8 @@ function renderOtherProfile(user, ctx) {
         </div>
       </div>
     </div>`, { modalClass: 'oprofile-modal' });
+
+  applyAccent($('modal'), user.accent_color);
 
   const renderTab = (tab) => {
     const content = $('op-content');
@@ -2998,20 +3029,37 @@ function settingsPanelHTML(section) {
             </div>
             <input type="file" id="set-banner-file" accept="image/*" class="hidden">
             <div class="color-row" id="banner-color-row" style="margin-top:12px">${PALETTE.map(c => `<span class="swatch${bannerColor.toLowerCase() === c.toLowerCase() ? ' sel' : ''}" data-color="${c}" style="background:${c}"></span>`).join('')}</div>
-            <button class="btn secondary sm" id="set-banner-remove">Remove Banner</button>
           </section>
 
           <section class="acct-card">
             <div class="acct-card-head">
               <div><h5>Accent Color</h5><p class="acct-card-sub">Tints your entire profile — banner, card background and highlights.</p></div>
             </div>
-            <div class="color-row" id="accent-row">${PALETTE.map(c => `<span class="swatch${accent.toLowerCase() === c.toLowerCase() ? ' sel' : ''}" data-color="${c}" style="background:${c}"></span>`).join('')}</div>
+            <div class="color-row" id="accent-row">${ACCENT_PALETTE.map(c => `<span class="swatch${accent.toLowerCase() === c.toLowerCase() ? ' sel' : ''}" data-color="${c}" style="background:${c}"></span>`).join('')}</div>
+            <div class="cc-row">
+              <label class="cc-label" for="accent-custom">Custom colour</label>
+              <span class="cc-picker">
+                <input type="color" id="accent-custom" value="${escapeHtml(accent)}" aria-label="Custom accent colour">
+                <span class="cc-hex" id="accent-custom-hex">${escapeHtml(accent.toUpperCase())}</span>
+              </span>
+            </div>
             <div class="cw" id="accent-wheel">
               <div class="cw-wheel"><div class="cw-cursor"></div></div>
               <div class="cw-side">
                 <div class="cw-preview" style="background:${escapeHtml(accent)}"></div>
                 <label class="cw-field"><span>Brightness</span><input type="range" class="cw-light-range" min="18" max="92" value="${Math.round(hexToHsl(accent).l)}"></label>
                 <label class="cw-field"><span>Hex code</span><input type="text" class="cw-hex-input" maxlength="7" value="${escapeHtml(accent.toUpperCase())}" placeholder="#5865F2"></label>
+              </div>
+            </div>
+            <div class="accent-preview" id="accent-preview">
+              <div class="ap-hero"></div>
+              <div class="ap-row">
+                <div class="ap-avatar">${avatarHTML(u, 46, u.status || 'online')}</div>
+                <div class="ap-meta">
+                  <div class="ap-name">${escapeHtml(u.display_name || u.username)}</div>
+                  <div class="ap-tag">${escapeHtml(fullTag(u))}</div>
+                </div>
+                <div class="ap-btn">Edit Profile</div>
               </div>
             </div>
           </section>
@@ -3185,7 +3233,6 @@ function wireAccountPanel() {
       } catch (err) { toast(err.message, 'error'); }
     } });
   });
-  $('set-banner-remove').addEventListener('click', () => { settingsUploads.banner_url = null; paintBanner(); markDirty(); });
   document.querySelectorAll('#banner-color-row .swatch').forEach(sw => sw.addEventListener('click', () => {
     bannerColor = sw.dataset.color;
     settingsUploads.banner_url = null;
@@ -3194,9 +3241,18 @@ function wireAccountPanel() {
   }));
 
   let accent = u.accent_color || '#5865F2';
+  const accentCustom = $('accent-custom');
+  const accentCustomHex = $('accent-custom-hex');
+  const accentPreview = $('accent-preview');
+  const syncAccentControls = (hex) => {
+    document.querySelectorAll('#accent-row .swatch').forEach(x => x.classList.toggle('sel', (x.dataset.color || '').toLowerCase() === hex.toLowerCase()));
+    if (accentCustom && accentCustom.value.toLowerCase() !== hex.toLowerCase()) accentCustom.value = hex;
+    if (accentCustomHex) accentCustomHex.textContent = hex.toUpperCase();
+    applyAccent(accentPreview, hex);
+  };
   const accentWheel = setupColorWheel($('accent-wheel'), accent, (hex) => {
     accent = hex;
-    document.querySelectorAll('#accent-row .swatch').forEach(x => x.classList.toggle('sel', (x.dataset.color || '').toLowerCase() === hex.toLowerCase()));
+    syncAccentControls(hex);
     previewSelf({ accent_color: hex });
     markDirty();
   });
@@ -3204,9 +3260,18 @@ function wireAccountPanel() {
     accent = sw.dataset.color;
     document.querySelectorAll('#accent-row .swatch').forEach(x => x.classList.toggle('sel', x === sw));
     if (accentWheel) accentWheel.set(accent);
+    syncAccentControls(accent);
     previewSelf({ accent_color: accent });
     markDirty();
   }));
+  if (accentCustom) accentCustom.addEventListener('input', () => {
+    accent = accentCustom.value;
+    if (accentWheel) accentWheel.set(accent);
+    syncAccentControls(accent);
+    previewSelf({ accent_color: accent });
+    markDirty();
+  });
+  syncAccentControls(accent);
 
   const unameInput = $('set-username');
   const hint = $('username-hint');

@@ -1427,6 +1427,27 @@ body[data-theme="light"] .ss-modal select {
 .cw-field input[type=text] { width: 100%; padding: 9px 11px; border-radius: 8px; border: 1px solid var(--divider); background: var(--input-bg); color: var(--text-normal); font-size: 13px; text-transform: none; letter-spacing: 0; font-family: ui-monospace, Menlo, monospace; }
 .cw-field input[type=text]:focus { outline: none; border-color: var(--brand); }
 
+/* ---------- Custom accent colour picker ---------- */
+.cc-row { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin-top: 14px; padding: 10px 14px; border: 1px solid var(--divider); border-radius: 10px; background: color-mix(in srgb, var(--chat-bg) 60%, #000); }
+.cc-label { font-size: 11.5px; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; color: var(--text-muted); }
+.cc-picker { display: inline-flex; align-items: center; gap: 10px; }
+.cc-picker input[type=color] { width: 40px; height: 30px; padding: 0; border: 1px solid var(--divider); border-radius: 8px; background: transparent; cursor: pointer; }
+.cc-picker input[type=color]::-webkit-color-swatch-wrapper { padding: 2px; }
+.cc-picker input[type=color]::-webkit-color-swatch { border: none; border-radius: 6px; }
+.cc-picker input[type=color]::-moz-color-swatch { border: none; border-radius: 6px; }
+.cc-hex { font-family: ui-monospace, Menlo, monospace; font-size: 13px; color: var(--text-normal); min-width: 74px; text-align: right; }
+
+/* ---------- Live mini profile preview (reflects the accent) ---------- */
+.accent-preview { margin-top: 16px; border-radius: 12px; overflow: hidden; border: 1px solid var(--divider); background: var(--accent, var(--brand)); }
+.accent-preview .ap-hero { height: 48px; background: color-mix(in srgb, var(--accent) 74%, var(--accent-shade)); }
+.accent-preview .ap-row { display: flex; align-items: center; gap: 12px; padding: 12px 14px; }
+.accent-preview .ap-avatar { flex: 0 0 auto; }
+.accent-preview .ap-avatar .avatar { border: 3px solid var(--accent); }
+.accent-preview .ap-meta { min-width: 0; flex: 1; }
+.accent-preview .ap-name { font-size: 15px; font-weight: 800; color: var(--accent-ink, #fff); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.accent-preview .ap-tag { font-size: 12.5px; color: var(--accent-ink-2, rgba(255,255,255,.78)); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.accent-preview .ap-btn { flex: 0 0 auto; padding: 7px 14px; border-radius: 8px; font-size: 12.5px; font-weight: 700; background: color-mix(in srgb, var(--accent) 72%, var(--accent-shade)); color: var(--accent-ink, #fff); border: 1px solid var(--accent-edge, rgba(255,255,255,.18)); }
+
 /* ---------- About Me clickable links ---------- */
 .bio-link { color: #4a9eff; text-decoration: none; word-break: break-word; }
 .bio-link:hover { text-decoration: underline; }
@@ -1434,24 +1455,80 @@ body[data-theme="light"] .ss-modal select {
 body[data-theme="light"] .bio-link { color: #0066cc; }
 
 /* ---------- Accent tinting: other people's profile ---------- */
-.oprofile-modal { --accent: var(--brand); background: color-mix(in srgb, var(--accent) 22%, var(--sidebar-bg)); }
-.oprofile-left { background: color-mix(in srgb, var(--accent) 15%, var(--sidebar-bg)); }
-.oprofile-right { background: color-mix(in srgb, var(--accent) 9%, var(--chat-bg)); }
+.oprofile-modal {
+  --accent: var(--brand);
+  --accent-ink: #fff; --accent-ink-2: rgba(255,255,255,.78);
+  --accent-edge: rgba(255,255,255,.18); --accent-shade: #000;
+  background: var(--accent); color: var(--accent-ink);
+}
+.oprofile-left { background: color-mix(in srgb, var(--accent) 82%, var(--accent-shade)); }
+.oprofile-right { background: var(--accent); }
 .oprofile-banner { background: var(--accent); }
-.op-avatar .avatar { border-color: color-mix(in srgb, var(--accent) 15%, var(--sidebar-bg)); }
-.op-add { background: var(--accent); }
-.op-add:hover { background: color-mix(in srgb, var(--accent) 82%, #000); }
-.op-server-ico { background: var(--accent); }
-.op-message { background: var(--accent); }
-.op-message:hover { background: color-mix(in srgb, var(--accent) 82%, #000); }
-.op-tab.active { border-bottom-color: var(--accent); }
-.op-note:hover { border-color: color-mix(in srgb, var(--accent) 55%, var(--divider)); }
+.op-avatar .avatar { border-color: color-mix(in srgb, var(--accent) 82%, var(--accent-shade)); }
+.op-name { color: var(--accent-ink); }
+.op-sub { color: var(--accent-ink-2); }
+.op-label { color: var(--accent-ink-2); }
+.op-date { color: var(--accent-ink); }
+.op-bio { color: var(--accent-ink); }
+.op-note { background: color-mix(in srgb, var(--accent) 74%, var(--accent-shade)); border-color: var(--accent-edge); }
+.op-note:hover { background: color-mix(in srgb, var(--accent) 66%, var(--accent-shade)); border-color: var(--accent-ink-2); }
+.op-note-text { color: var(--accent-ink); }
+.op-note-empty { color: var(--accent-ink-2); }
+.op-note-hint { color: var(--accent-ink-2); }
+.op-add { background: color-mix(in srgb, var(--accent) 84%, var(--accent-shade)); color: var(--accent-ink); border: 1px solid var(--accent-edge); }
+.op-add:hover { background: color-mix(in srgb, var(--accent) 72%, var(--accent-shade)); }
+.op-add.friends, .op-add.accept { background: #3ba55d; color: #fff; border-color: rgba(255,255,255,.18); }
+.op-add.friends:hover, .op-add.accept:hover { background: #2d8049; }
+.op-add.pending, .op-add.blocked { background: color-mix(in srgb, var(--accent) 72%, var(--accent-shade)); color: var(--accent-ink); }
+.op-more { background: color-mix(in srgb, var(--accent) 72%, var(--accent-shade)); color: var(--accent-ink); border: 1px solid var(--accent-edge); }
+.op-more:hover { background: color-mix(in srgb, var(--accent) 60%, var(--accent-shade)); }
+.op-tabs { border-bottom-color: var(--accent-edge); }
+.op-tab { color: var(--accent-ink-2); }
+.op-tab:hover { color: var(--accent-ink); }
+.op-tab.active { color: var(--accent-ink); border-bottom-color: var(--accent-ink); }
+.op-empty-ico { color: var(--accent-ink-2); }
+.op-empty h4 { color: var(--accent-ink); }
+.op-empty p { color: var(--accent-ink-2); }
+.op-list-row:hover { background: var(--accent-edge); }
+.op-list-row .olr-name { color: var(--accent-ink); }
+.op-list-row .olr-tag { color: var(--accent-ink-2); }
+.op-server-ico { background: color-mix(in srgb, var(--accent) 84%, var(--accent-shade)); color: var(--accent-ink); }
+.op-footer { border-top-color: var(--accent-edge); }
+.op-message { background: color-mix(in srgb, var(--accent) 84%, var(--accent-shade)); color: var(--accent-ink); border: 1px solid var(--accent-edge); }
+.op-message:hover { background: color-mix(in srgb, var(--accent) 72%, var(--accent-shade)); }
 
 /* ---------- Accent tinting: your own profile ---------- */
-.profile-modal { --accent: var(--brand); --profile-surface: color-mix(in srgb, var(--accent) 9%, var(--chat-bg)); background: color-mix(in srgb, var(--accent) 18%, var(--sidebar-bg)); }
-.profile-modal .profile-nav { background: color-mix(in srgb, var(--accent) 14%, var(--sidebar-bg)); }
-.profile-content { background: var(--profile-surface); }
-.profile-idcard .pic-avatar { border-color: var(--profile-surface); }
-.profile-hero { background: var(--accent); }
-.profile-actions-row .pa.primary { background: var(--accent); }
-.profile-actions-row .pa.primary:hover { background: color-mix(in srgb, var(--accent) 82%, #000); }
+.profile-modal {
+  --accent: var(--brand);
+  --accent-ink: #fff; --accent-ink-2: rgba(255,255,255,.78);
+  --accent-edge: rgba(255,255,255,.18); --accent-shade: #000;
+  background: var(--accent); color: var(--accent-ink);
+}
+.profile-modal .profile-topbar { border-bottom-color: var(--accent-edge); }
+.profile-modal .profile-topbar .pt-title { color: var(--accent-ink); }
+.profile-modal .profile-topbar .pt-close { color: var(--accent-ink-2); }
+.profile-modal .profile-topbar .pt-close:hover { background: var(--accent-edge); color: var(--accent-ink); }
+.profile-modal .profile-nav { background: color-mix(in srgb, var(--accent) 82%, var(--accent-shade)); border-right-color: var(--accent-edge); }
+.profile-modal .profile-content { background: var(--accent); }
+.profile-modal .profile-tabs { background: var(--accent); border-bottom-color: var(--accent-edge); }
+.profile-modal .profile-tab { color: var(--accent-ink-2); }
+.profile-modal .profile-tab:hover { color: var(--accent-ink); }
+.profile-modal .profile-tab.active { color: var(--accent-ink); border-bottom-color: var(--accent-ink); }
+.profile-modal .pnav-label { color: var(--accent-ink-2); }
+.profile-modal .pnav-preview .pnav-text .n1 { color: var(--accent-ink); }
+.profile-modal .pnav-preview .pnav-text .n2 { color: var(--accent-ink-2); }
+.profile-modal .pnav-status-pill { background: color-mix(in srgb, var(--accent) 74%, var(--accent-shade)); color: var(--accent-ink); }
+.profile-modal .pnav-meta { color: var(--accent-ink-2); }
+.profile-modal .pnav-swatch.sel { border-color: var(--accent-ink); }
+.profile-modal .pnav-item:hover { background: var(--accent-edge); }
+.profile-modal .profile-idcard .pic-avatar { border-color: var(--accent); }
+.profile-modal .profile-idcard .pic-name { color: var(--accent-ink); }
+.profile-modal .profile-idcard .pic-tag, .profile-modal .profile-idcard .pic-date { color: var(--accent-ink-2); }
+.profile-modal .profile-idcard .pic-status { color: var(--accent-ink); }
+.profile-modal .profile-actions-row .pa { background: color-mix(in srgb, var(--accent) 72%, var(--accent-shade)); color: var(--accent-ink); border: 1px solid var(--accent-edge); }
+.profile-modal .profile-actions-row .pa:hover { background: color-mix(in srgb, var(--accent) 60%, var(--accent-shade)); }
+.profile-modal .profile-actions-row .pa.primary { background: color-mix(in srgb, var(--accent) 86%, var(--accent-shade)); }
+.profile-modal .profile-actions-row .pa.primary:hover { background: color-mix(in srgb, var(--accent) 74%, var(--accent-shade)); }
+.profile-modal .profile-section-block h5 { color: var(--accent-ink-2); }
+.profile-modal .profile-section-block p { color: var(--accent-ink); }
+.profile-modal .bio-link { color: var(--accent-ink); text-decoration: underline; }
