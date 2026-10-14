@@ -34,6 +34,6 @@
 - [x] Client: voice channel join UI, mute/unmute/deafen, smooth layout
 
 ## 8. Test & deploy
-- [ ] Test locally (all features)
-- [ ] Commit + push to GitHub (hellorayhere/crossroads)
-- [ ] Trigger Render deploy + confirm live, data preserved
+- [x] Test locally (all features)
+- [x] Commit + push to GitHub (hellorayhere/crossroads)
+- [x] Trigger Render deploy + confirm live, data preserved
