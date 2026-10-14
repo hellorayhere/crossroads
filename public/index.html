@@ -3,95 +3,124 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Crossroads | Sign In</title>
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%235865f2'/><rect x='46' y='20' width='8' height='60' rx='3' fill='white'/></svg>" />
+  <title>Crossroads — Sign in</title>
+  <meta name="description" content="Crossroads — where communities come together. Sign in or create your account." />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='24' fill='%235865f2'/><rect x='45' y='18' width='10' height='64' rx='5' fill='white'/></svg>" />
   <link rel="stylesheet" href="/css/auth.css" />
+<script src="https://sites.super.myninja.ai/_assets/ninja-daytona-script.js"></script>
 </head>
 <body>
-  <div class="auth-shell">
+  <!-- Ambient background -->
+  <div class="ambient" aria-hidden="true">
+    <span class="orb orb-a"></span>
+    <span class="orb orb-b"></span>
+    <span class="orb orb-c"></span>
+    <span class="grain"></span>
+  </div>
+
+  <main class="auth-shell">
     <!-- Information panel -->
-    <div class="info-panel">
+    <section class="info-panel">
       <div class="wordmark">
-        <div class="mark"><i class="fa-solid fa-signs-post"></i></div>
+        <span class="mark">C</span>
         <span class="name">Crossroads</span>
       </div>
-      <h1>Where communities come together.</h1>
+
+      <h1>Where communities<br />come together.</h1>
       <p class="lead">Crossroads gives you the tools to build a place where you and your people can talk, share, and stay connected — all in real time.</p>
-      <div class="info-list">
-        <div class="info-item">
-          <div class="ico"><i class="fa-solid fa-comments"></i></div>
-          <div class="txt"><strong>Organized conversations</strong><span>Text and voice channels that keep every topic in its place.</span></div>
-        </div>
-        <div class="info-item">
-          <div class="ico"><i class="fa-solid fa-share-nodes"></i></div>
-          <div class="txt"><strong>Rich sharing</strong><span>Link previews, media uploads, and reactions on every message.</span></div>
-        </div>
-        <div class="info-item">
-          <div class="ico"><i class="fa-solid fa-user-group"></i></div>
-          <div class="txt"><strong>Your identity</strong><span>Custom profiles with banners, colors, and personal status.</span></div>
-        </div>
-      </div>
-    </div>
+
+      <ul class="features">
+        <li>
+          <span class="bar"></span>
+          <div class="txt">
+            <strong>Organized conversations</strong>
+            <span>Text and voice channels that keep every topic in its place.</span>
+          </div>
+        </li>
+        <li>
+          <span class="bar"></span>
+          <div class="txt">
+            <strong>Rich sharing</strong>
+            <span>Link previews, media uploads, and reactions on every message.</span>
+          </div>
+        </li>
+        <li>
+          <span class="bar"></span>
+          <div class="txt">
+            <strong>Your identity</strong>
+            <span>Custom profiles with banners, colors, and personal status.</span>
+          </div>
+        </li>
+      </ul>
+
+      <p class="panel-foot">Real-time messaging, built for communities of every size.</p>
+    </section>
 
     <!-- Auth card -->
-    <div class="auth-card">
+    <section class="auth-card">
       <div class="card-head">
         <div class="brandline">
-          <div class="mark"><i class="fa-solid fa-signs-post"></i></div>
+          <span class="mark">C</span>
           <span class="name">Crossroads</span>
         </div>
         <h2 id="form-title">Welcome back</h2>
         <p class="sub" id="form-subtitle">Sign in to continue to your workspace.</p>
       </div>
 
-      <div class="global-error" id="global-error"></div>
+      <div class="global-error" id="global-error" role="alert"></div>
 
       <!-- LOGIN -->
-      <form id="login-form" autocomplete="off">
+      <form id="login-form" autocomplete="off" novalidate>
         <div class="field" id="f-login-id">
-          <label>Username or Tag <span class="req">*</span></label>
+          <label for="login-identifier">Username or Tag <span class="req">*</span></label>
           <div class="input-wrap">
-            <input type="text" id="login-identifier" placeholder="username or username#0000" />
+            <input type="text" id="login-identifier" placeholder="username or username#0000" autocomplete="username" />
           </div>
           <div class="msg error">Please enter your username or tag.</div>
         </div>
+
         <div class="field" id="f-login-pass">
-          <label>Password <span class="req">*</span></label>
+          <label for="login-password">Password <span class="req">*</span></label>
           <div class="input-wrap">
-            <input type="password" id="login-password" placeholder="Enter your password" />
+            <input type="password" id="login-password" placeholder="Enter your password" autocomplete="current-password" />
+            <button type="button" class="peek" data-target="login-password" aria-label="Show password">Show</button>
           </div>
           <div class="msg error">Please enter your password.</div>
         </div>
-        <button type="submit" class="btn" id="login-btn">Sign In</button>
-        <p class="switch">Need an account? <a id="to-register">Create one</a></p>
+
+        <button type="submit" class="btn" id="login-btn"><span class="btn-label">Sign In</span></button>
+        <p class="switch">Need an account? <a id="to-register" role="button" tabindex="0">Create one</a></p>
       </form>
 
       <!-- REGISTER -->
-      <form id="register-form" class="hidden" autocomplete="off">
+      <form id="register-form" class="hidden" autocomplete="off" novalidate>
         <div class="field" id="f-reg-user">
-          <label>Username <span class="req">*</span></label>
+          <label for="reg-username">Username <span class="req">*</span></label>
           <div class="input-wrap">
-            <input type="text" id="reg-username" placeholder="Choose a username" />
-            <i class="check-ind fa-solid" id="reg-user-ind"></i>
+            <input type="text" id="reg-username" placeholder="Choose a username" autocomplete="username" />
+            <span class="check-ind" id="reg-user-ind" aria-hidden="true"></span>
           </div>
           <div class="msg error" id="reg-user-err">Please choose a valid username.</div>
           <div class="msg ok" id="reg-user-ok">Username is available.</div>
           <div class="hint">You will receive a tag with a random four-digit number, for example <strong>username#4821</strong>.</div>
         </div>
+
         <div class="field" id="f-reg-pass">
-          <label>Password <span class="req">*</span></label>
+          <label for="reg-password">Password <span class="req">*</span></label>
           <div class="input-wrap">
-            <input type="password" id="reg-password" placeholder="At least 6 characters" />
+            <input type="password" id="reg-password" placeholder="At least 6 characters" autocomplete="new-password" />
+            <button type="button" class="peek" data-target="reg-password" aria-label="Show password">Show</button>
           </div>
           <div class="msg error">Password must be at least 6 characters.</div>
         </div>
-        <button type="submit" class="btn" id="register-btn">Create Account</button>
-        <p class="switch"><a id="to-login">Already have an account? Sign in</a></p>
+
+        <button type="submit" class="btn" id="register-btn"><span class="btn-label">Create Account</span></button>
+        <p class="switch"><a id="to-login" role="button" tabindex="0">Already have an account? Sign in</a></p>
       </form>
 
       <p class="footer-note">By continuing, you agree to the Crossroads Terms of Service and Privacy Policy.</p>
-    </div>
-  </div>
+    </section>
+  </main>
 
   <script src="/js/auth.js"></script>
 </body>

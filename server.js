@@ -142,16 +142,39 @@ function mutualFriends(aId, bId) {
     .filter(Boolean);
 }
 
-function messageWithMeta(m, currentUserId) {
-  const author = db.prepare('SELECT * FROM users WHERE id = ?').get(m.user_id);
-  const reactions = db.prepare('SELECT emoji, user_id FROM reactions WHERE message_id = ?').all(m.id);
+function groupReactions(rows, currentUserId) {
   const grouped = {};
-  for (const r of reactions) {
+  for (const r of rows) {
     if (!grouped[r.emoji]) grouped[r.emoji] = { emoji: r.emoji, count: 0, me: false, users: [] };
     grouped[r.emoji].count++;
     grouped[r.emoji].users.push(r.user_id);
     if (r.user_id === currentUserId) grouped[r.emoji].me = true;
   }
+  return Object.values(grouped);
+}
+
+function safeParse(s, fallback) {
+  try { return JSON.parse(s); } catch (e) { return fallback; }
+}
+
+function replyPreviewOf(m) {
+  if (!m || !m.reply_to_id) return null;
+  const orig = db.prepare('SELECT * FROM messages WHERE id = ?').get(m.reply_to_id);
+  if (!orig) return null;
+  const author = db.prepare('SELECT * FROM users WHERE id = ?').get(orig.user_id);
+  return {
+    id: orig.id,
+    content: orig.content,
+    attachment_url: orig.attachment_url,
+    attachment_name: orig.attachment_name,
+    attachment_type: orig.attachment_type,
+    author: publicUser(author)
+  };
+}
+
+function messageWithMeta(m, currentUserId) {
+  const author = db.prepare('SELECT * FROM users WHERE id = ?').get(m.user_id);
+  const reactions = db.prepare('SELECT emoji, user_id FROM reactions WHERE message_id = ?').all(m.id);
   return {
     id: m.id,
     channel_id: m.channel_id,
@@ -162,9 +185,97 @@ function messageWithMeta(m, currentUserId) {
     attachment_type: m.attachment_type,
     created_at: m.created_at,
     edited_at: m.edited_at,
+    reply_to_id: m.reply_to_id || null,
+    reply_to: replyPreviewOf(m),
+    mentions: safeParse(m.mentions, []),
     author: publicUser(author),
-    reactions: Object.values(grouped)
+    reactions: groupReactions(reactions, currentUserId)
   };
+}
+
+/* Batch version — fetches authors, reactions and replied-to messages in bulk
+   so loading a channel never triggers an N+1 query storm (fixes lag). */
+function messagesWithMeta(rows, currentUserId) {
+  if (!rows.length) return [];
+  const ids = rows.map(r => r.id);
+  const authorIds = [...new Set(rows.map(r => r.user_id))];
+  const replyIds = [...new Set(rows.map(r => r.reply_to_id).filter(Boolean))];
+
+  const authorMap = {};
+  if (authorIds.length) {
+    const ph = authorIds.map(() => '?').join(',');
+    for (const u of db.prepare(`SELECT * FROM users WHERE id IN (${ph})`).all(...authorIds)) authorMap[u.id] = u;
+  }
+  const reactMap = {};
+  {
+    const ph = ids.map(() => '?').join(',');
+    for (const r of db.prepare(`SELECT message_id, emoji, user_id FROM reactions WHERE message_id IN (${ph})`).all(...ids)) {
+      (reactMap[r.message_id] = reactMap[r.message_id] || []).push(r);
+    }
+  }
+  const replyMap = {};
+  if (replyIds.length) {
+    const ph = replyIds.map(() => '?').join(',');
+    const origs = db.prepare(`SELECT * FROM messages WHERE id IN (${ph})`).all(...replyIds);
+    const origAuthorIds = [...new Set(origs.map(o => o.user_id))];
+    const origAuthors = {};
+    if (origAuthorIds.length) {
+      const ph2 = origAuthorIds.map(() => '?').join(',');
+      for (const u of db.prepare(`SELECT * FROM users WHERE id IN (${ph2})`).all(...origAuthorIds)) origAuthors[u.id] = u;
+    }
+    for (const o of origs) {
+      replyMap[o.id] = {
+        id: o.id,
+        content: o.content,
+        attachment_url: o.attachment_url,
+        attachment_name: o.attachment_name,
+        attachment_type: o.attachment_type,
+        author: publicUser(origAuthors[o.user_id])
+      };
+    }
+  }
+  return rows.map(m => ({
+    id: m.id,
+    channel_id: m.channel_id,
+    dm_id: m.dm_id,
+    content: m.content,
+    attachment_url: m.attachment_url,
+    attachment_name: m.attachment_name,
+    attachment_type: m.attachment_type,
+    created_at: m.created_at,
+    edited_at: m.edited_at,
+    reply_to_id: m.reply_to_id || null,
+    reply_to: m.reply_to_id ? (replyMap[m.reply_to_id] || null) : null,
+    mentions: safeParse(m.mentions, []),
+    author: publicUser(authorMap[m.user_id]),
+    reactions: groupReactions(reactMap[m.id] || [], currentUserId)
+  }));
+}
+
+/* ---------------- Mentions & notifications ---------------- */
+function parseMentionIds(content) {
+  if (!content) return [];
+  const names = new Set();
+  const re = /@([a-zA-Z0-9._]+)/g;
+  let mm;
+  while ((mm = re.exec(content)) !== null) names.add(mm[1].toLowerCase());
+  const ids = [];
+  for (const name of names) {
+    const u = db.prepare('SELECT id FROM users WHERE LOWER(username) = LOWER(?) ORDER BY created_at ASC LIMIT 1').get(name);
+    if (u) ids.push(u.id);
+  }
+  return ids;
+}
+
+function createNotification(userId, type, data) {
+  if (!userId) return null;
+  const id = newId();
+  const now = Date.now();
+  db.prepare('INSERT INTO notifications (id, user_id, type, data, read, created_at) VALUES (?,?,?,?,0,?)')
+    .run(id, userId, type, JSON.stringify(data), now);
+  const notif = { id, type, data, read: false, created_at: now };
+  io.to(`user:${userId}`).emit('notification', notif);
+  return notif;
 }
 
 /* ---------------- Auth routes ---------------- */
@@ -325,6 +436,7 @@ app.post('/api/friends/request', auth, (req, res) => {
     if (existing.requester_id === target.id) {
       db.prepare('UPDATE friendships SET status = ? WHERE id = ?').run('accepted', existing.id);
       io.to(`user:${target.id}`).emit('friend_update', { type: 'accepted', user: publicUser(req.user) });
+      createNotification(target.id, 'friend_accepted', { user: publicUser(req.user) });
       return res.json({ status: 'friends' });
     }
     return res.json({ status: 'pending_outgoing' });
@@ -332,6 +444,7 @@ app.post('/api/friends/request', auth, (req, res) => {
   db.prepare('INSERT INTO friendships (id, requester_id, addressee_id, status, created_at) VALUES (?,?,?,?,?)')
     .run(newId(), uid, target.id, 'pending', Date.now());
   io.to(`user:${target.id}`).emit('friend_update', { type: 'request', user: publicUser(req.user) });
+  createNotification(target.id, 'friend_request', { user: publicUser(req.user) });
   res.json({ status: 'pending_outgoing' });
 });
 
@@ -341,6 +454,7 @@ app.post('/api/friends/accept', auth, (req, res) => {
   if (!f) return res.status(404).json({ error: 'No pending request from this user' });
   db.prepare('UPDATE friendships SET status = ? WHERE id = ?').run('accepted', f.id);
   io.to(`user:${userId}`).emit('friend_update', { type: 'accepted', user: publicUser(req.user) });
+  createNotification(userId, 'friend_accepted', { user: publicUser(req.user) });
   res.json({ ok: true, status: 'friends' });
 });
 
@@ -392,6 +506,39 @@ app.put('/api/notes/:userId', auth, (req, res) => {
   else db.prepare('INSERT INTO notes (id, owner_id, target_id, content, updated_at) VALUES (?,?,?,?,?)').run(newId(), req.user.id, req.params.userId, content, Date.now());
   res.json({ note: content });
 });
+
+/* ---------------- Notifications ---------------- */
+app.get('/api/notifications', auth, (req, res) => {
+  const rows = db.prepare('SELECT * FROM notifications WHERE user_id = ? ORDER BY created_at DESC LIMIT 50').all(req.user.id);
+  const unread = db.prepare('SELECT COUNT(*) AS c FROM notifications WHERE user_id = ? AND read = 0').get(req.user.id).c;
+  res.json({
+    notifications: rows.map(n => ({ id: n.id, type: n.type, data: safeParse(n.data, {}), read: !!n.read, created_at: n.created_at })),
+    unread
+  });
+});
+
+app.post('/api/notifications/read', auth, (req, res) => {
+  db.prepare('UPDATE notifications SET read = 1 WHERE user_id = ?').run(req.user.id);
+  res.json({ ok: true });
+});
+
+app.delete('/api/notifications/:id', auth, (req, res) => {
+  db.prepare('DELETE FROM notifications WHERE id = ? AND user_id = ?').run(req.params.id, req.user.id);
+  res.json({ ok: true });
+});
+
+/* ---------------- User settings (persisted per account) ---------------- */
+app.get('/api/settings', auth, (req, res) => {
+  res.json({ settings: safeParse(req.user.settings, {}) });
+});
+
+app.patch('/api/settings', auth, (req, res) => {
+  const current = safeParse(req.user.settings, {});
+  const merged = Object.assign({}, current, req.body || {});
+  db.prepare('UPDATE users SET settings = ? WHERE id = ?').run(JSON.stringify(merged), req.user.id);
+  res.json({ settings: merged });
+});
+
 /* ---------------- Servers ---------------- */
 app.get('/api/servers', auth, (req, res) => {
   const rows = db.prepare(`
@@ -455,6 +602,52 @@ app.post('/api/servers/:id/channels', auth, (req, res) => {
   res.json({ channel: ch });
 });
 
+/* Update server name / icon (owner only). */
+app.patch('/api/servers/:id', auth, (req, res) => {
+  const srv = db.prepare('SELECT * FROM servers WHERE id = ?').get(req.params.id);
+  if (!srv) return res.status(404).json({ error: 'Server not found' });
+  if (srv.owner_id !== req.user.id) return res.status(403).json({ error: 'Only the owner can edit this server' });
+  const updates = [];
+  const values = [];
+  if ('name' in req.body && String(req.body.name || '').trim()) {
+    updates.push('name = ?'); values.push(String(req.body.name).trim().slice(0, 40));
+  }
+  if ('icon_url' in req.body) { updates.push('icon_url = ?'); values.push(req.body.icon_url || null); }
+  if (updates.length) {
+    values.push(srv.id);
+    db.prepare(`UPDATE servers SET ${updates.join(', ')} WHERE id = ?`).run(...values);
+  }
+  res.json({ server: db.prepare('SELECT * FROM servers WHERE id = ?').get(srv.id) });
+});
+
+/* Leave a server (non-owners only). */
+app.post('/api/servers/:id/leave', auth, (req, res) => {
+  const srv = getServerForUser(req.params.id, req.user.id);
+  if (!srv) return res.status(404).json({ error: 'Server not found' });
+  if (srv.owner_id === req.user.id) return res.status(400).json({ error: 'You own this server — delete it instead.' });
+  db.prepare('DELETE FROM server_members WHERE server_id = ? AND user_id = ?').run(srv.id, req.user.id);
+  res.json({ ok: true });
+});
+
+/* Delete a server and all of its channels/messages (owner only). */
+app.delete('/api/servers/:id', auth, (req, res) => {
+  const srv = db.prepare('SELECT * FROM servers WHERE id = ?').get(req.params.id);
+  if (!srv) return res.status(404).json({ error: 'Server not found' });
+  if (srv.owner_id !== req.user.id) return res.status(403).json({ error: 'Only the owner can delete this server' });
+  const chans = db.prepare('SELECT id FROM channels WHERE server_id = ?').all(srv.id).map(c => c.id);
+  const wipe = db.transaction(() => {
+    for (const cid of chans) {
+      db.prepare('DELETE FROM reactions WHERE message_id IN (SELECT id FROM messages WHERE channel_id = ?)').run(cid);
+      db.prepare('DELETE FROM messages WHERE channel_id = ?').run(cid);
+    }
+    db.prepare('DELETE FROM channels WHERE server_id = ?').run(srv.id);
+    db.prepare('DELETE FROM server_members WHERE server_id = ?').run(srv.id);
+    db.prepare('DELETE FROM servers WHERE id = ?').run(srv.id);
+  });
+  wipe();
+  res.json({ ok: true });
+});
+
 /* ---------------- Messages ---------------- */
 app.get('/api/channels/:id/messages', auth, (req, res) => {
   const ch = db.prepare('SELECT * FROM channels WHERE id = ?').get(req.params.id);
@@ -464,7 +657,7 @@ app.get('/api/channels/:id/messages', auth, (req, res) => {
   const limit = Math.min(parseInt(req.query.limit) || 50, 100);
   const rows = db.prepare('SELECT * FROM messages WHERE channel_id = ? ORDER BY created_at DESC LIMIT ?').all(ch.id, limit);
   rows.reverse();
-  res.json({ messages: rows.map(m => messageWithMeta(m, req.user.id)) });
+  res.json({ messages: messagesWithMeta(rows, req.user.id) });
 });
 
 app.post('/api/channels/:id/messages', auth, (req, res) => {
@@ -472,16 +665,23 @@ app.post('/api/channels/:id/messages', auth, (req, res) => {
   if (!ch) return res.status(404).json({ error: 'Channel not found' });
   const srv = getServerForUser(ch.server_id, req.user.id);
   if (!srv) return res.status(403).json({ error: 'Not a member of this server' });
-  const { content, attachment_url, attachment_name, attachment_type } = req.body || {};
+  const { content, attachment_url, attachment_name, attachment_type, reply_to_id } = req.body || {};
   if ((!content || !content.trim()) && !attachment_url) return res.status(400).json({ error: 'Message cannot be empty' });
   const id = newId();
   const now = Date.now();
-  db.prepare(`INSERT INTO messages (id, channel_id, user_id, content, attachment_url, attachment_name, attachment_type, created_at)
-              VALUES (?,?,?,?,?,?,?,?)`)
-    .run(id, ch.id, req.user.id, (content || '').trim(), attachment_url || null, attachment_name || null, attachment_type || null, now);
+  const mentionIds = parseMentionIds(content).filter(uid => uid !== req.user.id);
+  db.prepare(`INSERT INTO messages (id, channel_id, user_id, content, attachment_url, attachment_name, attachment_type, created_at, reply_to_id, mentions)
+              VALUES (?,?,?,?,?,?,?,?,?,?)`)
+    .run(id, ch.id, req.user.id, (content || '').trim(), attachment_url || null, attachment_name || null, attachment_type || null, now, reply_to_id || null, JSON.stringify(mentionIds));
   const m = db.prepare('SELECT * FROM messages WHERE id = ?').get(id);
   const full = messageWithMeta(m, req.user.id);
   io.to(`channel:${ch.id}`).emit('message', full);
+  const ctx = { kind: 'channel', channel_id: ch.id, server_id: ch.server_id, channel_name: ch.name };
+  for (const uid of mentionIds) createNotification(uid, 'mention', Object.assign({ message: full }, ctx));
+  if (reply_to_id) {
+    const orig = db.prepare('SELECT * FROM messages WHERE id = ?').get(reply_to_id);
+    if (orig && orig.user_id !== req.user.id) createNotification(orig.user_id, 'reply', Object.assign({ message: full }, ctx));
+  }
   res.json({ message: full });
 });
 
@@ -549,25 +749,31 @@ app.get('/api/dms/:id/messages', auth, (req, res) => {
   if (!dm || (dm.user1_id !== req.user.id && dm.user2_id !== req.user.id)) return res.status(404).json({ error: 'DM not found' });
   const rows = db.prepare('SELECT * FROM messages WHERE dm_id = ? ORDER BY created_at DESC LIMIT 50').all(dm.id);
   rows.reverse();
-  res.json({ messages: rows.map(m => messageWithMeta(m, req.user.id)) });
+  res.json({ messages: messagesWithMeta(rows, req.user.id) });
 });
 
 app.post('/api/dms/:id/messages', auth, (req, res) => {
   const dm = db.prepare('SELECT * FROM dm_channels WHERE id = ?').get(req.params.id);
   if (!dm || (dm.user1_id !== req.user.id && dm.user2_id !== req.user.id)) return res.status(404).json({ error: 'DM not found' });
-  const { content, attachment_url, attachment_name, attachment_type } = req.body || {};
+  const { content, attachment_url, attachment_name, attachment_type, reply_to_id } = req.body || {};
   if ((!content || !content.trim()) && !attachment_url) return res.status(400).json({ error: 'Message cannot be empty' });
   const id = newId();
   const now = Date.now();
-  db.prepare(`INSERT INTO messages (id, dm_id, user_id, content, attachment_url, attachment_name, attachment_type, created_at)
-              VALUES (?,?,?,?,?,?,?,?)`)
-    .run(id, dm.id, req.user.id, (content || '').trim(), attachment_url || null, attachment_name || null, attachment_type || null, now);
+  const mentionIds = parseMentionIds(content).filter(uid => uid !== req.user.id);
+  db.prepare(`INSERT INTO messages (id, dm_id, user_id, content, attachment_url, attachment_name, attachment_type, created_at, reply_to_id, mentions)
+              VALUES (?,?,?,?,?,?,?,?,?,?)`)
+    .run(id, dm.id, req.user.id, (content || '').trim(), attachment_url || null, attachment_name || null, attachment_type || null, now, reply_to_id || null, JSON.stringify(mentionIds));
   const m = db.prepare('SELECT * FROM messages WHERE id = ?').get(id);
   const full = messageWithMeta(m, req.user.id);
   io.to(`dm:${dm.id}`).emit('dm_message', full);
-  // Notify the other user
   const otherId = dm.user1_id === req.user.id ? dm.user2_id : dm.user1_id;
   io.to(`user:${otherId}`).emit('dm_notify', { dm_id: dm.id, message: full });
+  const ctx = { kind: 'dm', dm_id: dm.id };
+  for (const uid of mentionIds) if (uid !== otherId) createNotification(uid, 'mention', Object.assign({ message: full }, ctx));
+  if (reply_to_id) {
+    const orig = db.prepare('SELECT * FROM messages WHERE id = ?').get(reply_to_id);
+    if (orig && orig.user_id !== req.user.id) createNotification(orig.user_id, 'reply', Object.assign({ message: full }, ctx));
+  }
   res.json({ message: full });
 });
 
@@ -606,13 +812,22 @@ app.get('/api/embed', auth, async (req, res) => {
   }
 });
 
-/* ---------------- Upload ---------------- */
-app.post('/api/upload', auth, upload.single('file'), (req, res) => {
-  if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
-  res.json({
-    url: `/uploads/${req.file.filename}`,
-    name: req.file.originalname,
-    type: req.file.mimetype
+/* ---------------- Upload ----------------
+   Accepts images (including animated GIF/WebP), video, audio and documents.
+   Hard limit: 25 MB. */
+app.post('/api/upload', auth, (req, res) => {
+  upload.single('file')(req, res, (err) => {
+    if (err) {
+      if (err.code === 'LIMIT_FILE_SIZE') return res.status(413).json({ error: 'File is too large (maximum 25 MB)' });
+      return res.status(400).json({ error: err.message || 'Upload failed' });
+    }
+    if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+    res.json({
+      url: `/uploads/${req.file.filename}`,
+      name: req.file.originalname,
+      type: req.file.mimetype,
+      size: req.file.size
+    });
   });
 });
 

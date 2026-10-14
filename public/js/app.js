@@ -20,7 +20,14 @@ const state = {
   typingUsers: {},
   usersCache: {},
   showMembers: true,
-  replyTo: null
+  replyTo: null,
+  view: 'home',
+  friends: null,
+  friendsTab: 'online',
+  notifications: [],
+  unread: 0,
+  settings: {},
+  mention: { active: false, query: '', items: [], sel: 0, start: 0 }
 };
 
 /* Emoji set is used only for message content and reactions (a native chat feature). */
@@ -29,7 +36,24 @@ const EMOJIS = ['\u{1F600}','\u{1F602}','\u{1F972}','\u{1F60D}','\u{1F60E}','\u{
 /* Palette used for banner / accent selection. */
 const PALETTE = ['#5865F2','#3BA55D','#FAA81A','#ED4245','#EB459E','#9B59B6','#1ABC9C','#E67E22','#3498DB','#95A5A6','#2B2D31','#111214'];
 
-/* Relationship labels used across the friends system. */
+/* The six website background colours (dark theme). */
+const BG_COLORS = [
+  { id: 'graphite', label: 'Graphite', rail: '#202225', side: '#2b2d31', main: '#313338' },
+  { id: 'midnight', label: 'Midnight', rail: '#181b28', side: '#20232f', main: '#24283c' },
+  { id: 'ocean',    label: 'Ocean',    rail: '#152026', side: '#1b272e', main: '#1f2d36' },
+  { id: 'forest',   label: 'Forest',   rail: '#16211c', side: '#1c2a24', main: '#20302a' },
+  { id: 'plum',     label: 'Plum',     rail: '#1e1827', side: '#262030', main: '#2b2238' },
+  { id: 'ember',    label: 'Ember',    rail: '#201814', side: '#2a1f1b', main: '#2f231f' }
+];
+
+const SETTINGS_DEFAULTS = {
+  theme: 'dark', bg: 'graphite', compact: false, showMembers: true,
+  safeMode: true, dmFromMembers: true, dataPersonalisation: false, readReceipts: true,
+  notifDesktop: true, notifSounds: true, notifBadge: false,
+  echoCancel: true, noiseSuppress: true, inputVolume: 70,
+  language: 'English, US'
+};
+
 const REL_LABEL = {
   none: 'Add Friend',
   pending_outgoing: 'Cancel Request',
@@ -38,9 +62,87 @@ const REL_LABEL = {
   blocked: 'Blocked'
 };
 
+/* ---------------- Icon set (inline SVG, clean line style) ---------------- */
+const ICONS = {
+  'message-circle': '<path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/>',
+  'plus': '<line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>',
+  'compass': '<circle cx="12" cy="12" r="10"/><polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76"/>',
+  'chevron-down': '<polyline points="6 9 12 15 18 9"/>',
+  'chevron-right': '<polyline points="9 18 15 12 9 6"/>',
+  'chevron-left': '<polyline points="15 18 9 12 15 6"/>',
+  'caret-down': '<polyline points="6 9 12 15 18 9"/>',
+  'mic': '<path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/>',
+  'settings': '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>',
+  'hash': '<line x1="4" y1="9" x2="20" y2="9"/><line x1="4" y1="15" x2="20" y2="15"/><line x1="10" y1="3" x2="8" y2="21"/><line x1="16" y1="3" x2="14" y2="21"/>',
+  'bell': '<path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/>',
+  'users': '<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>',
+  'user-group': '<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>',
+  'pin': '<path d="M12 17v5"/><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z"/>',
+  'search': '<circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>',
+  'plus-circle': '<circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/>',
+  'smile': '<circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><line x1="9" y1="9" x2="9.01" y2="9"/><line x1="15" y1="9" x2="15.01" y2="9"/>',
+  'smile-plus': '<path d="M22 11v1a10 10 0 1 1-9-10"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><line x1="9" y1="9" x2="9.01" y2="9"/><line x1="15" y1="9" x2="15.01" y2="9"/><line x1="16" y1="5" x2="22" y2="5"/><line x1="19" y1="2" x2="19" y2="8"/>',
+  'send': '<line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/>',
+  'reply': '<polyline points="9 17 4 12 9 7"/><path d="M20 18v-2a4 4 0 0 0-4-4H4"/>',
+  'corner-up-left': '<polyline points="9 14 4 9 9 4"/><path d="M20 20v-7a4 4 0 0 0-4-4H4"/>',
+  'trash': '<polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>',
+  'check': '<polyline points="20 6 9 17 4 12"/>',
+  'xmark': '<line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>',
+  'user-plus': '<path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="8.5" cy="7" r="4"/><line x1="20" y1="8" x2="20" y2="14"/><line x1="23" y1="11" x2="17" y2="11"/>',
+  'user-minus': '<path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="8.5" cy="7" r="4"/><line x1="23" y1="11" x2="17" y2="11"/>',
+  'user-check': '<path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="8.5" cy="7" r="4"/><polyline points="17 11 19 13 23 9"/>',
+  'unlock': '<rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 9.9-1"/>',
+  'lock': '<rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>',
+  'ban': '<circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/>',
+  'clock': '<circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>',
+  'comment': '<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>',
+  'ellipsis-vertical': '<circle cx="12" cy="12" r="1"/><circle cx="12" cy="5" r="1"/><circle cx="12" cy="19" r="1"/>',
+  'more-horizontal': '<circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/>',
+  'calendar-days': '<rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/>',
+  'note': '<path d="M15.5 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V8.5L15.5 3z"/><path d="M15 3v6h6"/>',
+  'image': '<rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/>',
+  'crown': '<path d="M5 16L3 5l5.5 5L12 4l3.5 6L21 5l-2 11H5z"/><path d="M5 19h14"/>',
+  'ghost': '<path d="M9 10h.01M15 10h.01M12 2a8 8 0 0 0-8 8v12l3-3 2.5 2.5L12 19l2.5 2.5L17 19l3 3V10a8 8 0 0 0-8-8z"/>',
+  'server': '<rect x="2" y="2" width="20" height="8" rx="2" ry="2"/><rect x="2" y="14" width="20" height="8" rx="2" ry="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/>',
+  'file': '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/>',
+  'plug': '<path d="M9 2v6M15 2v6M6 8h12v3a6 6 0 0 1-12 0V8zM12 17v5"/>',
+  'link': '<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>',
+  'mobile': '<rect x="5" y="2" width="14" height="20" rx="2" ry="2"/><line x1="12" y1="18" x2="12.01" y2="18"/>',
+  'volume-high': '<polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"/>',
+  'id-badge': '<rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="2"/><path d="M15 8h4M15 12h4M7 16h10"/>',
+  'download': '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>',
+  'upload': '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>',
+  'pencil': '<path d="M17 3a2.83 2.83 0 0 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/>',
+  'key': '<path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/>',
+  'globe': '<circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>',
+  'eye': '<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>',
+  'log-out': '<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/>',
+  'shield': '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>',
+  'sliders': '<line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/>',
+  'palette': '<circle cx="13.5" cy="6.5" r="1.5"/><circle cx="17.5" cy="10.5" r="1.5"/><circle cx="8.5" cy="7.5" r="1.5"/><circle cx="6.5" cy="12.5" r="1.5"/><path d="M12 2a10 10 0 0 0 0 20c1.1 0 2-.9 2-2 0-.5-.2-1-.5-1.3-.3-.4-.5-.8-.5-1.2 0-1 .8-1.8 1.8-1.8H16a6 6 0 0 0 6-6c0-5.5-4.5-10-10-10z"/>',
+  'keyboard': '<rect x="2" y="6" width="20" height="12" rx="2"/><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M6 14h12"/>',
+  'phone': '<path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/>',
+  'at-sign': '<circle cx="12" cy="12" r="4"/><path d="M16 8v5a3 3 0 0 0 6 0v-1a10 10 0 1 0-3.92 7.94"/>',
+  'external-link': '<path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/>',
+  'copy': '<rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>',
+  'share': '<circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/>',
+  'refresh': '<polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>',
+  'circle': '<circle cx="12" cy="12" r="9"/>'
+};
+
+function svgIcon(name) {
+  const p = ICONS[name] || ICONS['circle'];
+  return `<svg class="ic" viewBox="0 0 24 24" aria-hidden="true">${p}</svg>`;
+}
+function icon(name) { return `<i data-ic="${name}">${svgIcon(name)}</i>`; }
+function hydrateIcons(root) {
+  (root || document).querySelectorAll('i[data-ic]').forEach(el => {
+    if (!el.querySelector('svg')) el.innerHTML = svgIcon(el.dataset.ic);
+  });
+}
+
 /* ---------------- DOM helpers ---------------- */
 const $ = (id) => document.getElementById(id);
-function icon(name, style = 'solid') { return `<i class="fa-${style} ${name}"></i>`; }
 
 function escapeHtml(s) {
   if (s == null) return '';
@@ -76,6 +178,25 @@ function avatarHTML(user, size = 40, status = null) {
   return `<div class="avatar" style="width:${size}px;height:${size}px;font-size:${Math.round(size * 0.42)}px;background:${bg}">${inner}${dot}</div>`;
 }
 
+/* ---------------- Settings helpers ---------------- */
+function setting(key) { return state.settings[key] !== undefined ? state.settings[key] : SETTINGS_DEFAULTS[key]; }
+function applyTheme() {
+  document.body.dataset.theme = setting('theme') || 'dark';
+  document.body.dataset.bg = setting('bg') || 'graphite';
+  document.body.classList.toggle('compact', !!setting('compact'));
+  state.showMembers = setting('showMembers') !== false;
+  if (state.server) renderMembers();
+}
+const saveTimers = {};
+function saveSetting(key, value) {
+  state.settings[key] = value;
+  applyTheme();
+  clearTimeout(saveTimers[key]);
+  saveTimers[key] = setTimeout(() => {
+    api('/api/settings', { method: 'PATCH', body: JSON.stringify({ [key]: value }) }).catch(() => {});
+  }, 250);
+}
+
 /* ---------------- API ---------------- */
 async function api(path, opts = {}) {
   const headers = Object.assign({ 'Authorization': 'Bearer ' + token }, opts.headers || {});
@@ -99,7 +220,57 @@ function toast(msg, type = '') {
   t.className = 'toast ' + type;
   t.textContent = msg;
   $('toast-wrap').appendChild(t);
-  setTimeout(() => { t.style.opacity = '0'; t.style.transition = 'opacity .3s'; setTimeout(() => t.remove(), 300); }, 3000);
+  setTimeout(() => { t.style.opacity = '0'; t.style.transition = 'opacity .3s'; setTimeout(() => t.remove(), 300); }, type === 'alert' ? 4200 : 3000);
+}
+
+/* ---------------- Custom confirm / prompt ---------------- */
+function confirmDialog(opts = {}) {
+  return new Promise((resolve) => {
+    const wrap = document.createElement('div');
+    wrap.className = 'confirm-overlay';
+    wrap.innerHTML = `<div class="confirm-box">
+      <h3>${escapeHtml(opts.title || 'Are you sure?')}</h3>
+      ${opts.body ? `<p>${opts.body}</p>` : ''}
+      <div class="confirm-actions">
+        <button class="btn ghost" id="cd-cancel">${escapeHtml(opts.cancelText || 'Cancel')}</button>
+        <button class="btn ${opts.danger ? 'danger' : ''}" id="cd-ok">${escapeHtml(opts.confirmText || 'Confirm')}</button>
+      </div></div>`;
+    document.body.appendChild(wrap);
+    const done = (v) => { wrap.remove(); document.removeEventListener('keydown', esc); resolve(v); };
+    const esc = (e) => { if (e.key === 'Escape') done(false); };
+    wrap.querySelector('#cd-ok').addEventListener('click', () => done(true));
+    wrap.querySelector('#cd-cancel').addEventListener('click', () => done(false));
+    wrap.addEventListener('click', (e) => { if (e.target === wrap) done(false); });
+    document.addEventListener('keydown', esc);
+    wrap.querySelector('#cd-ok').focus();
+  });
+}
+
+function promptDialog(opts = {}) {
+  return new Promise((resolve) => {
+    const wrap = document.createElement('div');
+    wrap.className = 'confirm-overlay';
+    wrap.innerHTML = `<div class="confirm-box">
+      <h3>${escapeHtml(opts.title || '')}</h3>
+      ${opts.body ? `<p>${opts.body}</p>` : ''}
+      <div class="field"><label>${escapeHtml(opts.label || '')}</label>
+        <input id="pd-input" value="${escapeHtml(opts.value || '')}" placeholder="${escapeHtml(opts.placeholder || '')}" maxlength="${opts.maxlength || 256}"></div>
+      <div class="confirm-actions">
+        <button class="btn ghost" id="pd-cancel">Cancel</button>
+        <button class="btn" id="pd-ok">${escapeHtml(opts.confirmText || 'Save')}</button>
+      </div></div>`;
+    document.body.appendChild(wrap);
+    const input = wrap.querySelector('#pd-input');
+    const done = (v) => { wrap.remove(); resolve(v); };
+    wrap.querySelector('#pd-ok').addEventListener('click', () => done(input.value));
+    wrap.querySelector('#pd-cancel').addEventListener('click', () => done(null));
+    wrap.addEventListener('click', (e) => { if (e.target === wrap) done(null); });
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); done(input.value); }
+      if (e.key === 'Escape') done(null);
+    });
+    setTimeout(() => { input.focus(); input.select(); }, 30);
+  });
 }
 
 /* ============================================================
@@ -112,11 +283,18 @@ async function init() {
     me = user;
     localStorage.setItem('cr_user', JSON.stringify(me));
   } catch (e) { return; }
+  try {
+    const { settings } = await api('/api/settings');
+    state.settings = settings || {};
+  } catch (e) { state.settings = {}; }
+  applyTheme();
+  hydrateIcons(document);
   renderMe();
   connectSocket();
   await loadServers();
   await loadFriends();
   await loadDMs();
+  await loadNotifications();
   showHome();
   bindGlobalEvents();
 }
@@ -128,9 +306,7 @@ function renderMe(u = me) {
   $('my-tag').textContent = '#' + u.discriminator;
 }
 
-/* Live preview of the signed-in user's profile across the whole UI.
-   `patch` is a partial user object; it is merged over the current `me`.
-   This never hits the server — it only reflects changes instantly. */
+/* Live preview of the signed-in user's profile across the whole UI. */
 function previewSelf(patch) {
   const p = Object.assign({}, me, patch);
   renderMe(p);
@@ -169,6 +345,7 @@ function connectSocket() {
     loadDMs();
     if (!state.dm || state.dm.id !== data.dm_id) {
       toast('New message from ' + fullTag(data.message.author), '');
+      if (setting('notifSounds') !== false) beep();
     }
   });
   socket.on('message_deleted', (data) => {
@@ -192,10 +369,36 @@ function connectSocket() {
   });
   socket.on('friend_update', (data) => {
     loadFriends();
-    if (data.type === 'request') toast((data.user.display_name || data.user.username) + ' sent you a friend request', 'success');
+    if (data.type === 'request') toast((data.user.display_name || data.user.username) + ' sent you a friend request', 'alert');
     if (data.type === 'accepted') toast('You are now friends with ' + (data.user.display_name || data.user.username), 'success');
     if (data.type === 'removed') toast((data.user.display_name || data.user.username) + ' removed you as a friend');
   });
+  socket.on('notification', (n) => {
+    state.notifications.unshift(n);
+    state.unread++;
+    renderNotifBadge();
+    const info = notifInfo(n);
+    toast(info.plain, 'alert');
+    if (setting('notifSounds') !== false) beep();
+    if ($('notif-panel')) renderNotifList();
+  });
+}
+
+/* Short WebAudio blip for pings (no external asset). */
+let audioCtx = null;
+function beep() {
+  try {
+    audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+    const o = audioCtx.createOscillator();
+    const g = audioCtx.createGain();
+    o.type = 'sine'; o.frequency.value = 660;
+    g.gain.value = 0.06;
+    o.connect(g); g.connect(audioCtx.destination);
+    o.start();
+    o.frequency.setValueAtTime(880, audioCtx.currentTime + 0.08);
+    g.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + 0.28);
+    o.stop(audioCtx.currentTime + 0.3);
+  } catch (e) { /* ignore */ }
 }
 
 /* ============================================================
@@ -228,7 +431,8 @@ function renderRail() {
    HOME / DMs
    ============================================================ */
 function showHome() {
-  state.server = null; state.channel = null; state.dm = null;
+  state.server = null; state.channel = null; state.dm = null; state.view = 'home';
+  setReplyTo(null);
   renderRail();
   $('rail-home').classList.add('active');
   $('sidebar-name').textContent = 'Direct Messages';
@@ -245,7 +449,7 @@ async function loadDMs() {
   const { dms } = await api('/api/dms');
   state.dms = dms;
   for (const d of dms) if (d.user) state.usersCache[d.user.id] = d.user;
-  if (!state.server) renderDMList();
+  if (!state.server && state.view !== 'friends') renderDMList();
 }
 
 function renderDMList() {
@@ -255,13 +459,13 @@ function renderDMList() {
   friendsBtn.className = 'dm-item friends-entry' + (state.view === 'friends' ? ' active' : '');
   friendsBtn.id = 'friends-entry';
   const pendingCount = (state.friends && state.friends.incoming) ? state.friends.incoming.length : 0;
-  friendsBtn.innerHTML = `${icon('fa-user-group')}<span class="dm-name">Friends</span>${pendingCount ? `<span class="friend-badge">${pendingCount}</span>` : ''}`;
+  friendsBtn.innerHTML = `${icon('user-group')}<span class="dm-name">Friends</span>${pendingCount ? `<span class="friend-badge">${pendingCount}</span>` : ''}`;
   friendsBtn.addEventListener('click', openFriends);
   list.appendChild(friendsBtn);
 
   const cat = document.createElement('div');
   cat.className = 'channel-category';
-  cat.innerHTML = `${icon('fa-caret-down', 'solid')} Direct Messages`;
+  cat.innerHTML = `${icon('caret-down')} Direct Messages`;
   list.appendChild(cat);
   for (const d of state.dms) {
     const item = document.createElement('div');
@@ -272,13 +476,14 @@ function renderDMList() {
   }
   const add = document.createElement('div');
   add.className = 'dm-item';
-  add.innerHTML = `<div class="avatar" style="width:32px;height:32px;font-size:14px;background:#5865f2">${icon('fa-plus')}</div><span class="dm-name">Start a conversation</span>`;
+  add.innerHTML = `<div class="avatar" style="width:32px;height:32px;font-size:14px;background:#5865f2">${icon('plus')}</div><span class="dm-name">Start a conversation</span>`;
   add.addEventListener('click', openNewDM);
   list.appendChild(add);
 }
 
 async function openDM(d) {
   state.server = null; state.channel = null; state.view = 'home';
+  setReplyTo(null);
   if (state.dm && state.dm.id !== d.id) socket.emit('leave_dm', state.dm.id);
   state.dm = d;
   state.usersCache[d.user.id] = d.user;
@@ -320,6 +525,7 @@ async function loadFriends() {
 
 async function openFriends() {
   state.server = null; state.channel = null; state.view = 'friends';
+  setReplyTo(null);
   if (state.dm) { socket.emit('leave_dm', state.dm.id); state.dm = null; }
   renderRail();
   $('rail-home').classList.add('active');
@@ -341,15 +547,15 @@ function friendRow(u, kind) {
   const status = u.status === 'offline' ? 'Offline' : statusLabel(u.status);
   let actions = '';
   if (kind === 'friend') {
-    actions = `<button class="fr-act" data-fr-msg="${u.id}" title="Message">${icon('fa-comment')}</button>
-               <button class="fr-act" data-fr-act="remove" data-uid="${u.id}" title="Remove Friend">${icon('fa-user-minus')}</button>`;
+    actions = `<button class="fr-act" data-fr-msg="${u.id}" title="Message">${icon('comment')}</button>
+               <button class="fr-act" data-fr-act="remove" data-uid="${u.id}" title="Remove Friend">${icon('user-minus')}</button>`;
   } else if (kind === 'incoming') {
-    actions = `<button class="fr-act ok" data-fr-act="accept" data-uid="${u.id}" title="Accept">${icon('fa-check')}</button>
-               <button class="fr-act no" data-fr-act="decline" data-uid="${u.id}" title="Decline">${icon('fa-xmark')}</button>`;
+    actions = `<button class="fr-act ok" data-fr-act="accept" data-uid="${u.id}" title="Accept">${icon('check')}</button>
+               <button class="fr-act no" data-fr-act="decline" data-uid="${u.id}" title="Decline">${icon('xmark')}</button>`;
   } else if (kind === 'outgoing') {
-    actions = `<button class="fr-act" data-fr-act="cancel" data-uid="${u.id}" title="Cancel Request">${icon('fa-xmark')}</button>`;
+    actions = `<button class="fr-act" data-fr-act="cancel" data-uid="${u.id}" title="Cancel Request">${icon('xmark')}</button>`;
   } else if (kind === 'blocked') {
-    actions = `<button class="fr-act ok" data-fr-act="unblock" data-uid="${u.id}" title="Unblock">${icon('fa-unlock')}</button>`;
+    actions = `<button class="fr-act ok" data-fr-act="unblock" data-uid="${u.id}" title="Unblock">${icon('unlock')}</button>`;
   }
   return `<div class="fr-row" data-uid="${u.id}">
     ${avatarHTML(u, 32, u.status || 'offline')}
@@ -360,7 +566,8 @@ function friendRow(u, kind) {
 
 function renderFriendsView() {
   const box = $('messages');
-  const f = state.friends;
+  box.style.padding = ''; box.style.overflow = '';
+  const f = state.friends || { friends: [], incoming: [], outgoing: [], blocked: [] };
   const tab = state.friendsTab;
   const counts = {
     online: f.friends.filter(x => x.status !== 'offline').length,
@@ -385,8 +592,8 @@ function renderFriendsView() {
   } else if (tab === 'pending') {
     const inc = f.incoming.map(u => friendRow(u, 'incoming')).join('');
     const out = f.outgoing.map(u => friendRow(u, 'outgoing')).join('');
-    body = `<div class="fr-cat">Incoming Requests — ${f.incoming.length}</div>${inc || emptyFriends('No incoming requests.')}
-            <div class="fr-cat">Outgoing Requests — ${f.outgoing.length}</div>${out || emptyFriends('No outgoing requests.')}`;
+    body = `<div class="fr-cat">Incoming Requests \u2014 ${f.incoming.length}</div>${inc || emptyFriends('No incoming requests.')}
+            <div class="fr-cat">Outgoing Requests \u2014 ${f.outgoing.length}</div>${out || emptyFriends('No outgoing requests.')}`;
   } else if (tab === 'blocked') {
     body = f.blocked.length ? f.blocked.map(u => friendRow(u, 'blocked')).join('') : emptyFriends('No blocked users.');
   } else {
@@ -404,7 +611,7 @@ function renderFriendsView() {
         ${tabBtn('pending', 'Pending', counts.pending)}
         ${tabBtn('blocked', 'Blocked', counts.blocked)}
       </div>
-      <button class="fr-add-friend${tab === 'add' ? ' active' : ''}" data-tab="add">${icon('fa-user-plus')} Add Friend</button>
+      <button class="fr-add-friend${tab === 'add' ? ' active' : ''}" data-tab="add">${icon('user-plus')} Add Friend</button>
     </div>
     <div class="fr-body">${body}</div>
   </div>`;
@@ -447,12 +654,12 @@ async function addFriendByTag(tag) {
   try {
     const res = await api('/api/friends/request', { method: 'POST', body: JSON.stringify({ tag }) });
     const msg = res.status === 'friends' ? 'You are now friends!' : 'Friend request sent!';
-    if (hint) hint.textContent = msg;
+    if (hint) { hint.textContent = msg; hint.className = 'fr-add-hint ok'; }
     toast(msg, 'success');
     await loadFriends(); renderDMList(); refreshFriendCounts();
     const ai = $('fr-add-input'); if (ai) ai.value = '';
   } catch (e) {
-    if (hint) hint.textContent = e.message;
+    if (hint) { hint.textContent = e.message; hint.className = 'fr-add-hint bad'; }
     toast(e.message, 'error');
   }
 }
@@ -471,8 +678,16 @@ async function friendAction(act, uid) {
     if (act === 'accept') await api('/api/friends/accept', { method: 'POST', body: JSON.stringify({ userId: uid }) });
     else if (act === 'decline') await api('/api/friends/decline', { method: 'POST', body: JSON.stringify({ userId: uid }) });
     else if (act === 'cancel') await api('/api/friends/cancel', { method: 'POST', body: JSON.stringify({ userId: uid }) });
-    else if (act === 'remove') { if (!confirm('Remove this friend?')) return; await api('/api/friends/' + uid, { method: 'DELETE' }); }
-    else if (act === 'block') { if (!confirm('Block this user? They will be removed from your friends.')) return; await api('/api/blocks', { method: 'POST', body: JSON.stringify({ userId: uid }) }); }
+    else if (act === 'remove') {
+      const ok = await confirmDialog({ title: 'Remove Friend', body: 'Are you sure you want to remove this friend?', confirmText: 'Remove Friend', danger: true });
+      if (!ok) return;
+      await api('/api/friends/' + uid, { method: 'DELETE' });
+    }
+    else if (act === 'block') {
+      const ok = await confirmDialog({ title: 'Block User', body: 'They will be removed from your friends and will not be able to message you.', confirmText: 'Block', danger: true });
+      if (!ok) return;
+      await api('/api/blocks', { method: 'POST', body: JSON.stringify({ userId: uid }) });
+    }
     else if (act === 'unblock') await api('/api/blocks/' + uid, { method: 'DELETE' });
     await loadFriends(); renderDMList();
     if (state.view === 'friends') renderFriendsView();
@@ -490,6 +705,7 @@ async function openServer(id) {
   state.channels = data.channels;
   state.members = data.members;
   state.dm = null;
+  setReplyTo(null);
   for (const m of data.members) state.usersCache[m.id] = m;
   renderRail();
   $('rail-home').classList.remove('active');
@@ -509,23 +725,23 @@ function renderChannelList() {
 
   const tcat = document.createElement('div');
   tcat.className = 'channel-category';
-  tcat.innerHTML = `${icon('fa-caret-down')} Text Channels`;
+  tcat.innerHTML = `${icon('caret-down')} Text Channels`;
   list.appendChild(tcat);
   for (const c of textChannels) list.appendChild(channelRow(c));
   const tadd = document.createElement('div');
   tadd.className = 'channel-add';
-  tadd.innerHTML = `${icon('fa-plus')} Create Channel`;
+  tadd.innerHTML = `${icon('plus')} Create Channel`;
   tadd.addEventListener('click', () => openCreateChannel('text'));
   list.appendChild(tadd);
 
   const vcat = document.createElement('div');
   vcat.className = 'channel-category';
-  vcat.innerHTML = `${icon('fa-caret-down')} Voice Channels`;
+  vcat.innerHTML = `${icon('caret-down')} Voice Channels`;
   list.appendChild(vcat);
   for (const c of voiceChannels) list.appendChild(channelRow(c));
   const vadd = document.createElement('div');
   vadd.className = 'channel-add';
-  vadd.innerHTML = `${icon('fa-plus')} Create Channel`;
+  vadd.innerHTML = `${icon('plus')} Create Channel`;
   vadd.addEventListener('click', () => openCreateChannel('voice'));
   list.appendChild(vadd);
 }
@@ -534,7 +750,7 @@ function channelRow(c) {
   const row = document.createElement('div');
   row.className = 'channel' + (state.channel && state.channel.id === c.id ? ' active' : '');
   row.dataset.cid = c.id;
-  const ic = c.type === 'voice' ? icon('fa-volume-high') : icon('fa-hashtag');
+  const ic = c.type === 'voice' ? icon('volume-high') : icon('hash');
   row.innerHTML = `<span class="hash">${ic}</span><span class="ch-name">${escapeHtml(c.name)}</span>`;
   row.addEventListener('click', () => {
     if (c.type === 'voice') { toast('Voice channels are not available yet'); return; }
@@ -549,10 +765,11 @@ async function openChannel(cid) {
   if (state.channel && state.channel.id !== cid) socket.emit('leave_channel', state.channel.id);
   state.channel = c;
   state.dm = null;
+  setReplyTo(null);
   document.querySelectorAll('.channel').forEach(el => el.classList.toggle('active', el.dataset.cid === cid));
   socket.emit('join_channel', cid);
   $('chat-hash').style.display = '';
-  $('chat-hash').innerHTML = icon('fa-hashtag');
+  $('chat-hash').innerHTML = icon('hash');
   $('chat-title').textContent = c.name;
   $('chat-topic').textContent = c.topic || '';
   const { messages } = await api('/api/channels/' + cid + '/messages');
@@ -580,7 +797,7 @@ function renderMembers() {
       const row = document.createElement('div');
       row.className = 'member' + (m.status === 'offline' ? ' offline' : '');
       row.dataset.uid = m.id;
-      const crown = (state.server.owner_id === m.id) ? `<span class="owner-crown">${icon('fa-crown')}</span>` : '';
+      const crown = (state.server.owner_id === m.id) ? `<span class="owner-crown">${icon('crown')}</span>` : '';
       row.innerHTML = `${avatarHTML(m, 32, m.status || 'offline')}<span class="mname">${escapeHtml(m.display_name || m.username)}${crown}</span>`;
       row.addEventListener('click', () => openProfile(m));
       wrap.appendChild(row);
@@ -615,7 +832,7 @@ function renderMessages() {
   if (state.channel) {
     const intro = document.createElement('div');
     intro.className = 'channel-intro';
-    intro.innerHTML = `<div class="big-avatar">${icon('fa-hashtag')}</div><h2>Welcome to #${escapeHtml(state.channel.name)}</h2><p>This is the start of the #${escapeHtml(state.channel.name)} channel.</p>`;
+    intro.innerHTML = `<div class="big-avatar">${icon('hash')}</div><h2>Welcome to #${escapeHtml(state.channel.name)}</h2><p>This is the start of the #${escapeHtml(state.channel.name)} channel.</p>`;
     inner.appendChild(intro);
   } else if (state.dm) {
     const intro = document.createElement('div');
@@ -627,11 +844,18 @@ function renderMessages() {
 
   let prev = null;
   for (const m of state.messages) {
-    const grouped = prev && prev.author && m.author && prev.author.id === m.author.id && (m.created_at - prev.created_at) < 5 * 60 * 1000;
+    const grouped = prev && prev.author && m.author && prev.author.id === m.author.id && (m.created_at - prev.created_at) < 5 * 60 * 1000 && !m.reply_to;
     inner.appendChild(messageNode(m, grouped));
     prev = m;
   }
   scrollToBottom();
+}
+
+function replyRefHTML(r) {
+  const name = r.author ? (r.author.display_name || r.author.username) : 'Unknown';
+  const txt = r.content ? r.content : (r.attachment_name ? 'Attachment' : 'Message');
+  const ava = r.author ? `<span class="rr-ava">${r.author.avatar_url ? `<img src="${escapeHtml(r.author.avatar_url)}" alt="">` : ''}</span>` : '';
+  return `<div class="reply-ref" data-jump="${r.id}"><span class="rr-line"></span>${ava}<span class="rr-name">${escapeHtml(name)}</span><span class="rr-text">${escapeHtml(txt)}</span></div>`;
 }
 
 function messageNode(m, grouped, animate) {
@@ -645,11 +869,11 @@ function messageNode(m, grouped, animate) {
     : `<div class="gutter">${avatarHTML(a, 40)}</div>`;
   const head = grouped ? '' : `<div class="head"><span class="author">${escapeHtml(a.display_name || a.username)}</span><span class="time">${formatTime(m.created_at)}</span></div>`;
   const toolbar = `<div class="msg-toolbar">
-      <button data-act="react" title="Add Reaction">${icon('fa-face-smile', 'regular')}</button>
-      <button data-act="reply" title="Reply">${icon('fa-reply')}</button>
-      ${m.author.id === me.id ? `<button data-act="delete" title="Delete">${icon('fa-trash')}</button>` : ''}
+      <button data-act="react" title="Add Reaction">${icon('smile-plus')}</button>
+      <button data-act="reply" title="Reply">${icon('reply')}</button>
+      <button data-act="more" title="More">${icon('ellipsis-vertical')}</button>
     </div>`;
-  node.innerHTML = `${toolbar}${gutter}<div class="body">${head}
+  node.innerHTML = `${toolbar}${gutter}<div class="body">${m.reply_to ? replyRefHTML(m.reply_to) : ''}${head}
     <div class="text" data-content>${formatContent(m.content)}</div>
     <div class="attachment-slot"></div>
     <div class="embed-slot"></div>
@@ -659,24 +883,23 @@ function messageNode(m, grouped, animate) {
   const authorEl = node.querySelector('.author');
   if (authorEl) authorEl.addEventListener('click', () => openProfile(a));
 
-  if (m.attachment_url) {
-    node.querySelector('.attachment-slot').appendChild(attachmentNode(m));
-  }
+  const jump = node.querySelector('.reply-ref');
+  if (jump) jump.addEventListener('click', () => flashMessage(jump.dataset.jump));
+
+  if (m.attachment_url) node.querySelector('.attachment-slot').appendChild(attachmentNode(m));
   const urls = extractUrls(m.content);
   if (urls.length) {
     const slot = node.querySelector('.embed-slot');
     urls.slice(0, 2).forEach(u => slot.appendChild(embedNode(u)));
   }
-  node.querySelectorAll('.reaction').forEach(r => {
-    r.addEventListener('click', () => toggleReaction(m.id, r.dataset.emoji));
-  });
+  node.querySelectorAll('.reaction').forEach(r => r.addEventListener('click', () => toggleReaction(m.id, r.dataset.emoji)));
   node.querySelectorAll('.msg-toolbar button').forEach(btn => {
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
       const act = btn.dataset.act;
-      if (act === 'react') openReactionPicker(btn, m.id);
-      else if (act === 'delete') deleteMessage(m.id);
-      else if (act === 'reply') { state.replyTo = m; $('message-input').focus(); toast('Replying to ' + fullTag(m.author)); }
+      if (act === 'react') openReactionPickerAt(btn.getBoundingClientRect().left - 140, btn.getBoundingClientRect().bottom + 8, m.id);
+      else if (act === 'reply') setReplyTo(m);
+      else if (act === 'more') { const r = btn.getBoundingClientRect(); openMessageContextMenu(r.right - 200, r.bottom + 4, m); }
     });
   });
   return node;
@@ -686,21 +909,35 @@ function appendMessage(m) {
   const inner = $('messages-inner');
   if (!inner) { renderMessages(); return; }
   const prev = state.messages[state.messages.length - 2];
-  const grouped = prev && prev.author && m.author && prev.author.id === m.author.id && (m.created_at - prev.created_at) < 5 * 60 * 1000;
+  const grouped = prev && prev.author && m.author && prev.author.id === m.author.id && (m.created_at - prev.created_at) < 5 * 60 * 1000 && !m.reply_to;
   inner.appendChild(messageNode(m, grouped, true));
   scrollToBottom();
+}
+
+function userByName(name) {
+  const lc = (name || '').toLowerCase();
+  if (me && me.username && me.username.toLowerCase() === lc) return me;
+  for (const id in state.usersCache) {
+    const u = state.usersCache[id];
+    if (u && u.username && u.username.toLowerCase() === lc) return u;
+  }
+  return null;
 }
 
 function formatContent(text) {
   if (!text) return '';
   let html = escapeHtml(text);
-  html = html.replace(/@([a-zA-Z0-9._]+)/g, (mt, name) => {
-    const isMe = name.toLowerCase() === me.username.toLowerCase();
-    return `<span class="mention${isMe ? ' me' : ''}">@${name}</span>`;
-  });
-  html = html.replace(/#([a-z0-9-]+)/g, '<span class="mention">#$1</span>');
+  const links = [];
+  html = html.replace(/(https?:\/\/[^\s<]+)/g, (u) => { links.push(u); return `\u0000L${links.length - 1}\u0000`; });
   html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
-  html = html.replace(/(https?:\/\/[^\s<]+)/g, (u) => `<a href="${u}" target="_blank" rel="noopener">${u}</a>`);
+  html = html.replace(/@([a-zA-Z0-9._]+)/g, (mt, name) => {
+    const u = userByName(name);
+    const isMe = u ? u.id === me.id : (name.toLowerCase() === (me.username || '').toLowerCase());
+    const uidAttr = u ? ` data-uid="${u.id}"` : '';
+    return `<span class="mention${isMe ? ' me' : ''}"${uidAttr}>@${name}</span>`;
+  });
+  html = html.replace(/(^|[\s(])#([a-z0-9-]+)/g, '$1<span class="mention" data-channel="$2">#$2</span>');
+  html = html.replace(/\u0000L(\d+)\u0000/g, (mt, i) => `<a href="${links[i]}" target="_blank" rel="noopener">${links[i]}</a>`);
   return html;
 }
 
@@ -736,7 +973,7 @@ function attachmentNode(m) {
   } else if (t.startsWith('audio/')) {
     wrap.innerHTML = `<audio src="${escapeHtml(url)}" controls style="width:320px"></audio>`;
   } else {
-    wrap.innerHTML = `<div class="file-card"><div class="fi">${icon('fa-file')}</div><div><a href="${escapeHtml(url)}" target="_blank" rel="noopener">${escapeHtml(m.attachment_name || 'file')}</a><div class="fsize">Click to download</div></div></div>`;
+    wrap.innerHTML = `<div class="file-card"><div class="fi">${icon('file')}</div><div><a href="${escapeHtml(url)}" target="_blank" rel="noopener">${escapeHtml(m.attachment_name || 'file')}</a><div class="fsize">Click to download</div></div></div>`;
   }
   return wrap;
 }
@@ -760,6 +997,16 @@ function embedNode(url) {
 function scrollToBottom() {
   const box = $('messages');
   box.scrollTop = box.scrollHeight;
+}
+
+function flashMessage(mid) {
+  const node = document.querySelector(`[data-mid="${mid}"]`);
+  if (!node) { toast('Original message is not loaded'); return; }
+  node.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  node.classList.remove('flash');
+  void node.offsetWidth;
+  node.classList.add('flash');
+  setTimeout(() => node.classList.remove('flash'), 1500);
 }
 
 function lightbox(url, type) {
@@ -792,9 +1039,13 @@ async function sendMessage() {
     payload.attachment_name = state.pendingAttachment.name;
     payload.attachment_type = state.pendingAttachment.type;
   }
+  if (state.replyTo) payload.reply_to_id = state.replyTo.id;
+
   input.value = '';
   autoGrow(input);
   clearAttachment();
+  setReplyTo(null);
+  closeMentionPop();
   try {
     if (t.kind === 'channel') await api('/api/channels/' + t.id + '/messages', { method: 'POST', body: JSON.stringify(payload) });
     else await api('/api/dms/' + t.id + '/messages', { method: 'POST', body: JSON.stringify(payload) });
@@ -830,10 +1081,93 @@ function renderTyping() {
   bar.innerHTML = `<span class="typing-dots"><span></span><span></span><span></span></span> ${label}\u2026`;
 }
 
+/* ---------------- Reply bar ---------------- */
+function setReplyTo(m) {
+  state.replyTo = m || null;
+  renderReplyBar();
+  if (m) { const i = $('message-input'); if (i) i.focus(); }
+}
+function renderReplyBar() {
+  const bar = $('reply-bar');
+  if (!bar) return;
+  const m = state.replyTo;
+  if (!m) { bar.classList.add('hidden'); $('composer-box').classList.remove('replying'); return; }
+  bar.classList.remove('hidden');
+  $('composer-box').classList.add('replying');
+  const name = m.author.display_name || m.author.username;
+  const txt = m.content ? m.content.slice(0, 120) : 'Attachment';
+  bar.innerHTML = `<span class="rb-text">Replying to <b>${escapeHtml(name)}</b> \u2014 ${escapeHtml(txt)}</span><button id="rb-cancel" title="Cancel Reply">${icon('xmark')}</button>`;
+  $('rb-cancel').addEventListener('click', () => setReplyTo(null));
+}
+
+/* ---------------- @ mention autocomplete ---------------- */
+function mentionCandidates() {
+  const map = {};
+  const add = (u) => { if (u && u.id) map[u.id] = u; };
+  if (state.members) state.members.forEach(add);
+  if (state.dm && state.dm.user) add(state.dm.user);
+  if (state.friends) state.friends.friends.forEach(add);
+  Object.values(state.usersCache).forEach(add);
+  return Object.values(map);
+}
+function updateMentionAutocomplete() {
+  const ta = $('message-input');
+  const caret = ta.selectionStart;
+  const before = ta.value.slice(0, caret);
+  const m = before.match(/(?:^|\s)@([a-zA-Z0-9._]{0,32})$/);
+  if (!m) { closeMentionPop(); return; }
+  const q = m[1].toLowerCase();
+  const start = caret - m[1].length - 1;
+  const cands = mentionCandidates().filter(u => {
+    const un = (u.username || '').toLowerCase();
+    const dn = (u.display_name || '').toLowerCase();
+    return !q || un.includes(q) || dn.includes(q);
+  }).sort((a, b) => {
+    const an = (a.username || '').toLowerCase().startsWith(q) ? 0 : 1;
+    const bn = (b.username || '').toLowerCase().startsWith(q) ? 0 : 1;
+    return an - bn;
+  }).slice(0, 8);
+  if (!cands.length) { closeMentionPop(); return; }
+  state.mention = { active: true, query: q, items: cands, sel: 0, start };
+  renderMentionPop();
+}
+function renderMentionPop() {
+  const old = $('mention-pop'); if (old) old.remove();
+  if (!state.mention.active) return;
+  const box = $('composer-box').getBoundingClientRect();
+  const pop = document.createElement('div');
+  pop.className = 'mention-pop';
+  pop.id = 'mention-pop';
+  pop.innerHTML = `<div class="mp-head">Members</div>` + state.mention.items.map((u, i) =>
+    `<div class="mp-item${i === state.mention.sel ? ' sel' : ''}" data-i="${i}">${avatarHTML(u, 24, u.status || 'offline')}<div><div class="mp-name">${escapeHtml(u.display_name || u.username)}</div><div class="mp-tag">#${u.discriminator}</div></div></div>`).join('');
+  document.body.appendChild(pop);
+  const ph = pop.offsetHeight;
+  pop.style.left = box.left + 'px';
+  pop.style.top = Math.max(8, box.top - ph - 8) + 'px';
+  pop.querySelectorAll('.mp-item').forEach(el => el.addEventListener('mousedown', (e) => { e.preventDefault(); insertMention(state.mention.items[+el.dataset.i]); }));
+}
+function insertMention(u) {
+  const ta = $('message-input');
+  const caret = ta.selectionStart;
+  const before = ta.value.slice(0, state.mention.start);
+  const after = ta.value.slice(caret);
+  const insert = '@' + u.username + ' ';
+  ta.value = before + insert + after;
+  const pos = (before + insert).length;
+  ta.setSelectionRange(pos, pos);
+  closeMentionPop();
+  ta.focus();
+  autoGrow(ta);
+}
+function closeMentionPop() {
+  const el = $('mention-pop'); if (el) el.remove();
+  state.mention.active = false;
+}
+
 /* ---------------- Attachments ---------------- */
 async function handleFile(file) {
   if (!file) return;
-  if (file.size > 25 * 1024 * 1024) { toast('File too large (max 25MB)', 'error'); return; }
+  if (file.size > 25 * 1024 * 1024) { toast('File is too large (maximum 25 MB)', 'error'); return; }
   const fd = new FormData();
   fd.append('file', file);
   toast('Uploading ' + file.name + '\u2026');
@@ -849,8 +1183,8 @@ function renderAttachmentPreview() {
   if (!a) { p.classList.add('hidden'); $('composer-box').classList.remove('attached'); return; }
   p.classList.remove('hidden');
   $('composer-box').classList.add('attached');
-  const thumb = (a.type || '').startsWith('image/') ? `<img src="${escapeHtml(a.url)}">` : `<div class="fi" style="width:48px;height:48px;border-radius:6px;background:#5865f2;display:grid;place-items:center;color:#fff">${icon('fa-file')}</div>`;
-  p.innerHTML = `${thumb}<span class="ap-name">${escapeHtml(a.name)}</span><button id="ap-remove">${icon('fa-xmark')}</button>`;
+  const thumb = (a.type || '').startsWith('image/') ? `<img src="${escapeHtml(a.url)}">` : `<div class="fi" style="width:48px;height:48px;border-radius:6px;background:#5865f2;display:grid;place-items:center;color:#fff">${icon('file')}</div>`;
+  p.innerHTML = `${thumb}<span class="ap-name">${escapeHtml(a.name)}</span><button id="ap-remove">${icon('xmark')}</button>`;
   $('ap-remove').addEventListener('click', clearAttachment);
 }
 function clearAttachment() {
@@ -869,17 +1203,14 @@ async function toggleReaction(mid, emoji) {
   } catch (e) { toast(e.message, 'error'); }
 }
 
-function openReactionPicker(anchor, mid) {
+function openReactionPickerAt(x, y, mid) {
   closePopovers();
-  const rect = anchor.getBoundingClientRect();
   const picker = document.createElement('div');
   picker.className = 'emoji-picker';
   picker.id = 'reaction-picker';
   picker.style.position = 'fixed';
-  picker.style.bottom = 'auto';
-  picker.style.right = 'auto';
-  picker.style.top = Math.min(rect.bottom + 8, window.innerHeight - 340) + 'px';
-  picker.style.left = Math.max(8, Math.min(rect.left - 140, window.innerWidth - 340)) + 'px';
+  picker.style.top = Math.max(8, Math.min(y, window.innerHeight - 340)) + 'px';
+  picker.style.left = Math.max(8, Math.min(x, window.innerWidth - 340)) + 'px';
   picker.innerHTML = `<h4>Add a reaction</h4><div class="emoji-grid">${EMOJIS.map(e => `<button data-e="${e}">${e}</button>`).join('')}</div>`;
   picker.querySelectorAll('button').forEach(b => b.addEventListener('click', () => { toggleReaction(mid, b.dataset.e); picker.remove(); }));
   document.body.appendChild(picker);
@@ -892,7 +1223,6 @@ function openEmojiPickerForInput() {
   picker.className = 'emoji-picker';
   picker.id = 'input-emoji-picker';
   picker.style.position = 'fixed';
-  picker.style.bottom = 'auto'; picker.style.right = 'auto';
   picker.style.top = Math.max(8, rect.top - 340) + 'px';
   picker.style.left = Math.max(8, rect.left - 280) + 'px';
   picker.innerHTML = `<h4>Emoji</h4><div class="emoji-grid">${EMOJIS.map(e => `<button data-e="${e}">${e}</button>`).join('')}</div>`;
@@ -904,11 +1234,13 @@ function openEmojiPickerForInput() {
 }
 
 function closePopovers() {
-  document.querySelectorAll('.emoji-picker, .context-menu, .dropdown-menu').forEach(el => el.remove());
+  document.querySelectorAll('.emoji-picker, .context-menu, .dropdown-menu, .notif-panel').forEach(el => el.remove());
+  closeMentionPop();
 }
 
 async function deleteMessage(mid) {
-  if (!confirm('Delete this message?')) return;
+  const ok = await confirmDialog({ title: 'Delete Message', body: 'Are you sure you want to delete this message? This cannot be undone.', confirmText: 'Delete', danger: true });
+  if (!ok) return;
   try {
     await api('/api/messages/' + mid, { method: 'DELETE' });
     const node = document.querySelector(`[data-mid="${mid}"]`);
@@ -917,13 +1249,13 @@ async function deleteMessage(mid) {
   } catch (e) { toast(e.message, 'error'); }
 }
 
-/* Small anchored dropdown used by the profile "more" button and the server header. */
+/* Small anchored dropdown used by the profile "more" button. */
 function dropdownMenu(anchor, items) {
   closePopovers();
   const menu = document.createElement('div');
   menu.className = 'dropdown-menu';
   const rect = anchor.getBoundingClientRect();
-  menu.innerHTML = items.map(it => `<button data-a="${it.action}"${it.danger ? ' class="danger"' : ''}>${it.icon ? icon(it.icon) + ' ' : ''}${escapeHtml(it.label)}</button>`).join('');
+  menu.innerHTML = items.map((it, i) => it.sep ? '<div class="ctx-sep"></div>' : `<button data-i="${i}"${it.danger ? ' class="danger"' : ''}>${it.icon ? icon(it.icon) : ''}<span>${escapeHtml(it.label)}</span></button>`).join('');
   document.body.appendChild(menu);
   const mw = menu.offsetWidth, mh = menu.offsetHeight;
   let left = rect.left;
@@ -934,10 +1266,152 @@ function dropdownMenu(anchor, items) {
   menu.style.top = Math.max(8, top) + 'px';
   menu.querySelectorAll('button').forEach(b => b.addEventListener('click', () => {
     menu.remove();
-    const item = items.find(x => x.action === b.dataset.a);
+    const item = items[+b.dataset.i];
     if (item && item.onClick) item.onClick();
   }));
   return menu;
+}
+
+/* ---------------- Context menu ---------------- */
+function showContextMenu(x, y, items) {
+  closePopovers();
+  const menu = document.createElement('div');
+  menu.className = 'context-menu';
+  menu.innerHTML = items.map((it, i) => it.sep ? '<div class="ctx-sep"></div>'
+    : `<button data-i="${i}"${it.danger ? ' class="danger"' : ''}>${it.icon ? icon(it.icon) : ''}<span>${escapeHtml(it.label)}</span></button>`).join('');
+  document.body.appendChild(menu);
+  const mw = menu.offsetWidth, mh = menu.offsetHeight;
+  menu.style.left = Math.max(8, Math.min(x, window.innerWidth - mw - 8)) + 'px';
+  menu.style.top = Math.max(8, Math.min(y, window.innerHeight - mh - 8)) + 'px';
+  menu.querySelectorAll('button').forEach(b => b.addEventListener('click', () => {
+    const it = items[+b.dataset.i];
+    menu.remove();
+    if (it && it.onClick) it.onClick();
+  }));
+}
+
+function openMessageContextMenu(x, y, m) {
+  const items = [
+    { label: 'Add Reaction', icon: 'smile-plus', onClick: () => openReactionPickerAt(x, y, m.id) },
+    { label: 'Reply', icon: 'reply', onClick: () => setReplyTo(m) },
+    { label: 'Copy Text', icon: 'copy', onClick: () => { navigator.clipboard.writeText(m.content || '').then(() => toast('Copied to clipboard', 'success')).catch(() => {}); } },
+    { label: 'Copy Message Link', icon: 'link', onClick: () => { navigator.clipboard.writeText(location.origin + '/app.html?msg=' + m.id).then(() => toast('Message link copied', 'success')).catch(() => {}); } }
+  ];
+  if (m.author.id === me.id) {
+    items.push({ sep: true });
+    items.push({ label: 'Delete Message', icon: 'trash', danger: true, onClick: () => deleteMessage(m.id) });
+  }
+  showContextMenu(x, y, items);
+}
+
+/* ============================================================
+   NOTIFICATIONS
+   ============================================================ */
+async function loadNotifications() {
+  try {
+    const { notifications, unread } = await api('/api/notifications');
+    state.notifications = notifications || [];
+    state.unread = unread || 0;
+    renderNotifBadge();
+  } catch (e) { /* ignore */ }
+}
+
+function renderNotifBadge() {
+  const b = $('notif-badge');
+  if (!b) return;
+  if (state.unread > 0) { b.classList.remove('hidden'); b.textContent = state.unread > 99 ? '99+' : state.unread; }
+  else b.classList.add('hidden');
+}
+
+function notifInfo(n) {
+  const d = n.data || {};
+  const u = d.user || (d.message && d.message.author);
+  const name = u ? (u.display_name || u.username) : 'Someone';
+  const where = d.kind === 'channel' ? `in #${d.channel_name || 'a channel'}` : (d.kind === 'dm' ? 'in a direct message' : '');
+  const preview = d.message && d.message.content ? d.message.content : '';
+  let ico = 'bell', plain = 'New notification', html = 'New notification';
+  if (n.type === 'friend_request') { ico = 'user-plus'; plain = `${name} sent you a friend request`; html = `<b>${escapeHtml(name)}</b> sent you a friend request`; }
+  else if (n.type === 'friend_accepted') { ico = 'user-check'; plain = `${name} accepted your friend request`; html = `<b>${escapeHtml(name)}</b> accepted your friend request`; }
+  else if (n.type === 'mention') { ico = 'at-sign'; plain = `${name} mentioned you ${where}`; html = `<b>${escapeHtml(name)}</b> mentioned you ${escapeHtml(where)}`; }
+  else if (n.type === 'reply') { ico = 'reply'; plain = `${name} replied to you ${where}`; html = `<b>${escapeHtml(name)}</b> replied to you ${escapeHtml(where)}`; }
+  return { ico, plain, html, preview, user: u, where };
+}
+
+function renderNotifList() {
+  const list = $('notif-list');
+  if (!list) return;
+  if (!state.notifications.length) {
+    list.innerHTML = `<div class="notif-empty"><div class="ne-ico">${icon('bell')}</div>No notifications yet.</div>`;
+    return;
+  }
+  list.innerHTML = state.notifications.map((n, i) => {
+    const info = notifInfo(n);
+    const ava = info.user ? avatarHTML(info.user, 36, info.user.status || 'offline') : `<div class="avatar" style="width:36px;height:36px;font-size:15px;background:var(--brand)">${icon('bell')}</div>`;
+    return `<div class="notif-item${n.read ? '' : ' unread'}" data-i="${i}">
+      <div class="ni-ava">${ava}</div>
+      <div class="ni-body">
+        <div class="ni-title">${info.html}</div>
+        ${info.preview ? `<div class="ni-preview">${escapeHtml(info.preview)}</div>` : ''}
+        <div class="ni-time">${formatTime(n.created_at)}</div>
+      </div>
+      <span class="ni-ico">${icon(info.ico)}</span>
+    </div>`;
+  }).join('');
+  list.querySelectorAll('.notif-item').forEach(el => el.addEventListener('click', () => {
+    const n = state.notifications[+el.dataset.i];
+    if (n) goToNotification(n);
+  }));
+}
+
+async function markAllRead() {
+  try { await api('/api/notifications/read', { method: 'POST' }); } catch (e) { /* ignore */ }
+  state.unread = 0;
+  state.notifications.forEach(n => { n.read = true; });
+  renderNotifBadge();
+  renderNotifList();
+}
+
+function openNotifPanel() {
+  const existing = $('notif-panel');
+  if (existing) { existing.remove(); return; }
+  closePopovers();
+  const panel = document.createElement('div');
+  panel.className = 'notif-panel';
+  panel.id = 'notif-panel';
+  panel.innerHTML = `<div class="np-head"><h4>Notifications</h4><button id="np-read">Mark all as read</button></div><div class="notif-list" id="notif-list"></div>`;
+  document.body.appendChild(panel);
+  const r = $('hdr-notifs').getBoundingClientRect();
+  panel.style.top = (r.bottom + 8) + 'px';
+  panel.style.left = Math.max(8, Math.min(r.right - 380, window.innerWidth - 388)) + 'px';
+  renderNotifList();
+  $('np-read').addEventListener('click', markAllRead);
+  if (state.unread > 0) {
+    api('/api/notifications/read', { method: 'POST' }).catch(() => {});
+    state.unread = 0;
+    renderNotifBadge();
+  }
+}
+
+async function goToNotification(n) {
+  const d = n.data || {};
+  const panel = $('notif-panel'); if (panel) panel.remove();
+  const u = d.user || (d.message && d.message.author);
+  if (n.type === 'friend_request' || n.type === 'friend_accepted') {
+    if (u) openProfile(u);
+    return;
+  }
+  try {
+    if (d.kind === 'channel' && d.server_id) {
+      await openServer(d.server_id);
+      await openChannel(d.channel_id);
+    } else if (d.kind === 'dm' && d.dm_id) {
+      await loadDMs();
+      const dm = state.dms.find(x => x.id === d.dm_id);
+      if (dm) await openDM(dm);
+    }
+    const mid = d.message && d.message.id;
+    if (mid) setTimeout(() => flashMessage(mid), 350);
+  } catch (e) { /* ignore */ }
 }
 
 /* ============================================================
@@ -949,18 +1423,16 @@ function openModal(html, opts = {}) {
   modal.className = opts.modalClass ? opts.modalClass : ('modal' + (opts.wide ? ' wide' : ''));
   modal.innerHTML = html;
   overlay.classList.remove('hidden');
+  hydrateIcons(modal);
 }
 function closeModal() { modalCloseGuard = null; $('modal-overlay').classList.add('hidden'); $('modal').innerHTML = ''; $('modal').className = 'modal'; }
 
-/* When set, this function runs instead of closing the modal. It lets a panel
-   (e.g. My Account) intercept the close and warn about unsaved changes. */
 let modalCloseGuard = null;
 function requestCloseModal() {
   if (typeof modalCloseGuard === 'function') { modalCloseGuard(); return; }
   closeModal();
 }
 
-/* Small "unsaved changes" confirmation shown above the settings modal. */
 function showUnsavedDialog({ onSave, onDiscard }) {
   const existing = $('confirm-overlay');
   if (existing) existing.remove();
@@ -969,7 +1441,7 @@ function showUnsavedDialog({ onSave, onDiscard }) {
   wrap.id = 'confirm-overlay';
   wrap.innerHTML = `
     <div class="confirm-box">
-      <h3>Careful — you have unsaved changes!</h3>
+      <h3>Careful \u2014 you have unsaved changes!</h3>
       <p>Would you like to save your changes before leaving?</p>
       <div class="confirm-actions">
         <button class="btn" id="cu-save">Save Changes</button>
@@ -983,7 +1455,7 @@ function showUnsavedDialog({ onSave, onDiscard }) {
   $('cu-discard').addEventListener('click', () => { close(); if (onDiscard) onDiscard(); });
   $('cu-save').addEventListener('click', async () => {
     const btn = $('cu-save');
-    btn.disabled = true; btn.textContent = 'Saving…';
+    btn.disabled = true; btn.textContent = 'Saving\u2026';
     let ok = false;
     try { ok = await (onSave ? onSave() : true); } catch (e) { ok = false; }
     if (ok) close(); else { btn.disabled = false; btn.textContent = 'Save Changes'; }
@@ -991,24 +1463,54 @@ function showUnsavedDialog({ onSave, onDiscard }) {
   wrap.addEventListener('click', (e) => { if (e.target === wrap) close(); });
 }
 
+/* ---------------- Dropzone helper ---------------- */
+function dropzoneHTML(id, label, sub) {
+  return `<div class="dropzone" id="${id}" data-label="${escapeHtml(label)}" data-sub="${escapeHtml(sub)}">
+    <div class="dz-ico">${icon('image')}</div>
+    <div class="dz-title">${escapeHtml(label)}</div>
+    <div class="dz-sub">${escapeHtml(sub)}</div>
+  </div>`;
+}
+function dzClear(dz) {
+  dz.classList.remove('has-preview');
+  dz.innerHTML = `<div class="dz-ico">${icon('image')}</div><div class="dz-title">${escapeHtml(dz.dataset.label)}</div><div class="dz-sub">${escapeHtml(dz.dataset.sub)}</div>`;
+}
+function dzSetPreview(dz, url, onClear) {
+  dz.classList.add('has-preview');
+  dz.innerHTML = `<img class="dz-preview" src="${escapeHtml(url)}" alt=""><button class="dz-clear" type="button">${icon('xmark')}</button>`;
+  dz.querySelector('.dz-clear').addEventListener('click', (e) => { e.stopPropagation(); dzClear(dz); if (onClear) onClear(); });
+}
+function wireDropzone(dz, input, onFile) {
+  dz.addEventListener('click', (e) => { if (e.target.closest('.dz-clear')) return; input.click(); });
+  dz.addEventListener('dragover', (e) => { e.preventDefault(); dz.classList.add('drag'); });
+  dz.addEventListener('dragleave', () => dz.classList.remove('drag'));
+  dz.addEventListener('drop', (e) => { e.preventDefault(); dz.classList.remove('drag'); const f = e.dataTransfer.files[0]; if (f) onFile(f); });
+  input.addEventListener('change', (e) => { const f = e.target.files[0]; if (f) onFile(f); e.target.value = ''; });
+}
+async function uploadImage(file) {
+  if (file.size > 25 * 1024 * 1024) throw new Error('Image is too large (maximum 25 MB)');
+  const fd = new FormData(); fd.append('file', file);
+  return api('/api/upload', { method: 'POST', body: fd });
+}
+
+/* ---------------- Create / join server ---------------- */
 function openCreateServer() {
   openModal(`
     <h3>Create a Server</h3>
     <p class="msub">Your server is where you and your friends hang out. Make yours and start talking.</p>
     <div class="field"><label>Server Name <span class="req">*</span></label>
       <input id="cs-name" placeholder="My Server" maxlength="40"></div>
-    <div class="field"><label>Server Icon (optional)</label>
-      <input type="file" id="cs-icon-file" accept="image/*">
-      <div class="hint">Upload an image to use as your server icon.</div></div>
+    <div class="field"><label>Server Icon <span style="color:var(--text-muted);text-transform:none;font-weight:500">(optional)</span></label>
+      ${dropzoneHTML('cs-icon-dz', 'Upload Image', 'PNG, JPG or GIF \u2014 up to 25 MB')}
+      <input type="file" id="cs-icon-file" accept="image/*" class="hidden"></div>
     <div class="modal-actions">
       <button class="btn secondary" id="cs-cancel">Cancel</button>
       <button class="btn" id="cs-create">Create Server</button>
     </div>`);
   let iconUrl = null;
-  $('cs-icon-file').addEventListener('change', async (e) => {
-    const f = e.target.files[0]; if (!f) return;
-    const fd = new FormData(); fd.append('file', f);
-    try { const d = await api('/api/upload', { method: 'POST', body: fd }); iconUrl = d.url; toast('Icon uploaded', 'success'); }
+  const dz = $('cs-icon-dz');
+  wireDropzone(dz, $('cs-icon-file'), async (f) => {
+    try { const d = await uploadImage(f); iconUrl = d.url; dzSetPreview(dz, d.url, () => { iconUrl = null; }); toast('Icon ready', 'success'); }
     catch (err) { toast(err.message, 'error'); }
   });
   $('cs-cancel').addEventListener('click', closeModal);
@@ -1114,7 +1616,7 @@ async function startDM(userId) {
 }
 
 /* ============================================================
-   PROFILE MODAL (three-panel, mirrors the reference layout)
+   PROFILE MODALS
    ============================================================ */
 async function openProfile(user, opts = {}) {
   const isMe = user.id === me.id;
@@ -1135,7 +1637,7 @@ async function openProfile(user, opts = {}) {
   return renderOtherProfile(user, { relationship, mutualServers, mutualFriends, note });
 }
 
-/* ---------- Your own profile (unchanged three-panel feel, cleaned up) ---------- */
+/* ---------- Your own profile ---------- */
 function renderOwnProfile(user) {
   const displayName = user.display_name || user.username;
   const bannerColor = user.banner_color || user.accent_color || '#5865F2';
@@ -1147,8 +1649,8 @@ function renderOwnProfile(user) {
 
   openModal(`
     <div class="profile-topbar">
-      <div class="pt-title">${icon('fa-id-badge')} Your Profile</div>
-      <button class="pt-close" id="pf-x">${icon('fa-xmark')}</button>
+      <div class="pt-title">${icon('id-badge')} Your Profile</div>
+      <button class="pt-close" id="pf-x">${icon('xmark')}</button>
     </div>
     <div class="profile-body-grid">
       <div class="profile-nav">
@@ -1173,11 +1675,9 @@ function renderOwnProfile(user) {
       </div>
 
       <div class="profile-content">
-        <div class="profile-tabs">
-          <div class="profile-tab active">Board</div>
-        </div>
+        <div class="profile-tabs"><div class="profile-tab active">Board</div></div>
         <div class="profile-hero" style="${bannerStyle}">
-          <button class="hero-edit" id="pf-banner">${icon('fa-image')} Change Banner</button>
+          <button class="hero-edit" id="pf-banner">${icon('image')} Change Banner</button>
         </div>
         <div class="profile-idcard">
           <div class="pic-avatar">${avatarHTML(user, 96, user.status || 'offline')}</div>
@@ -1195,10 +1695,6 @@ function renderOwnProfile(user) {
           <h5>About Me</h5>
           <p>${escapeHtml(user.bio || 'You have not written a description yet.')}</p>
         </div>
-        <div class="profile-section-block">
-          <h5>Note</h5>
-          <div class="profile-note"><span>${icon('fa-note-sticky')} Add a note</span><span class="pn-right">Private to only</span></div>
-        </div>
       </div>
     </div>`, { modalClass: 'profile-modal' });
 
@@ -1208,7 +1704,7 @@ function renderOwnProfile(user) {
   $('pf-share').addEventListener('click', async () => {
     const link = location.origin + '/app.html';
     try { await navigator.clipboard.writeText(link); toast('Profile link copied', 'success'); }
-    catch (e) { prompt('Copy your profile link:', link); }
+    catch (e) { promptDialog({ title: 'Share Profile', body: 'Copy your profile link below.', label: 'Profile link', value: link, confirmText: 'Done' }); }
   });
   document.querySelectorAll('#pf-swatches .pnav-swatch').forEach(sw => {
     sw.addEventListener('click', async () => {
@@ -1227,7 +1723,7 @@ function renderOwnProfile(user) {
   });
 }
 
-/* ---------- Someone else's profile (matches the reference layout) ---------- */
+/* ---------- Someone else's profile (banner sits on top of the avatar) ---------- */
 function renderOtherProfile(user, ctx) {
   const displayName = user.display_name || user.username;
   const accountCreated = new Date(user.created_at).toLocaleDateString([], { year: 'numeric', month: 'short', day: 'numeric' });
@@ -1236,25 +1732,29 @@ function renderOtherProfile(user, ctx) {
   const mutualFriends = ctx.mutualFriends || [];
   const note = ctx.note || '';
 
+  const bannerStyle = user.banner_url
+    ? `background-image:url('${escapeHtml(user.banner_url)}')`
+    : `background:${user.banner_color || user.accent_color || '#5865F2'}`;
+
   let addBtn;
-  if (rel === 'friends') addBtn = `<button class="op-add friends" id="pf-add">${icon('fa-check')} <span>Friends</span></button>`;
-  else if (rel === 'pending_outgoing') addBtn = `<button class="op-add pending" id="pf-add">${icon('fa-clock')} <span>Request Sent</span></button>`;
-  else if (rel === 'pending_incoming') addBtn = `<button class="op-add accept" id="pf-add">${icon('fa-user-check')} <span>Accept Request</span></button>`;
-  else if (rel === 'blocked') addBtn = `<button class="op-add blocked" id="pf-add" disabled>${icon('fa-ban')} <span>Blocked</span></button>`;
-  else addBtn = `<button class="op-add" id="pf-add">${icon('fa-user-plus')} <span>Add Friend</span></button>`;
+  if (rel === 'friends') addBtn = `<button class="op-add friends" id="pf-add">${icon('check')} <span>Friends</span></button>`;
+  else if (rel === 'pending_outgoing') addBtn = `<button class="op-add pending" id="pf-add">${icon('clock')} <span>Request Sent</span></button>`;
+  else if (rel === 'pending_incoming') addBtn = `<button class="op-add accept" id="pf-add">${icon('user-check')} <span>Accept Request</span></button>`;
+  else if (rel === 'blocked') addBtn = `<button class="op-add blocked" id="pf-add" disabled>${icon('ban')} <span>Blocked</span></button>`;
+  else addBtn = `<button class="op-add" id="pf-add">${icon('user-plus')} <span>Add Friend</span></button>`;
 
   const moreItems = [];
-  if (rel === 'friends') moreItems.push({ action: 'remove', label: 'Remove Friend', icon: 'fa-user-minus', danger: true });
-  if (rel === 'pending_outgoing') moreItems.push({ action: 'cancel', label: 'Cancel Request', icon: 'fa-xmark' });
-  if (rel === 'pending_incoming') moreItems.push({ action: 'accept', label: 'Accept Request', icon: 'fa-check' });
-  if (rel === 'blocked') moreItems.push({ action: 'unblock', label: 'Unblock', icon: 'fa-unlock' });
-  else moreItems.push({ action: 'block', label: 'Block', icon: 'fa-ban', danger: true });
-  moreItems.push({ action: 'dm', label: 'Message', icon: 'fa-comment' });
+  if (rel === 'friends') moreItems.push({ action: 'remove', label: 'Remove Friend', icon: 'user-minus', danger: true });
+  if (rel === 'pending_outgoing') moreItems.push({ action: 'cancel', label: 'Cancel Request', icon: 'xmark' });
+  if (rel === 'pending_incoming') moreItems.push({ action: 'accept', label: 'Accept Request', icon: 'check' });
+  if (rel === 'blocked') moreItems.push({ action: 'unblock', label: 'Unblock', icon: 'unlock' });
+  else moreItems.push({ action: 'block', label: 'Block', icon: 'ban', danger: true });
+  moreItems.push({ action: 'dm', label: 'Message', icon: 'comment' });
 
   openModal(`
-    <div class="profile-topbar">
-      <div class="pt-title">${icon('fa-id-badge')} ${escapeHtml(displayName)}</div>
-      <button class="pt-close" id="pf-x">${icon('fa-xmark')}</button>
+    <div class="oprofile-banner" style="${bannerStyle}">
+      <button class="ob-close" id="pf-x">${icon('xmark')}</button>
+      <div class="ob-name">${escapeHtml(displayName)}</div>
     </div>
     <div class="oprofile-body">
       <div class="oprofile-left">
@@ -1263,16 +1763,16 @@ function renderOtherProfile(user, ctx) {
         <div class="op-sub">${escapeHtml(user.custom_status || fullTag(user))}</div>
         <div class="op-actions">
           ${addBtn}
-          <button class="op-more" id="pf-more" title="More Options">${icon('fa-ellipsis-vertical')}</button>
+          <button class="op-more" id="pf-more" title="More Options">${icon('ellipsis-vertical')}</button>
         </div>
         <div class="op-section">
-          <div class="op-label">${icon('fa-calendar-days')} Member Since</div>
+          <div class="op-label">${icon('calendar-days')} Member Since</div>
           <div class="op-dates"><div class="op-date">${accountCreated}</div></div>
         </div>
         <div class="op-section">
-          <div class="op-label">${icon('fa-note-sticky')} Note</div>
+          <div class="op-label">${icon('note')} Note</div>
           <div class="op-note" id="pf-note">
-            ${note ? `<div class="op-note-text">${escapeHtml(note)}</div>` : `<div class="op-note-empty">${icon('fa-plus')} Click to add a note</div>`}
+            ${note ? `<div class="op-note-text">${escapeHtml(note)}</div>` : `<div class="op-note-empty">${icon('plus')} Click to add a note</div>`}
             <div class="op-note-hint">Note only visible to you</div>
           </div>
         </div>
@@ -1285,7 +1785,7 @@ function renderOtherProfile(user, ctx) {
         </div>
         <div class="op-content" id="op-content"></div>
         <div class="op-footer">
-          <button class="op-message" id="pf-dm">${icon('fa-comment')} Message</button>
+          <button class="op-message" id="pf-dm">${icon('comment')} Message</button>
         </div>
       </div>
     </div>`, { modalClass: 'oprofile-modal' });
@@ -1295,13 +1795,13 @@ function renderOtherProfile(user, ctx) {
     if (tab === 'friends') {
       content.innerHTML = mutualFriends.length
         ? mutualFriends.map(u => `<div class="op-list-row">${avatarHTML(u, 32, u.status || 'offline')}<div><div class="olr-name">${escapeHtml(u.display_name || u.username)}</div><div class="olr-tag">${escapeHtml(fullTag(u))}</div></div></div>`).join('')
-        : `<div class="op-empty"><div class="op-empty-ico">${icon('fa-user-group')}</div><h4>No Mutual Friends</h4><p>You and ${escapeHtml(displayName)} do not have any friends in common.</p></div>`;
+        : `<div class="op-empty"><div class="op-empty-ico">${icon('user-group')}</div><h4>No Mutual Friends</h4><p>You and ${escapeHtml(displayName)} do not have any friends in common.</p></div>`;
     } else if (tab === 'servers') {
       content.innerHTML = mutualServers.length
         ? mutualServers.map(s => `<div class="op-list-row"><div class="op-server-ico">${s.icon_url ? `<img src="${escapeHtml(s.icon_url)}" alt="">` : escapeHtml((s.name || '?')[0].toUpperCase())}</div><div><div class="olr-name">${escapeHtml(s.name)}</div><div class="olr-tag">Mutual Server</div></div></div>`).join('')
-        : `<div class="op-empty"><div class="op-empty-ico">${icon('fa-server')}</div><h4>No Mutual Servers</h4><p>You and ${escapeHtml(displayName)} are not in any servers together.</p></div>`;
+        : `<div class="op-empty"><div class="op-empty-ico">${icon('server')}</div><h4>No Mutual Servers</h4><p>You and ${escapeHtml(displayName)} are not in any servers together.</p></div>`;
     } else {
-      content.innerHTML = `<div class="op-empty"><div class="op-empty-ico">${icon('fa-ghost')}</div><h4>${escapeHtml(displayName)} doesn't have any activity to share here</h4><p>When they start playing a game or listening to music, it will show up here.</p></div>`;
+      content.innerHTML = `<div class="op-empty"><div class="op-empty-ico">${icon('ghost')}</div><h4>${escapeHtml(displayName)} doesn't have any activity to share here</h4><p>When they start playing a game or listening to music, it will show up here.</p></div>`;
     }
   };
   renderTab('activity');
@@ -1358,7 +1858,7 @@ function openNoteEditor(user, current) {
 }
 
 /* ============================================================
-   SETTINGS MODAL (Discord-style two-panel)
+   SETTINGS MODAL
    ============================================================ */
 const SETTINGS_NAV = [
   { cat: 'User Settings' },
@@ -1386,8 +1886,8 @@ function openSettings(section) {
   settingsSaveFn = null;
   const nav = SETTINGS_NAV.map(item => {
     if (item.cat) return `<div class="sn-cat">${item.cat}</div>`;
-    return `<div class="sn-item" data-sec="${item.id}">${item.label} <span class="chev">${icon('fa-chevron-right')}</span></div>`;
-  }).join('') + `<div class="sn-item sn-danger" id="sn-logout">Log Out</div>`;
+    return `<div class="sn-item" data-sec="${item.id}">${item.label} <span class="chev">${icon('chevron-right')}</span></div>`;
+  }).join('') + `<div class="sn-item sn-danger" id="sn-logout">${icon('log-out')} Log Out</div>`;
 
   openModal(`
     <div class="settings-body">
@@ -1413,7 +1913,7 @@ function openSettings(section) {
 
   const discardThen = (after) => {
     settingsDirty = false;
-    previewSelf();                 // revert any live preview back to saved values
+    previewSelf();
     if (after) after(); else closeModal();
   };
   const saveThen = async (after) => {
@@ -1428,10 +1928,7 @@ function openSettings(section) {
 
   modalCloseGuard = () => {
     if (!settingsDirty) { closeModal(); return; }
-    showUnsavedDialog({
-      onSave: () => saveThen(closeModal),
-      onDiscard: () => discardThen(closeModal)
-    });
+    showUnsavedDialog({ onSave: () => saveThen(closeModal), onDiscard: () => discardThen(closeModal) });
   };
 
   $('set-done').addEventListener('click', requestCloseModal);
@@ -1447,9 +1944,17 @@ function renderSettings(section) {
   document.querySelectorAll('#settings-nav .sn-item[data-sec]').forEach(el => el.classList.toggle('active', el.dataset.sec === section));
   const panel = $('settings-panel');
   panel.innerHTML = settingsPanelHTML(section);
+  hydrateIcons(panel);
   if (section === 'account') wireAccountPanel();
   if (section === 'profiles') wireProfilesPanel();
-  if (section === 'privacy' || section === 'appearance' || section === 'notifications') wireToggles();
+  if (section === 'privacy' || section === 'appearance' || section === 'notifications' || section === 'voice') wireToggles();
+  if (section === 'appearance') wireAppearance();
+  if (section === 'language') wireLanguage();
+}
+
+function toggleRow(key, title, desc) {
+  const on = setting(key);
+  return `<div class="set-row"><div><div class="sr-title">${escapeHtml(title)}</div><div class="sr-desc">${escapeHtml(desc)}</div></div><div class="toggle${on ? ' on' : ''}" data-toggle="${key}"></div></div>`;
 }
 
 function settingsPanelHTML(section) {
@@ -1476,11 +1981,11 @@ function settingsPanelHTML(section) {
         <div class="field"><label>About Me</label><textarea id="set-bio" maxlength="190" placeholder="Tell people about yourself">${escapeHtml(u.bio || '')}</textarea></div>
         <div class="field"><label>Profile Banner</label>
           <div class="banner-editor" id="banner-editor" style="${u.banner_url ? `background-image:url('${escapeHtml(u.banner_url)}')` : `background:${escapeHtml(u.banner_color || u.accent_color || '#5865F2')}`}">
-            <button class="banner-edit-btn" id="set-banner-file-btn">${icon('fa-image')} Upload Banner</button>
+            <button class="banner-edit-btn" id="set-banner-file-btn">${icon('image')} Upload Banner</button>
           </div>
           <input type="file" id="set-banner-file" accept="image/*" class="hidden">
           <div class="color-row" id="banner-color-row" style="margin-top:10px">${PALETTE.map(c => `<span class="swatch${(u.banner_color || '#5865F2').toLowerCase() === c.toLowerCase() ? ' sel' : ''}" data-color="${c}" style="background:${c}"></span>`).join('')}</div>
-          <div class="hint">Recommended size 600x240. Pick a color or upload an image.</div>
+          <div class="hint">Recommended size 600x240. Pick a color or upload an image (GIF supported, up to 25 MB).</div>
           <button class="btn secondary" id="set-banner-remove" style="margin-top:8px;padding:6px 12px;font-size:13px">Remove Banner</button>
         </div>
         <div class="field"><label>Accent Color</label>
@@ -1508,37 +2013,48 @@ function settingsPanelHTML(section) {
         <div class="modal-actions" style="justify-content:flex-start"><button class="btn" id="prof-save">Save Changes</button></div>`;
     case 'privacy':
       return `
-        <h4>Privacy & Safety</h4>
-        <div class="set-row"><div><div class="sr-title">Keep me safe</div><div class="sr-desc">Scan and blur media from unverified sources.</div></div><div class="toggle on" data-toggle></div></div>
-        <div class="set-row"><div><div class="sr-title">Allow direct messages from server members</div><div class="sr-desc">Members of servers you share can start a conversation with you.</div></div><div class="toggle on" data-toggle></div></div>
-        <div class="set-row"><div><div class="sr-title">Allow data personalisation</div><div class="sr-desc">Use my activity to improve recommendations.</div></div><div class="toggle" data-toggle></div></div>
-        <div class="set-row"><div><div class="sr-title">Show my read receipts</div><div class="sr-desc">Let others know when you have read their messages.</div></div><div class="toggle on" data-toggle></div></div>`;
+        <h4>Privacy &amp; Safety</h4>
+        ${toggleRow('safeMode', 'Keep me safe', 'Scan and blur media from unverified sources.')}
+        ${toggleRow('dmFromMembers', 'Allow direct messages from server members', 'Members of servers you share can start a conversation with you.')}
+        ${toggleRow('dataPersonalisation', 'Allow data personalisation', 'Use my activity to improve recommendations.')}
+        ${toggleRow('readReceipts', 'Show my read receipts', 'Let others know when you have read their messages.')}`;
     case 'apps':
-      return `<h4>Authorized Apps</h4><div class="empty-panel">${icon('fa-plug')}<h5>No authorized apps</h5><p>When you connect an application to your account, it will appear here.</p></div>`;
+      return `<h4>Authorized Apps</h4><div class="empty-panel"><div class="ep-ico">${icon('plug')}</div><h5>No authorized apps</h5><p>When you connect an application to your account, it will appear here.</p></div>`;
     case 'devices':
-      return `<h4>Devices</h4><div class="empty-panel">${icon('fa-mobile-screen')}<h5>No other devices</h5><p>You are only signed in on this device right now.</p></div>`;
+      return `<h4>Devices</h4><div class="empty-panel"><div class="ep-ico">${icon('mobile')}</div><h5>No other devices</h5><p>You are only signed in on this device right now.</p></div>`;
     case 'connections':
-      return `<h4>Connections</h4><div class="empty-panel">${icon('fa-link')}<h5>No connections</h5><p>Connect accounts such as GitHub or Twitch to display them on your profile.</p></div>`;
+      return `<h4>Connections</h4><div class="empty-panel"><div class="ep-ico">${icon('link')}</div><h5>No connections</h5><p>Connect accounts such as GitHub or Twitch to display them on your profile.</p></div>`;
     case 'appearance':
       return `
         <h4>Appearance</h4>
-        <div class="set-row"><div><div class="sr-title">Dark theme</div><div class="sr-desc">Crossroads is optimised for a dark interface.</div></div><div class="toggle on" data-toggle></div></div>
-        <div class="set-row"><div><div class="sr-title">Compact message display</div><div class="sr-desc">Reduce the spacing between messages.</div></div><div class="toggle" data-toggle></div></div>
-        <div class="set-row"><div><div class="sr-title">Show member list</div><div class="sr-desc">Display the member list beside channels.</div></div><div class="toggle on" data-toggle></div></div>`;
+        <div class="field"><label>Theme</label>
+          <div class="theme-grid" id="theme-grid">
+            ${themeCard('dark', 'Dark', ['#202225', '#2b2d31', '#313338'])}
+            ${themeCard('light', 'Light', ['#e3e5e8', '#f2f3f5', '#ffffff'])}
+          </div>
+        </div>
+        <div class="field"><label>Background Color</label>
+          <div class="theme-grid" id="bg-grid">
+            ${BG_COLORS.map(b => themeCard(b.id, b.label, [b.rail, b.side, b.main], true)).join('')}
+          </div>
+          <div class="hint">These background colors apply to the dark theme.</div>
+        </div>
+        ${toggleRow('compact', 'Compact message display', 'Reduce the spacing between messages.')}
+        ${toggleRow('showMembers', 'Show member list', 'Display the member list beside channels.')}`;
     case 'notifications':
       return `
         <h4>Notifications</h4>
-        <div class="set-row"><div><div class="sr-title">Enable desktop notifications</div><div class="sr-desc">Receive a notification when you are mentioned.</div></div><div class="toggle on" data-toggle></div></div>
-        <div class="set-row"><div><div class="sr-title">Notification sounds</div><div class="sr-desc">Play a sound for incoming messages.</div></div><div class="toggle on" data-toggle></div></div>
-        <div class="set-row"><div><div class="sr-title">Unread badge on app icon</div><div class="sr-desc">Show a badge for unread messages.</div></div><div class="toggle" data-toggle></div></div>`;
+        ${toggleRow('notifDesktop', 'Enable desktop notifications', 'Receive a notification when you are mentioned or messaged.')}
+        ${toggleRow('notifSounds', 'Notification sounds', 'Play a sound for incoming pings and messages.')}
+        ${toggleRow('notifBadge', 'Unread badge on app icon', 'Show a badge for unread messages.')}`;
     case 'voice':
       return `
-        <h4>Voice & Video</h4>
+        <h4>Voice &amp; Video</h4>
         <div class="field"><label>Input Device</label><select><option>Default</option><option>System Microphone</option></select></div>
         <div class="field"><label>Output Device</label><select><option>Default</option><option>System Speakers</option></select></div>
-        <div class="field"><label>Input Volume</label><input type="range" min="0" max="100" value="70" style="padding:0"></div>
-        <div class="set-row"><div><div class="sr-title">Echo cancellation</div><div class="sr-desc">Reduce echo picked up by your microphone.</div></div><div class="toggle on" data-toggle></div></div>
-        <div class="set-row"><div><div class="sr-title">Noise suppression</div><div class="sr-desc">Filter background noise during calls.</div></div><div class="toggle on" data-toggle></div></div>`;
+        <div class="field"><label>Input Volume</label><input type="range" id="voice-volume" min="0" max="100" value="${Number(setting('inputVolume')) || 70}" style="padding:0"></div>
+        ${toggleRow('echoCancel', 'Echo cancellation', 'Reduce echo picked up by your microphone.')}
+        ${toggleRow('noiseSuppress', 'Noise suppression', 'Filter background noise during calls.')}`;
     case 'keybinds':
       return `
         <h4>Keybinds</h4>
@@ -1551,11 +2067,27 @@ function settingsPanelHTML(section) {
       return `
         <h4>Language</h4>
         <div class="field"><label>Display Language</label>
-          <select><option>English, US</option><option>English, UK</option><option>Espa\u00f1ol</option><option>Fran\u00e7ais</option><option>Deutsch</option></select></div>
+          <select id="lang-select">
+            <option>English, US</option><option>English, UK</option><option>Espa\u00f1ol</option>
+            <option>Fran\u00e7ais</option><option>Deutsch</option>
+          </select></div>
         <p style="color:var(--text-muted);font-size:13px;line-height:1.5">Additional languages are being prepared and will appear here as they become available.</p>`;
     default:
       return `<h4>Settings</h4>`;
   }
+}
+
+function themeCard(id, label, colors, isBg) {
+  const sel = isBg ? (setting('bg') === id) : (setting('theme') === id);
+  const attr = isBg ? `data-bg="${id}"` : `data-theme="${id}"`;
+  return `<div class="theme-card${sel ? ' sel' : ''}" ${attr}>
+    <div class="tc-preview">
+      <div class="tc-rail" style="background:${colors[0]}"></div>
+      <div class="tc-side" style="background:${colors[1]}"></div>
+      <div class="tc-main" style="background:${colors[2]}"></div>
+    </div>
+    <div class="tc-label"><span>${escapeHtml(label)}</span><span class="tc-check">${icon('check')}</span></div>
+  </div>`;
 }
 
 function wireAccountPanel() {
@@ -1565,17 +2097,15 @@ function wireAccountPanel() {
 
   const markDirty = () => { settingsDirty = true; };
 
-  // ---- Avatar (real-time preview + saved on Save Changes) ----
   $('sa-upload').addEventListener('click', () => $('sa-file').click());
   $('sa-file').addEventListener('change', async (e) => {
     const f = e.target.files[0]; if (!f) return;
-    const fd = new FormData(); fd.append('file', f);
     try {
-      const d = await api('/api/upload', { method: 'POST', body: fd });
+      const d = await uploadImage(f);
       settingsUploads.avatar_url = d.url;
       previewSelf({ avatar_url: d.url });
       markDirty();
-      toast('Avatar ready — remember to save', 'success');
+      toast('Avatar ready \u2014 remember to save', 'success');
     } catch (err) { toast(err.message, 'error'); }
   });
   $('sa-remove').addEventListener('click', () => {
@@ -1584,12 +2114,9 @@ function wireAccountPanel() {
     markDirty();
   });
 
-  // ---- Profile banner (image + colour) ----
   let bannerColor = u.banner_color || '#5865F2';
   const editor = $('banner-editor');
   const paintBanner = () => {
-    // NOTE: set longhands (backgroundImage / backgroundColor) individually — assigning the
-    // `background` shorthand afterwards would reset and wipe the image we just set.
     if (settingsUploads.banner_url) {
       editor.style.backgroundImage = `url('${settingsUploads.banner_url}')`;
       editor.style.backgroundColor = 'transparent';
@@ -1602,11 +2129,10 @@ function wireAccountPanel() {
   $('set-banner-file-btn').addEventListener('click', () => $('set-banner-file').click());
   $('set-banner-file').addEventListener('change', async (e) => {
     const f = e.target.files[0]; if (!f) return;
-    const fd = new FormData(); fd.append('file', f);
     try {
-      const d = await api('/api/upload', { method: 'POST', body: fd });
+      const d = await uploadImage(f);
       settingsUploads.banner_url = d.url; paintBanner(); markDirty();
-      toast('Banner ready — remember to save', 'success');
+      toast('Banner ready \u2014 remember to save', 'success');
     } catch (err) { toast(err.message, 'error'); }
   });
   $('set-banner-remove').addEventListener('click', () => { settingsUploads.banner_url = null; paintBanner(); markDirty(); });
@@ -1617,7 +2143,6 @@ function wireAccountPanel() {
     paintBanner(); markDirty();
   }));
 
-  // ---- Accent colour ----
   let accent = u.accent_color || '#5865F2';
   document.querySelectorAll('#accent-row .swatch').forEach(sw => sw.addEventListener('click', () => {
     accent = sw.dataset.color;
@@ -1625,7 +2150,6 @@ function wireAccountPanel() {
     markDirty();
   }));
 
-  // ---- Username availability ----
   const unameInput = $('set-username');
   const hint = $('username-hint');
   let usernameOk = true;
@@ -1647,14 +2171,12 @@ function wireAccountPanel() {
     }, 350);
   });
 
-  // ---- Live preview for text fields ----
   $('set-display').addEventListener('input', () => { markDirty(); previewSelf({ display_name: $('set-display').value.trim() || null }); });
   $('set-pronouns').addEventListener('input', markDirty);
   $('set-custom').addEventListener('input', markDirty);
   $('set-bio').addEventListener('input', markDirty);
   $('set-status').addEventListener('change', () => { markDirty(); previewSelf({ status: $('set-status').value }); });
 
-  // ---- Save ----
   const doSave = async () => {
     const body = {
       display_name: $('set-display').value.trim() || null,
@@ -1676,7 +2198,7 @@ function wireAccountPanel() {
       const { user } = await api('/api/me', { method: 'PATCH', body: JSON.stringify(body) });
       me = user; localStorage.setItem('cr_user', JSON.stringify(me));
       settingsDirty = false;
-      previewSelf();            // refresh bottom-left panel + settings preview with saved values
+      previewSelf();
       renderRail(); renderMembers();
       toast('Profile updated', 'success');
       return true;
@@ -1708,7 +2230,34 @@ function wireProfilesPanel() {
 }
 
 function wireToggles() {
-  document.querySelectorAll('#settings-panel .toggle').forEach(t => t.addEventListener('click', () => t.classList.toggle('on')));
+  document.querySelectorAll('#settings-panel .toggle[data-toggle]').forEach(t => {
+    t.addEventListener('click', () => {
+      const key = t.dataset.toggle;
+      const val = !t.classList.contains('on');
+      t.classList.toggle('on', val);
+      saveSetting(key, val);
+    });
+  });
+}
+
+function wireAppearance() {
+  document.querySelectorAll('#theme-grid .theme-card').forEach(card => card.addEventListener('click', () => {
+    saveSetting('theme', card.dataset.theme);
+    document.querySelectorAll('#theme-grid .theme-card').forEach(c => c.classList.toggle('sel', c === card));
+  }));
+  document.querySelectorAll('#bg-grid .theme-card').forEach(card => card.addEventListener('click', () => {
+    saveSetting('bg', card.dataset.bg);
+    document.querySelectorAll('#bg-grid .theme-card').forEach(c => c.classList.toggle('sel', c === card));
+  }));
+}
+
+function wireLanguage() {
+  const sel = $('lang-select');
+  if (!sel) return;
+  sel.value = setting('language') || 'English, US';
+  sel.addEventListener('change', () => saveSetting('language', sel.value));
+  const vol = $('voice-volume');
+  if (vol) vol.addEventListener('change', () => saveSetting('inputVolume', Number(vol.value)));
 }
 
 /* ============================================================
@@ -1716,51 +2265,77 @@ function wireToggles() {
    ============================================================ */
 function serverMenu(e) {
   if (!state.server) return;
-  closePopovers();
-  const menu = document.createElement('div');
-  menu.className = 'context-menu';
   const rect = $('sidebar-header').getBoundingClientRect();
-  menu.style.left = rect.left + 'px';
-  menu.style.top = (rect.bottom + 4) + 'px';
   const isOwner = state.server.owner_id === me.id;
-  menu.innerHTML = `
-    <button data-a="invite">Invite People</button>
-    <button data-a="channel">Create Channel</button>
-    <button data-a="settings">Server Settings</button>
-    <button data-a="leave" class="danger">Leave Server</button>
-    ${isOwner ? '<button data-a="delete" class="danger">Delete Server</button>' : ''}`;
-  menu.querySelectorAll('button').forEach(b => b.addEventListener('click', async () => {
-    menu.remove();
-    const a = b.dataset.a;
-    if (a === 'invite') {
+  const items = [
+    { label: 'Invite People', icon: 'user-plus', onClick: async () => {
       const link = `${location.origin}/app.html?invite=${state.server.id}`;
       try { await navigator.clipboard.writeText(link); toast('Invite link copied', 'success'); }
-      catch (err) { prompt('Copy this invite link:', link); }
-    }
-    if (a === 'channel') openCreateChannel('text');
-    if (a === 'settings') openServerSettings();
-    if (a === 'leave') {
-      if (!confirm('Leave ' + state.server.name + '?')) return;
-      toast('Leaving servers is not available yet');
-    }
-    if (a === 'delete') {
-      if (!confirm('Delete ' + state.server.name + '? This cannot be undone.')) return;
-      toast('Deleting servers is not available yet');
-    }
-  }));
-  document.body.appendChild(menu);
+      catch (err) { promptDialog({ title: 'Invite People', body: 'Share this link to invite others.', label: 'Invite link', value: link, confirmText: 'Done' }); }
+    } },
+    { label: 'Create Channel', icon: 'plus', onClick: () => openCreateChannel('text') },
+    { label: 'Server Settings', icon: 'settings', onClick: openServerSettings }
+  ];
+  if (isOwner) items.push({ label: 'Delete Server', icon: 'trash', danger: true, onClick: () => deleteServer() });
+  else items.push({ label: 'Leave Server', icon: 'log-out', danger: true, onClick: () => leaveServer() });
+  showContextMenu(rect.left, rect.bottom + 4, items);
+}
+
+async function leaveServer() {
+  const ok = await confirmDialog({ title: 'Leave Server', body: `Are you sure you want to leave <b>${escapeHtml(state.server.name)}</b>? You will need a new invite to rejoin.`, confirmText: 'Leave Server', danger: true });
+  if (!ok) return;
+  try {
+    await api('/api/servers/' + state.server.id + '/leave', { method: 'POST' });
+    toast('You left ' + state.server.name, 'success');
+    await loadServers(); showHome();
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+async function deleteServer() {
+  const ok = await confirmDialog({ title: 'Delete Server', body: `This will permanently delete <b>${escapeHtml(state.server.name)}</b> and all of its channels and messages. This cannot be undone.`, confirmText: 'Delete Server', danger: true });
+  if (!ok) return;
+  try {
+    await api('/api/servers/' + state.server.id, { method: 'DELETE' });
+    toast('Server deleted', 'success');
+    await loadServers(); showHome();
+  } catch (e) { toast(e.message, 'error'); }
 }
 
 function openServerSettings() {
   const s = state.server;
+  const isOwner = s.owner_id === me.id;
   openModal(`
     <h3>Server Settings</h3>
     <p class="msub">${escapeHtml(s.name)}</p>
-    <div class="field"><label>Server Name</label><input value="${escapeHtml(s.name)}" disabled></div>
+    <div class="field"><label>Server Name</label>
+      <input id="ss-name" value="${escapeHtml(s.name)}" maxlength="40" ${isOwner ? '' : 'disabled'}></div>
+    <div class="field"><label>Server Icon</label>
+      ${dropzoneHTML('ss-icon-dz', 'Upload Image', 'PNG, JPG or GIF \u2014 up to 25 MB')}
+      <input type="file" id="ss-icon-file" accept="image/*" class="hidden"></div>
     <div class="field"><label>Invite Link</label><input value="${location.origin}/app.html?invite=${s.id}" readonly></div>
     <div class="field"><label>Members</label><input value="${state.members.length} members" disabled></div>
-    <div class="modal-actions"><button class="btn" id="ss-close">Done</button></div>`);
+    <div class="modal-actions">
+      <button class="btn secondary" id="ss-close">Done</button>
+      ${isOwner ? '<button class="btn" id="ss-save">Save Changes</button>' : ''}
+    </div>`);
+  let iconUrl = s.icon_url || null;
+  const dz = $('ss-icon-dz');
+  if (iconUrl) dzSetPreview(dz, iconUrl, () => { iconUrl = null; });
+  wireDropzone(dz, $('ss-icon-file'), async (f) => {
+    try { const d = await uploadImage(f); iconUrl = d.url; dzSetPreview(dz, d.url, () => { iconUrl = null; }); toast('Icon ready \u2014 remember to save', 'success'); }
+    catch (err) { toast(err.message, 'error'); }
+  });
   $('ss-close').addEventListener('click', closeModal);
+  if (isOwner) $('ss-save').addEventListener('click', async () => {
+    try {
+      const { server } = await api('/api/servers/' + s.id, { method: 'PATCH', body: JSON.stringify({ name: $('ss-name').value.trim(), icon_url: iconUrl }) });
+      state.server = server;
+      $('sidebar-name').textContent = server.name;
+      await loadServers();
+      closeModal();
+      toast('Server updated', 'success');
+    } catch (e) { toast(e.message, 'error'); }
+  });
 }
 
 /* ============================================================
@@ -1773,8 +2348,9 @@ function bindGlobalEvents() {
   $('sidebar-header').addEventListener('click', serverMenu);
   $('user-panel-me').addEventListener('click', () => openProfile(me));
   $('btn-settings').addEventListener('click', () => openSettings('account'));
-  $('btn-mic').addEventListener('click', () => toast('Voice settings are not available yet'));
-  $('hdr-members').addEventListener('click', () => { state.showMembers = !state.showMembers; renderMembers(); });
+  $('btn-mic').addEventListener('click', () => openSettings('voice'));
+  $('hdr-notifs').addEventListener('click', (e) => { e.stopPropagation(); openNotifPanel(); });
+  $('hdr-members').addEventListener('click', () => { saveSetting('showMembers', !state.showMembers); });
   $('hdr-pins').addEventListener('click', () => toast('Pinned messages are not available yet'));
   $('hdr-search').addEventListener('click', () => toast('Search is not available yet'));
   const ec = $('empty-create'); if (ec) ec.addEventListener('click', openCreateServer);
@@ -1783,10 +2359,18 @@ function bindGlobalEvents() {
   let typingSent = 0;
   input.addEventListener('input', () => {
     autoGrow(input);
+    updateMentionAutocomplete();
     const now = Date.now();
     if (now - typingSent > 2000) { typingSent = now; emitTyping(); }
   });
   input.addEventListener('keydown', (e) => {
+    if (state.mention.active) {
+      const len = state.mention.items.length;
+      if (e.key === 'ArrowDown') { e.preventDefault(); state.mention.sel = (state.mention.sel + 1) % len; renderMentionPop(); return; }
+      if (e.key === 'ArrowUp') { e.preventDefault(); state.mention.sel = (state.mention.sel - 1 + len) % len; renderMentionPop(); return; }
+      if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); insertMention(state.mention.items[state.mention.sel]); return; }
+      if (e.key === 'Escape') { e.preventDefault(); closeMentionPop(); return; }
+    }
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
   });
   $('send-btn').addEventListener('click', sendMessage);
@@ -1804,15 +2388,49 @@ function bindGlobalEvents() {
     for (const it of items) if (it.type.startsWith('image/')) { handleFile(it.getAsFile()); }
   });
 
+  /* Mentions inside messages: click to open a profile. */
+  $('messages').addEventListener('click', (e) => {
+    const men = e.target.closest('.mention');
+    if (!men) return;
+    if (men.dataset.uid) {
+      const u = state.usersCache[men.dataset.uid] || (me.id === men.dataset.uid ? me : null);
+      if (u) openProfile(u);
+    } else if (men.dataset.channel && state.channels) {
+      const c = state.channels.find(x => x.name === men.dataset.channel);
+      if (c) openChannel(c.id);
+    }
+  });
+
+  /* Disable the native right-click menu and show a custom one. */
+  document.addEventListener('contextmenu', (e) => {
+    e.preventDefault();
+    const msg = e.target.closest('.msg-group');
+    if (msg) {
+      const m = state.messages.find(x => x.id === msg.dataset.mid);
+      if (m) { openMessageContextMenu(e.clientX, e.clientY, m); return; }
+    }
+    showContextMenu(e.clientX, e.clientY, [
+      { label: 'Back', icon: 'chevron-left', onClick: () => history.back() },
+      { label: 'Reload', icon: 'refresh', onClick: () => location.reload() },
+      { sep: true },
+      { label: 'Select All', icon: 'check', onClick: () => { try { document.execCommand('selectAll'); } catch (err) {} } },
+      { label: 'Copy', icon: 'copy', onClick: () => { const s = String(window.getSelection()); if (s) navigator.clipboard.writeText(s).catch(() => {}); } }
+    ]);
+  });
+
   $('modal-overlay').addEventListener('click', (e) => { if (e.target.id === 'modal-overlay') requestCloseModal(); });
   document.addEventListener('click', (e) => {
-    if (!e.target.closest('.emoji-picker') && !e.target.closest('.context-menu') &&
-        !e.target.closest('.msg-toolbar') && !e.target.closest('#emoji-btn')) closePopovers();
+    if (!e.target.closest('.emoji-picker') && !e.target.closest('.context-menu') && !e.target.closest('.dropdown-menu') &&
+        !e.target.closest('.msg-toolbar') && !e.target.closest('#emoji-btn') && !e.target.closest('.notif-panel') &&
+        !e.target.closest('#hdr-notifs') && !e.target.closest('.mention-pop')) {
+      closePopovers();
+    }
   });
   document.addEventListener('keydown', (e) => {
     if (e.key !== 'Escape') return;
     const cu = $('confirm-overlay');
     if (cu) { cu.remove(); return; }
+    if ($('mention-pop')) { closeMentionPop(); return; }
     closePopovers();
     if (!$('modal-overlay').classList.contains('hidden')) requestCloseModal();
   });
@@ -1822,6 +2440,12 @@ function bindGlobalEvents() {
 async function handleInviteParam() {
   const params = new URLSearchParams(location.search);
   const invite = params.get('invite');
+  const msg = params.get('msg');
+  if (msg) {
+    history.replaceState({}, '', location.pathname);
+    setTimeout(() => flashMessage(msg), 500);
+    return;
+  }
   if (!invite) return;
   history.replaceState({}, '', location.pathname);
   if (state.servers.some(s => s.id === invite)) { openServer(invite); return; }

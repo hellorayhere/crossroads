@@ -112,6 +112,15 @@ CREATE TABLE IF NOT EXISTS notes (
   UNIQUE(owner_id, target_id)
 );
 
+CREATE TABLE IF NOT EXISTS notifications (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  type TEXT NOT NULL,
+  data TEXT DEFAULT '{}',
+  read INTEGER DEFAULT 0,
+  created_at INTEGER NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_messages_channel ON messages(channel_id);
 CREATE INDEX IF NOT EXISTS idx_messages_dm ON messages(dm_id);
 CREATE INDEX IF NOT EXISTS idx_reactions_message ON reactions(message_id);
@@ -119,6 +128,7 @@ CREATE INDEX IF NOT EXISTS idx_friendships_req ON friendships(requester_id);
 CREATE INDEX IF NOT EXISTS idx_friendships_add ON friendships(addressee_id);
 CREATE INDEX IF NOT EXISTS idx_blocks_blocker ON blocks(blocker_id);
 CREATE INDEX IF NOT EXISTS idx_notes_owner ON notes(owner_id);
+CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_id);
 `);
 
 /* ---------------- Migrations ----------------
@@ -136,12 +146,22 @@ function migrate() {
     display_name: 'TEXT',
     pronouns: "TEXT DEFAULT ''",
     custom_status: "TEXT DEFAULT ''",
-    banner_color: "TEXT DEFAULT '#5865F2'"
+    banner_color: "TEXT DEFAULT '#5865F2'",
+    settings: "TEXT DEFAULT '{}'"
   };
   for (const [col, def] of Object.entries(additions)) {
     if (!names.includes(col)) {
       db.exec(`ALTER TABLE users ADD COLUMN ${col} ${def}`);
     }
+  }
+
+  // 1b. Additive migrations for messages (replies + mentions). Never destructive.
+  const msgCols = db.prepare('PRAGMA table_info(messages)').all().map(c => c.name);
+  if (!msgCols.includes('reply_to_id')) {
+    try { db.exec('ALTER TABLE messages ADD COLUMN reply_to_id TEXT'); } catch (e) {}
+  }
+  if (!msgCols.includes('mentions')) {
+    try { db.exec("ALTER TABLE messages ADD COLUMN mentions TEXT DEFAULT '[]'"); } catch (e) {}
   }
 
   // 2. If email is still NOT NULL, rebuild the table so it becomes optional.
@@ -164,11 +184,12 @@ function migrate() {
         accent_color TEXT DEFAULT '#5865F2',
         bio TEXT DEFAULT '',
         status TEXT DEFAULT 'online',
+        settings TEXT DEFAULT '{}',
         created_at INTEGER NOT NULL,
         UNIQUE(username, discriminator)
       );
-      INSERT INTO users_new (id, username, discriminator, email, password_hash, display_name, pronouns, custom_status, banner_color, avatar, avatar_url, banner, banner_url, accent_color, bio, status, created_at)
-        SELECT id, username, discriminator, email, password_hash, display_name, pronouns, custom_status, banner_color, avatar, avatar_url, banner, banner_url, accent_color, bio, status, created_at FROM users;
+      INSERT INTO users_new (id, username, discriminator, email, password_hash, display_name, pronouns, custom_status, banner_color, avatar, avatar_url, banner, banner_url, accent_color, bio, status, settings, created_at)
+        SELECT id, username, discriminator, email, password_hash, display_name, pronouns, custom_status, banner_color, avatar, avatar_url, banner, banner_url, accent_color, bio, status, COALESCE(settings, '{}'), created_at FROM users;
       DROP TABLE users;
       ALTER TABLE users_new RENAME TO users;
     `);
