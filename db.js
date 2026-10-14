@@ -253,6 +253,10 @@ function migrate() {
   if (!msgCols.includes('pinned')) {
     try { db.exec('ALTER TABLE messages ADD COLUMN pinned INTEGER DEFAULT 0'); } catch (e) {}
   }
+  // 1b-3. Additive migration: store attachment byte size (for "2.4 MB" labels).
+  if (!msgCols.includes('attachment_size')) {
+    try { db.exec('ALTER TABLE messages ADD COLUMN attachment_size INTEGER'); } catch (e) {}
+  }
   // The pinned index must be created AFTER the column exists (safe for old DBs).
   try { db.exec('CREATE INDEX IF NOT EXISTS idx_messages_pinned ON messages(pinned)'); } catch (e) {}
 

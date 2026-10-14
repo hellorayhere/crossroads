@@ -1,39 +1,27 @@
-# Crossroads — Round 4 Task List
+# Crossroads — Round 5 Task List
 
-## 0. Recon & local setup
-- [x] Clone crossroads + crossroads-data repos
-- [x] Read auth flow, app.js, server.js, db.js, CSS
-- [x] Set up local instance (DB copy + npm install + run)
-- [x] Identify "shiny part" = blue glow (box-shadow) on .rail-item.active
+## 0. Recon
+- [x] Re-establish local instance (server + DB)
+- [x] Locate file upload / attachment rendering code
+- [x] Locate profile bio rendering (link colors)
+- [x] Locate upload button handler
+- [x] Locate message append/render (for animation)
 
-## 1. Fix sign-in flash bug
-- [x] Add synchronous redirect in index.html <head> when token exists (no auth-page flash)
+## 1. File attachment details (size MB/GB)
+- [x] Show human-readable file size on attachments (client)
+- [x] Ensure size available for received messages (server/db) if needed
 
-## 2. Fix bottom-left user panel popup bug
-- [x] Exclude .mini-profile / #user-panel-me from global click-to-close handler
+## 2. Bio links always blue
+- [x] Force link/invite URLs in bios to blue accent, unaffected by profile color
 
-## 3. Remove "shiny part" on servers
-- [x] Remove .rail-item.active box-shadow glow (both rules)
+## 3. Upload dropdown (Images / Videos & GIFs)
+- [x] Clicking upload shows menu: Images / Videos & GIFs
+- [x] Each opens file picker with proper accept filter
 
-## 4. Video embed redesign
-- [x] Sent video shows thumbnail + centered play button (per screenshot 1)
-- [x] Clicking play shows custom player w/ controls (per screenshot 2)
-- [x] CSS for video player
+## 4. Message text animation (typewriter)
+- [x] Sent messages reveal text character-by-character like the video
 
-## 5. Channel reordering (server owners/admins)
-- [x] Server: endpoint to persist channel order (PATCH /api/servers/:id/channels/order)
-- [x] Client: drag up/down reordering UI + context menu move up/down
-- [x] Socket sync to everyone (channels_update already wired)
-
-## 6. Search system
-- [x] Server: search endpoint (messages in channel/server/DMs)
-- [x] Client: search UI (replace "Search is not available yet")
-
-## 7. Voice channels
-- [x] Server: voice signaling over socket.io (join/leave/state/webrtc relay)
-- [x] Client: voice channel join UI, mute/unmute/deafen, smooth layout
-
-## 8. Test & deploy
-- [x] Test locally (all features)
-- [x] Commit + push to GitHub (hellorayhere/crossroads)
-- [x] Trigger Render deploy + confirm live, data preserved
+## 5. Test & deploy
+- [x] Test locally
+- [ ] Commit + push
+- [ ] Render deploy + verify live, data preserved

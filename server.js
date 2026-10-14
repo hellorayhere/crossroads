@@ -357,6 +357,7 @@ function replyPreviewOf(m) {
     attachment_url: orig.attachment_url,
     attachment_name: orig.attachment_name,
     attachment_type: orig.attachment_type,
+    attachment_size: orig.attachment_size || null,
     author: publicUser(author)
   };
 }
@@ -372,6 +373,7 @@ function messageWithMeta(m, currentUserId) {
     attachment_url: m.attachment_url,
     attachment_name: m.attachment_name,
     attachment_type: m.attachment_type,
+    attachment_size: m.attachment_size || null,
     created_at: m.created_at,
     edited_at: m.edited_at,
     reply_to_id: m.reply_to_id || null,
@@ -432,6 +434,7 @@ function messagesWithMeta(rows, currentUserId) {
     attachment_url: m.attachment_url,
     attachment_name: m.attachment_name,
     attachment_type: m.attachment_type,
+    attachment_size: m.attachment_size || null,
     created_at: m.created_at,
     edited_at: m.edited_at,
     reply_to_id: m.reply_to_id || null,
@@ -1301,14 +1304,14 @@ app.post('/api/channels/:id/messages', auth, (req, res) => {
   if (!ch) return res.status(404).json({ error: 'Channel not found' });
   const srv = getServerForUser(ch.server_id, req.user.id);
   if (!srv) return res.status(403).json({ error: 'Not a member of this server' });
-  const { content, attachment_url, attachment_name, attachment_type, reply_to_id } = req.body || {};
+  const { content, attachment_url, attachment_name, attachment_type, attachment_size, reply_to_id } = req.body || {};
   if ((!content || !content.trim()) && !attachment_url) return res.status(400).json({ error: 'Message cannot be empty' });
   const id = newId();
   const now = Date.now();
   const mentionIds = parseMentionIds(content).filter(uid => uid !== req.user.id);
-  db.prepare(`INSERT INTO messages (id, channel_id, user_id, content, attachment_url, attachment_name, attachment_type, created_at, reply_to_id, mentions)
-              VALUES (?,?,?,?,?,?,?,?,?,?)`)
-    .run(id, ch.id, req.user.id, (content || '').trim(), attachment_url || null, attachment_name || null, attachment_type || null, now, reply_to_id || null, JSON.stringify(mentionIds));
+  db.prepare(`INSERT INTO messages (id, channel_id, user_id, content, attachment_url, attachment_name, attachment_type, attachment_size, created_at, reply_to_id, mentions)
+              VALUES (?,?,?,?,?,?,?,?,?,?,?)`)
+    .run(id, ch.id, req.user.id, (content || '').trim(), attachment_url || null, attachment_name || null, attachment_type || null, Number.isFinite(attachment_size) ? attachment_size : null, now, reply_to_id || null, JSON.stringify(mentionIds));
   const m = db.prepare('SELECT * FROM messages WHERE id = ?').get(id);
   const full = messageWithMeta(m, req.user.id);
   io.to(`channel:${ch.id}`).emit('message', full);
@@ -1460,14 +1463,14 @@ app.get('/api/dms/:id/messages', auth, (req, res) => {
 app.post('/api/dms/:id/messages', auth, (req, res) => {
   const dm = db.prepare('SELECT * FROM dm_channels WHERE id = ?').get(req.params.id);
   if (!dm || (dm.user1_id !== req.user.id && dm.user2_id !== req.user.id)) return res.status(404).json({ error: 'DM not found' });
-  const { content, attachment_url, attachment_name, attachment_type, reply_to_id } = req.body || {};
+  const { content, attachment_url, attachment_name, attachment_type, attachment_size, reply_to_id } = req.body || {};
   if ((!content || !content.trim()) && !attachment_url) return res.status(400).json({ error: 'Message cannot be empty' });
   const id = newId();
   const now = Date.now();
   const mentionIds = parseMentionIds(content).filter(uid => uid !== req.user.id);
-  db.prepare(`INSERT INTO messages (id, dm_id, user_id, content, attachment_url, attachment_name, attachment_type, created_at, reply_to_id, mentions)
-              VALUES (?,?,?,?,?,?,?,?,?,?)`)
-    .run(id, dm.id, req.user.id, (content || '').trim(), attachment_url || null, attachment_name || null, attachment_type || null, now, reply_to_id || null, JSON.stringify(mentionIds));
+  db.prepare(`INSERT INTO messages (id, dm_id, user_id, content, attachment_url, attachment_name, attachment_type, attachment_size, created_at, reply_to_id, mentions)
+              VALUES (?,?,?,?,?,?,?,?,?,?,?)`)
+    .run(id, dm.id, req.user.id, (content || '').trim(), attachment_url || null, attachment_name || null, attachment_type || null, Number.isFinite(attachment_size) ? attachment_size : null, now, reply_to_id || null, JSON.stringify(mentionIds));
   const m = db.prepare('SELECT * FROM messages WHERE id = ?').get(id);
   const full = messageWithMeta(m, req.user.id);
   // A new message un-hides the conversation for everyone in it.

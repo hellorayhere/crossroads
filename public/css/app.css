@@ -1531,7 +1531,13 @@ body[data-theme="light"] .bio-link { color: #0066cc; }
 .profile-modal .profile-actions-row .pa.primary:hover { background: color-mix(in srgb, var(--accent) 74%, var(--accent-shade)); }
 .profile-modal .profile-section-block h5 { color: var(--accent-ink-2); }
 .profile-modal .profile-section-block p { color: var(--accent-ink); }
-.profile-modal .bio-link { color: var(--accent-ink); text-decoration: underline; }
+.profile-modal .bio-link { color: #4a9eff; text-decoration: underline; }
+/* Bio links stay the standard clickable blue in every profile view — they must
+   never inherit the profile's accent colour when the user changes it. */
+.oprofile-modal .bio-link { color: #4a9eff; }
+.profile-modal .bio-link:hover, .oprofile-modal .bio-link:hover { text-decoration: underline; }
+body[data-theme="light"] .profile-modal .bio-link,
+body[data-theme="light"] .oprofile-modal .bio-link { color: #0066cc; }
 
 /* ============================================================
    ROUND 4 — custom video player, channel reordering, search, voice
@@ -1693,3 +1699,28 @@ body[data-theme="light"] .bio-link { color: #0066cc; }
 .voice-panel .vp-act:hover { background: color-mix(in srgb, var(--sidebar-bg) 40%, #fff); }
 .voice-panel .vp-act.off { background: color-mix(in srgb, var(--red, #ed4245) 85%, transparent); color: #fff; }
 .voice-panel .vp-act .ic { width: 17px; height: 17px; }
+
+/* ============================================================
+   ROUND 5 — attachment sizes, upload menu, message typewriter
+   ============================================================ */
+
+/* ---------- Attachment size badges ---------- */
+.attachment.media, .attachment.video-attachment { position: relative; }
+.att-size {
+  position: absolute; right: 8px; bottom: 8px; z-index: 3;
+  background: rgba(0,0,0,.72); color: #fff; font-size: 11px; font-weight: 600;
+  padding: 2px 7px; border-radius: 6px; letter-spacing: .2px; pointer-events: none;
+  -webkit-backdrop-filter: blur(2px); backdrop-filter: blur(2px);
+}
+.attachment.video-attachment .att-size { top: 8px; bottom: auto; }
+.attachment .file-card .fc-meta { min-width: 0; }
+.attachment .file-card .fc-meta a { display: block; max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ap-size { display: inline-block; margin-left: 8px; color: var(--text-muted); font-size: 12px; font-weight: 600; }
+
+/* ---------- Message typewriter caret ---------- */
+.text-body .type-cursor {
+  display: inline-block; width: 2px; height: 1.05em; margin-left: 1px;
+  background: var(--text-normal); vertical-align: -2px;
+  animation: typeBlink .7s steps(1) infinite;
+}
+@keyframes typeBlink { 50% { opacity: 0; } }

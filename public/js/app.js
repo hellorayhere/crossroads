@@ -175,6 +175,7 @@ const ICONS = {
   'calendar-days': '<rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/>',
   'note': '<path d="M15.5 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V8.5L15.5 3z"/><path d="M15 3v6h6"/>',
   'image': '<rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/>',
+  'film': '<rect x="2" y="2" width="20" height="20" rx="2.18" ry="2.18"/><line x1="7" y1="2" x2="7" y2="22"/><line x1="17" y1="2" x2="17" y2="22"/><line x1="2" y1="12" x2="22" y2="12"/><line x1="2" y1="7" x2="7" y2="7"/><line x1="2" y1="17" x2="7" y2="17"/><line x1="17" y1="17" x2="22" y2="17"/><line x1="17" y1="7" x2="22" y2="7"/>',
   'crown': '<path d="M5 16L3 5l5.5 5L12 4l3.5 6L21 5l-2 11H5z"/><path d="M5 19h14"/>',
   'ghost': '<path d="M9 10h.01M15 10h.01M12 2a8 8 0 0 0-8 8v12l3-3 2.5 2.5L12 19l2.5 2.5L17 19l3 3V10a8 8 0 0 0-8-8z"/>',
   'server': '<rect x="2" y="2" width="20" height="8" rx="2" ry="2"/><rect x="2" y="14" width="20" height="8" rx="2" ry="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/>',
@@ -1814,7 +1815,7 @@ function messageNode(m, grouped, animate) {
       <button data-act="more" title="More">${icon('ellipsis-vertical')}</button>
     </div>`;
   node.innerHTML = `${toolbar}${gutter}<div class="body">${m.reply_to ? replyRefHTML(m.reply_to) : ''}${head}
-    <div class="text" data-content>${m.pinned ? `<span class="msg-pin" title="Pinned message">${icon('pin')}</span>` : ''}${formatContent(m.content)}</div>
+    <div class="text" data-content>${m.pinned ? `<span class="msg-pin" title="Pinned message">${icon('pin')}</span>` : ''}<span class="text-body">${formatContent(m.content)}</span></div>
     <div class="attachment-slot"></div>
     <div class="embed-slot"></div>
     <div class="reactions">${reactionsHTML(m.reactions)}</div>
@@ -1856,8 +1857,40 @@ function appendMessage(m) {
   if (!inner) { renderMessages(); return; }
   const prev = state.messages[state.messages.length - 2];
   const grouped = prev && prev.author && m.author && prev.author.id === m.author.id && (m.created_at - prev.created_at) < 5 * 60 * 1000 && !m.reply_to;
-  inner.appendChild(messageNode(m, grouped, true));
+  const node = messageNode(m, grouped, true);
+  inner.appendChild(node);
+  typewriterMessage(node, m);
   scrollToBottom();
+}
+
+/* Typewriter reveal for a freshly added message: the text types out
+   character-by-character (like the reference clip) with a blinking caret,
+   then settles into its fully formatted form. Long messages reveal in small
+   chunks so the whole animation stays around a second. */
+function typewriterMessage(node, m) {
+  if (!node || !m || !m.content) return;
+  if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  const body = node.querySelector('.text-body');
+  if (!body) return;
+  const raw = m.content;
+  if (raw.length > 800) return;                 /* don't animate novels */
+  const html = body.innerHTML;
+  body.textContent = '';
+  const cursor = document.createElement('span');
+  cursor.className = 'type-cursor';
+  body.appendChild(cursor);
+  const maxSteps = 55;
+  const chunk = Math.max(1, Math.ceil(raw.length / maxSteps));
+  const speed = raw.length <= maxSteps ? 22 : 15;
+  let i = 0;
+  const step = () => {
+    if (!body.isConnected) { body.innerHTML = html; return; }
+    if (i >= raw.length) { cursor.remove(); body.innerHTML = html; return; }
+    cursor.insertAdjacentText('beforebegin', raw.slice(i, i + chunk));
+    i += chunk;
+    setTimeout(step, speed);
+  };
+  step();
 }
 
 function userByName(name) {
@@ -2074,6 +2107,7 @@ function attachmentNode(m) {
   wrap.className = 'attachment';
   const t = (m.attachment_type || '').toLowerCase();
   const url = m.attachment_url;
+  const sizeText = fmtBytes(m.attachment_size);
   const isGif = t === 'image/gif' || /\.gif(\?|$)/i.test(url || '');
   if (t.startsWith('image/')) {
     /* Images and GIFs render as bare media directly under the message. */
@@ -2081,18 +2115,34 @@ function attachmentNode(m) {
     if (isGif) wrap.classList.add('gif');
     wrap.innerHTML = `<img src="${escapeHtml(url)}" alt="${escapeHtml(m.attachment_name || '')}" loading="lazy" decoding="async">`;
     wrap.querySelector('img').addEventListener('click', () => lightbox(url, 'image'));
+    if (sizeText) wrap.insertAdjacentHTML('beforeend', `<span class="att-size">${sizeText}</span>`);
   } else if (t.startsWith('video/')) {
     /* Videos show a poster frame with a centred play button; pressing play
        reveals a full custom control bar (seek, volume, fullscreen). */
     wrap.classList.add('video-attachment');
     wrap.appendChild(videoPlayerNode(url, m.attachment_name || ''));
+    if (sizeText) wrap.insertAdjacentHTML('beforeend', `<span class="att-size">${sizeText}</span>`);
   } else if (t.startsWith('audio/')) {
     wrap.classList.add('media');
     wrap.innerHTML = `<audio src="${escapeHtml(url)}" controls style="width:320px"></audio>`;
+    if (sizeText) wrap.insertAdjacentHTML('beforeend', `<span class="att-size">${sizeText}</span>`);
   } else {
-    wrap.innerHTML = `<div class="file-card"><div class="fi">${icon('file')}</div><div><a href="${escapeHtml(url)}" target="_blank" rel="noopener">${escapeHtml(m.attachment_name || 'file')}</a><div class="fsize">Click to download</div></div></div>`;
+    const meta = [sizeText, 'Click to download'].filter(Boolean).join(' \u2022 ');
+    wrap.innerHTML = `<div class="file-card"><div class="fi">${icon('file')}</div><div class="fc-meta"><a href="${escapeHtml(url)}" target="_blank" rel="noopener">${escapeHtml(m.attachment_name || 'file')}</a><div class="fsize">${escapeHtml(meta)}</div></div></div>`;
   }
   return wrap;
+}
+
+/* Human-readable byte size, e.g. 812 B, 314 KB, 2.4 MB, 1.1 GB. */
+function fmtBytes(n) {
+  if (n === null || n === undefined || n === '' || isNaN(n)) return '';
+  n = Number(n);
+  if (!isFinite(n) || n <= 0) return '';
+  if (n < 1024) return n + ' B';
+  const units = ['KB', 'MB', 'GB', 'TB'];
+  let i = -1;
+  do { n /= 1024; i++; } while (n >= 1024 && i < units.length - 1);
+  return (n < 10 ? n.toFixed(1) : Math.round(n)) + ' ' + units[i];
 }
 
 function embedNode(url) {
@@ -2242,6 +2292,7 @@ async function sendMessage() {
     payload.attachment_url = state.pendingAttachment.url;
     payload.attachment_name = state.pendingAttachment.name;
     payload.attachment_type = state.pendingAttachment.type;
+    payload.attachment_size = state.pendingAttachment.size;
   }
   if (state.replyTo) payload.reply_to_id = state.replyTo.id;
 
@@ -2369,6 +2420,14 @@ function closeMentionPop() {
 }
 
 /* ---------------- Attachments ---------------- */
+/* Open the OS file picker filtered to a given accept type. Used by the
+   "Images" / "Videos & GIFs" options in the upload menu. */
+function pickFile(accept) {
+  const inp = $('file-input');
+  if (!inp) return;
+  inp.setAttribute('accept', accept);
+  inp.click();
+}
 async function handleFile(file) {
   if (!file) return;
   if (file.size > 25 * 1024 * 1024) { toast('File is too large (maximum 25 MB)', 'error'); return; }
@@ -4930,7 +4989,14 @@ function bindGlobalEvents() {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
   });
   $('send-btn').addEventListener('click', sendMessage);
-  $('attach-btn').addEventListener('click', () => $('file-input').click());
+  $('attach-btn').addEventListener('click', (e) => {
+    e.stopPropagation();
+    const r = e.currentTarget.getBoundingClientRect();
+    showContextMenu(r.left, r.top - 104, [
+      { label: 'Images', icon: 'image', onClick: () => pickFile('image/*') },
+      { label: 'Videos & GIFs', icon: 'film', onClick: () => pickFile('video/*,image/gif') }
+    ]);
+  });
   $('emoji-btn').addEventListener('click', openEmojiPickerForInput);
   $('file-input').addEventListener('change', (e) => { handleFile(e.target.files[0]); e.target.value = ''; });
 
