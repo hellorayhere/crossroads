@@ -2422,7 +2422,7 @@ function bindGlobalEvents() {
   document.addEventListener('click', (e) => {
     if (!e.target.closest('.emoji-picker') && !e.target.closest('.context-menu') && !e.target.closest('.dropdown-menu') &&
         !e.target.closest('.msg-toolbar') && !e.target.closest('#emoji-btn') && !e.target.closest('.notif-panel') &&
-        !e.target.closest('#hdr-notifs') && !e.target.closest('.mention-pop')) {
+        !e.target.closest('#hdr-notifs') && !e.target.closest('.mention-pop') && !e.target.closest('#sidebar-header')) {
       closePopovers();
     }
   });
