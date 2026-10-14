@@ -617,6 +617,7 @@ function showHome() {
   renderRail();
   $('rail-home').classList.add('active');
   $('sidebar-name').textContent = t('Direct Messages');
+  syncSidebarBanner();
   $('chat-hash').style.display = 'none';
   $('chat-title').textContent = t('Direct Messages');
   $('chat-topic').textContent = '';
@@ -674,6 +675,7 @@ async function openDM(d) {
   renderRail();
   $('rail-home').classList.add('active');
   $('sidebar-name').textContent = 'Direct Messages';
+  syncSidebarBanner();
   renderDMList();
   $('chat-hash').style.display = 'none';
   $('chat-title').textContent = d.user.display_name || d.user.username;
@@ -750,6 +752,7 @@ async function openFriends() {
   renderRail();
   $('rail-home').classList.add('active');
   $('sidebar-name').textContent = 'Direct Messages';
+  syncSidebarBanner();
   $('chat-hash').style.display = 'none';
   $('chat-title').textContent = 'Friends';
   $('chat-topic').textContent = '';
@@ -761,12 +764,20 @@ async function openFriends() {
   animateView();
 }
 
-function emptyFriends(msg) { return `<div class="fr-empty">${msg}</div>`; }
+function emptyFriends(msg, ic) {
+  return `<div class="fr-empty"><div class="fr-empty-ic">${icon(ic || 'users')}</div><div class="fr-empty-txt">${msg}</div></div>`;
+}
 
 function friendRow(u, kind) {
-  const name = escapeHtml(u.display_name || u.username);
+  const raw = (u.display_name || u.username || '');
+  const name = escapeHtml(raw);
+  const disc = escapeHtml(String(u.discriminator == null ? '' : u.discriminator));
   const status = u.status === 'offline' ? 'Offline' : statusLabel(u.status);
   const statusClass = u.status || 'offline';
+  const sub = kind === 'incoming' ? 'Incoming request'
+            : kind === 'outgoing' ? 'Request sent'
+            : kind === 'blocked' ? 'Blocked'
+            : status;
   let actions = '';
   if (kind === 'friend') {
     actions = `<button class="fr-act" data-fr-msg="${u.id}" title="Message">${icon('comment')}</button>
@@ -779,11 +790,12 @@ function friendRow(u, kind) {
   } else if (kind === 'blocked') {
     actions = `<button class="fr-act ok" data-fr-act="unblock" data-uid="${u.id}" title="Unblock">${icon('unlock')}</button>`;
   }
-  return `<div class="fr-row" data-uid="${u.id}">
-    <div class="fr-avatar">${avatarHTML(u, 42, u.status || 'offline')}</div>
+  const always = kind === 'friend' ? '' : ' always';
+  return `<div class="fr-row ${statusClass}${always}" data-uid="${u.id}" data-name="${escapeHtml(raw.toLowerCase())}" data-tag="${disc}">
+    <div class="fr-avatar">${avatarHTML(u, 44, u.status || 'offline')}</div>
     <div class="fr-info">
-      <div class="fr-name">${name}<span class="fr-tag">#${u.discriminator}</span></div>
-      <div class="fr-status ${statusClass}"><span class="fr-dot"></span>${status}</div>
+      <div class="fr-name">${name}<span class="fr-tag">#${disc}</span></div>
+      <div class="fr-status ${statusClass}"><span class="fr-dot"></span>${sub}</div>
     </div>
     <div class="fr-actions">${actions}</div>
   </div>`;
@@ -801,8 +813,9 @@ function renderFriendsView() {
     blocked: f.blocked.length
   };
 
-  const navItem = (id, label, count) =>
+  const navItem = (id, label, count, ic) =>
     `<button class="fr-nav-item${tab === id ? ' active' : ''}" data-tab="${id}">
+       <span class="fr-nav-ic">${icon(ic)}</span>
        <span class="fr-nav-lbl">${label}</span>
        ${count ? `<span class="fr-nav-count">${count}</span>` : ''}
      </button>`;
@@ -830,34 +843,40 @@ function renderFriendsView() {
   } else if (tab === 'pending') {
     const inc = f.incoming.map(u => friendRow(u, 'incoming')).join('');
     const out = f.outgoing.map(u => friendRow(u, 'outgoing')).join('');
-    body = `<div class="fr-cat">Incoming \u2014 ${f.incoming.length}</div>${inc || emptyFriends('No incoming requests.')}
-            <div class="fr-cat">Outgoing \u2014 ${f.outgoing.length}</div>${out || emptyFriends('No outgoing requests.')}`;
+    body = `<div class="fr-cat">Incoming \u2014 ${f.incoming.length}</div>${inc || emptyFriends('No incoming requests.', 'user-plus')}
+            <div class="fr-cat">Outgoing \u2014 ${f.outgoing.length}</div>${out || emptyFriends('No outgoing requests.', 'clock')}`;
   } else if (tab === 'blocked') {
-    body = f.blocked.length ? f.blocked.map(u => friendRow(u, 'blocked')).join('') : emptyFriends('No blocked users.');
+    body = f.blocked.length ? f.blocked.map(u => friendRow(u, 'blocked')).join('') : emptyFriends('No blocked users.', 'ban');
   } else {
     let list = f.friends;
     if (tab === 'online') list = list.filter(x => x.status !== 'offline');
     body = list.length ? list.map(u => friendRow(u, 'friend')).join('')
-      : emptyFriends(tab === 'online' ? 'No one is online right now.' : 'No friends yet. Add some!');
+      : emptyFriends(tab === 'online' ? 'No one is online right now.' : 'No friends yet. Add some!', tab === 'online' ? 'clock' : 'user-plus');
   }
 
   const heading = HEADINGS[tab] || HEADINGS.all;
 
   box.innerHTML = `<div class="friends-view">
     <aside class="fr-nav">
-      <div class="fr-nav-head">${t('Friends')}</div>
-      <button class="fr-nav-add${tab === 'add' ? ' active' : ''}" data-tab="add">${icon('user-plus')} ${t('Add Friend')}</button>
+      <div class="fr-nav-head">
+        <span class="fr-nav-title">${t('Friends')}</span>
+        <span class="fr-nav-total">${counts.all}</span>
+      </div>
+      <button class="fr-nav-add${tab === 'add' ? ' active' : ''}" data-tab="add">${icon('user-plus')}<span>${t('Add Friend')}</span></button>
       <nav class="fr-nav-list">
-        ${navItem('online', t('Online'), counts.online)}
-        ${navItem('all', t('All'), counts.all)}
-        ${navItem('pending', t('Pending'), counts.pending)}
-        ${navItem('blocked', t('Blocked'), counts.blocked)}
+        ${navItem('online', t('Online'), counts.online, 'users')}
+        ${navItem('all', t('All'), counts.all, 'user-group')}
+        ${navItem('pending', t('Pending'), counts.pending, 'clock')}
+        ${navItem('blocked', t('Blocked'), counts.blocked, 'ban')}
       </nav>
     </aside>
     <section class="fr-main">
       <header class="fr-main-head">
-        <h3>${heading[0]}</h3>
-        <p>${heading[1]}</p>
+        <div class="fr-head-text">
+          <h3>${heading[0]}</h3>
+          <p>${heading[1]}</p>
+        </div>
+        ${tab !== 'add' ? `<label class="fr-search"><span class="fr-search-ic">${icon('search')}</span><input id="fr-filter" placeholder="Search ${heading[0].toLowerCase()}" autocomplete="off" spellcheck="false"></label>` : ''}
       </header>
       <div class="fr-body">${body}</div>
     </section>
@@ -871,6 +890,9 @@ function renderFriendsView() {
     btn.addEventListener('click', (e) => { e.stopPropagation(); friendAction(btn.dataset.frAct, btn.dataset.uid); }));
   box.querySelectorAll('[data-fr-msg]').forEach(btn =>
     btn.addEventListener('click', (e) => { e.stopPropagation(); startDM(btn.dataset.frMsg); }));
+
+  const filter = $('fr-filter');
+  if (filter) filter.addEventListener('input', () => filterFriendRows(filter.value));
 
   const ai = $('fr-add-input');
   if (ai) {
@@ -887,6 +909,15 @@ function renderFriendsView() {
       searchTimer = setTimeout(() => searchUsersForFriend(q), 250);
     });
   }
+}
+
+/* Client-side filter for the visible friend rows (name or tag). */
+function filterFriendRows(q) {
+  const query = (q || '').trim().toLowerCase();
+  document.querySelectorAll('.fr-body .fr-row').forEach(row => {
+    const hay = (row.dataset.name || '') + '#' + (row.dataset.tag || '');
+    row.style.display = (!query || hay.includes(query)) ? '' : 'none';
+  });
 }
 
 function relationshipOf(uid) {
@@ -1008,11 +1039,28 @@ async function openServer(id) {
   renderRail();
   $('rail-home').classList.remove('active');
   $('sidebar-name').textContent = data.server.name;
+  syncSidebarBanner(true);
   renderChannelList();
   renderMembers();
   const firstText = state.channels.find(c => c.type === 'text');
   if (firstText) openChannel(firstText.id);
   else { state.channel = null; renderEmptyChat('No text channels yet'); $('composer').classList.add('hidden'); }
+}
+
+/* Show the server's banner directly under the server name in the sidebar. */
+function syncSidebarBanner(animate) {
+  const el = $('sidebar-banner');
+  if (!el) return;
+  const s = state.server;
+  if (s && s.banner_url) {
+    el.style.backgroundImage = `url("${s.banner_url}")`;
+    el.classList.remove('hidden');
+    if (animate) { el.classList.remove('reveal'); void el.offsetWidth; el.classList.add('reveal'); }
+  } else {
+    el.style.backgroundImage = '';
+    el.classList.add('hidden');
+    el.classList.remove('reveal');
+  }
 }
 
 function renderChannelList() {
@@ -3313,6 +3361,7 @@ function renderServerTab(tab, s, isOwner) {
       const { server } = await api('/api/servers/' + s.id, { method: 'PATCH', body: JSON.stringify({ name: $('ss-name').value.trim(), description: $('ss-desc').value.trim(), icon_url: iconUrl, banner_url: bannerUrl }) });
       state.server = server;
       const sn = $('sidebar-name'); if (sn) sn.textContent = server.name;
+      syncSidebarBanner(true);
       await loadServers();
       toast('Server updated', 'success');
       renderServerTab('overview', server, isOwner);

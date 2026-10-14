@@ -1,29 +1,19 @@
-# Crossroads — Round 2 Task List
+# Crossroads — Round 3 Task List
 
-## 1. Auth: "Reset password" option under Create account
-- [x] Add reset link on login card
-- [x] Build reset flow UI + backend
-- [x] Wire in auth.js + server.js
-- [x] Verify in browser (link, form, validation, success, restore)
+## 1. Server banner shows under the server name (bug fix)
+- [x] Add banner strip in the channel sidebar, under the server name
+- [x] Render state.server.banner_url in the sidebar (not just in settings)
+- [x] Hide banner for DMs / Friends / home views
+- [x] Update live sidebar immediately after upload + save
+- [x] Verify locally (banner element renders at 86px with background image)
 
-## 2. Server create: better name/description placeholders (not plain white)
-- [x] Improve placeholder + input styling (name input was still white — fixed with .ss-overview selectors)
+## 2. Friends UI/layout — make it better (the one with the friend button)
+- [x] Redesign left nav (icons, header, counts, active accent)
+- [x] Add search/filter box in the main header
+- [x] Polish friend rows (status ring, hover-revealed actions)
+- [x] Verify locally across tabs (Online/All/Pending/Blocked/Add)
 
-## 3. Server banner shows under server name
-- [x] Render uploaded banner under server name
-
-## 4. "Join a Server" — add more details
-- [x] Enrich join-a-server panel
-
-## 5. File/GIF/video messages: remove outer embed
-- [x] Media sends under message without embed wrapper (files keep embed)
-
-## 6. Friend requests require # tag
-- [x] Enforce tag in add-friend input
-
-## 7. Friends layout revamp (unique, not basic/cartoony)
-- [x] Redesign Friends view (two-column nav + main)
-
-## 8. Deploy
-- [ ] Commit + push, verify Render redeploy + live site
-- [ ] Confirm data preserved
+## 3. Deploy
+- [ ] Commit + push
+- [ ] Trigger Render deploy + confirm live
+- [ ] Confirm data preserved (no wipes)
