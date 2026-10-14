@@ -1923,7 +1923,6 @@ function renderOtherProfile(user, ctx) {
   openModal(`
     <div class="oprofile-banner" style="${bannerStyle}">
       <button class="ob-close" id="pf-x">${icon('xmark')}</button>
-      <div class="ob-name">${escapeHtml(displayName)}</div>
     </div>
     <div class="oprofile-body">
       <div class="oprofile-left">
