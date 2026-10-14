@@ -72,6 +72,7 @@ CREATE TABLE IF NOT EXISTS server_members (
   server_id TEXT NOT NULL,
   user_id TEXT NOT NULL,
   joined_at INTEGER NOT NULL,
+  role TEXT DEFAULT 'member',
   PRIMARY KEY (server_id, user_id)
 );
 
@@ -202,6 +203,18 @@ function migrate() {
   if (!srvCols.includes('description')) {
     try { db.exec("ALTER TABLE servers ADD COLUMN description TEXT DEFAULT ''"); } catch (e) {}
   }
+
+  // 1d. Additive migration for server member roles (owner / admin / member).
+  const memCols = db.prepare('PRAGMA table_info(server_members)').all().map(c => c.name);
+  if (!memCols.includes('role')) {
+    try { db.exec("ALTER TABLE server_members ADD COLUMN role TEXT DEFAULT 'member'"); } catch (e) {}
+  }
+  // Backfill: make sure every server owner is marked as 'owner' (never destructive).
+  try {
+    db.exec(`UPDATE server_members SET role = 'owner'
+      WHERE (role IS NULL OR role = 'member')
+        AND EXISTS (SELECT 1 FROM servers s WHERE s.id = server_members.server_id AND s.owner_id = server_members.user_id)`);
+  } catch (e) {}
 
   // 2. If email is still NOT NULL, rebuild the table so it becomes optional.
   if (emailNotNull) {

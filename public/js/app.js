@@ -30,20 +30,26 @@ const state = {
   mention: { active: false, query: '', items: [], sel: 0, start: 0 }
 };
 
+/* Restore the locally-mirrored settings immediately so the theme, background and
+   other preferences are correct from the very first frame (before /api/settings
+   responds). The server value loaded in init() stays the source of truth. */
+try { Object.assign(state.settings, JSON.parse(localStorage.getItem('cr_settings') || '{}')); } catch (e) { /* ignore */ }
+
 /* Emoji set is used only for message content and reactions (a native chat feature). */
 const EMOJIS = ['\u{1F600}','\u{1F602}','\u{1F972}','\u{1F60D}','\u{1F60E}','\u{1F914}','\u{1F634}','\u{1F973}','\u{1F62D}','\u{1F621}','\u{1F44D}','\u{1F44E}','\u{1F44F}','\u{1F64F}','\u{1F525}','\u{1F4AF}','\u{2728}','\u{1F389}','\u{2764}\u{FE0F}','\u{1F49C}','\u{1F499}','\u{1F49A}','\u{1F63A}','\u{1F436}','\u{1F355}','\u{1F354}','\u{2615}','\u{1F3AE}','\u{1F3B5}','\u{1F680}','\u{26A1}','\u{1F31F}','\u{1F440}','\u{1F92F}','\u{1F605}','\u{1F64C}','\u{1F91D}','\u{1F4AA}','\u{1F9E0}','\u{1F984}'];
 
 /* Palette used for banner / accent selection. */
 const PALETTE = ['#5865F2','#3BA55D','#FAA81A','#ED4245','#EB459E','#9B59B6','#1ABC9C','#E67E22','#3498DB','#95A5A6','#2B2D31','#111214'];
 
-/* The six website background colours (dark theme). */
+/* The website background colours (dark theme). */
 const BG_COLORS = [
   { id: 'graphite', label: 'Graphite', rail: '#202225', side: '#2b2d31', main: '#313338' },
   { id: 'midnight', label: 'Midnight', rail: '#181b28', side: '#20232f', main: '#24283c' },
   { id: 'ocean',    label: 'Ocean',    rail: '#152026', side: '#1b272e', main: '#1f2d36' },
   { id: 'forest',   label: 'Forest',   rail: '#16211c', side: '#1c2a24', main: '#20302a' },
   { id: 'plum',     label: 'Plum',     rail: '#1e1827', side: '#262030', main: '#2b2238' },
-  { id: 'ember',    label: 'Ember',    rail: '#201814', side: '#2a1f1b', main: '#2f231f' }
+  { id: 'ember',    label: 'Ember',    rail: '#201814', side: '#2a1f1b', main: '#2f231f' },
+  { id: 'black',    label: 'Black',    rail: '#000000', side: '#050506', main: '#0d0d0f' }
 ];
 
 const SETTINGS_DEFAULTS = {
@@ -180,6 +186,13 @@ function avatarHTML(user, size = 40, status = null) {
 
 /* ---------------- Settings helpers ---------------- */
 function setting(key) { return state.settings[key] !== undefined ? state.settings[key] : SETTINGS_DEFAULTS[key]; }
+
+/* Mirror settings into localStorage so the saved theme/background can be
+   applied synchronously before the first paint (prevents the theme flash). */
+function mirrorSettingsLocal() {
+  try { localStorage.setItem('cr_settings', JSON.stringify(state.settings || {})); } catch (e) { /* ignore */ }
+}
+
 function applyTheme() {
   document.body.dataset.theme = setting('theme') || 'dark';
   document.body.dataset.bg = setting('bg') || 'graphite';
@@ -190,6 +203,7 @@ function applyTheme() {
 const saveTimers = {};
 function saveSetting(key, value) {
   state.settings[key] = value;
+  mirrorSettingsLocal();
   applyTheme();
   clearTimeout(saveTimers[key]);
   saveTimers[key] = setTimeout(() => {
@@ -363,9 +377,76 @@ function connectSocket() {
   socket.on('presence', (data) => {
     const u = state.usersCache[data.user_id];
     if (u) u.status = data.status;
-    const dot = document.querySelector(`[data-uid="${data.user_id}"] .status-dot`);
-    if (dot) dot.className = 'status-dot ' + data.status;
+    const mi = state.members.findIndex(m => m.id === data.user_id);
+    if (mi >= 0) state.members[mi].status = data.status;
+    state.dms.forEach(d => { if (d.user && d.user.id === data.user_id) d.user.status = data.status; });
+    if (me && data.user_id === me.id) { me.status = data.status; renderMe(); }
+    document.querySelectorAll(`[data-uid="${data.user_id}"] .status-dot`).forEach(dot => { dot.className = 'status-dot ' + data.status; });
+    if (state.server) renderMembers();
+    if (state.view === 'home') renderDMList();
     if (state.view === 'friends') renderFriendsView();
+    refreshMiniProfileStatus();
+  });
+  /* A user changed their avatar / banner / name / custom status: refresh every
+     surface that shows them, everywhere, in real time. */
+  socket.on('profile_update', (u) => {
+    if (!u || !u.id) return;
+    state.usersCache[u.id] = Object.assign({}, state.usersCache[u.id] || {}, u);
+    if (me && u.id === me.id) {
+      me = Object.assign({}, me, u);
+      localStorage.setItem('cr_user', JSON.stringify(me));
+      renderMe();
+    }
+    const mi = state.members.findIndex(m => m.id === u.id);
+    if (mi >= 0) state.members[mi] = Object.assign({}, state.members[mi], u);
+    state.dms.forEach(d => { if (d.user && d.user.id === u.id) d.user = Object.assign({}, d.user, u); });
+    state.messages.forEach(m => { if (m.author && m.author.id === u.id) m.author = Object.assign({}, m.author, u); });
+    if (state.friends) {
+      ['online', 'offline', 'pendingIn', 'pendingOut', 'all'].forEach(k => {
+        if (Array.isArray(state.friends[k])) state.friends[k].forEach(f => { if (f.id === u.id) Object.assign(f, u); });
+      });
+    }
+    refreshMessageAuthor(u);
+    if (state.server) renderMembers();
+    if (state.view === 'home') renderDMList();
+    if (state.view === 'friends') renderFriendsView();
+    refreshOpenProfile(u);
+    refreshMiniProfileUser(u);
+  });
+  /* Channel list changed on the server (created / renamed / deleted). */
+  socket.on('channels_update', (data) => {
+    if (!data || !state.server || data.server_id !== state.server.id) return;
+    state.channels = data.channels || [];
+    if (state.channel && !state.channels.some(c => c.id === state.channel.id)) {
+      const first = state.channels.find(c => c.type === 'text') || state.channels[0];
+      state.channel = null;
+      if (first) openChannel(first.id);
+      else { state.messages = []; renderEmptyChat('This server has no channels yet.'); }
+    } else if (state.channel) {
+      const c = state.channels.find(x => x.id === state.channel.id);
+      if (c) { state.channel = c; $('chat-title').textContent = c.name; $('chat-topic').textContent = c.topic || ''; }
+    }
+    renderChannelList();
+  });
+  /* Server name / icon / banner / description changed. */
+  socket.on('server_update', (s) => {
+    if (!s || !s.id) return;
+    const idx = state.servers.findIndex(x => x.id === s.id);
+    if (idx >= 0) state.servers[idx] = Object.assign({}, state.servers[idx], s);
+    if (state.server && state.server.id === s.id) {
+      state.server = Object.assign({}, state.server, s);
+      const sn = $('sidebar-name'); if (sn) sn.textContent = s.name;
+    }
+    renderRail();
+    const activeTab = document.querySelector('.ss-tab.active');
+    if (activeTab && activeTab.dataset.tab === 'overview' && state.server && state.server.id === s.id) {
+      renderServerTab('overview', state.server, state.server.owner_id === me.id);
+    }
+  });
+  /* Member roles changed: refresh the member list + open members tab. */
+  socket.on('server_members_update', (data) => {
+    if (!data || !state.server || data.server_id !== state.server.id) return;
+    reloadServerMembers();
   });
   socket.on('friend_update', (data) => {
     loadFriends();
@@ -493,6 +574,8 @@ async function openDM(d) {
   renderDMList();
   $('chat-hash').style.display = 'none';
   $('chat-title').textContent = d.user.display_name || d.user.username;
+  $('chat-title').style.cursor = 'pointer';
+  $('chat-title').onclick = () => openProfile(d.user);
   $('chat-topic').textContent = '';
   $('members').innerHTML = '';
   socket.emit('join_dm', d.id);
@@ -722,28 +805,33 @@ function renderChannelList() {
   list.innerHTML = '';
   const textChannels = state.channels.filter(c => c.type === 'text');
   const voiceChannels = state.channels.filter(c => c.type === 'voice');
+  const admin = amIAdmin();
 
   const tcat = document.createElement('div');
   tcat.className = 'channel-category';
   tcat.innerHTML = `${icon('caret-down')} Text Channels`;
   list.appendChild(tcat);
   for (const c of textChannels) list.appendChild(channelRow(c));
-  const tadd = document.createElement('div');
-  tadd.className = 'channel-add';
-  tadd.innerHTML = `${icon('plus')} Create Channel`;
-  tadd.addEventListener('click', () => openCreateChannel('text'));
-  list.appendChild(tadd);
+  if (admin) {
+    const tadd = document.createElement('div');
+    tadd.className = 'channel-add';
+    tadd.innerHTML = `${icon('plus')} Create Channel`;
+    tadd.addEventListener('click', () => openCreateChannel('text'));
+    list.appendChild(tadd);
+  }
 
   const vcat = document.createElement('div');
   vcat.className = 'channel-category';
   vcat.innerHTML = `${icon('caret-down')} Voice Channels`;
   list.appendChild(vcat);
   for (const c of voiceChannels) list.appendChild(channelRow(c));
-  const vadd = document.createElement('div');
-  vadd.className = 'channel-add';
-  vadd.innerHTML = `${icon('plus')} Create Channel`;
-  vadd.addEventListener('click', () => openCreateChannel('voice'));
-  list.appendChild(vadd);
+  if (admin) {
+    const vadd = document.createElement('div');
+    vadd.className = 'channel-add';
+    vadd.innerHTML = `${icon('plus')} Create Channel`;
+    vadd.addEventListener('click', () => openCreateChannel('voice'));
+    list.appendChild(vadd);
+  }
 }
 
 function channelRow(c) {
@@ -771,6 +859,8 @@ async function openChannel(cid) {
   $('chat-hash').style.display = '';
   $('chat-hash').innerHTML = icon('hash');
   $('chat-title').textContent = c.name;
+  $('chat-title').style.cursor = '';
+  $('chat-title').onclick = null;
   $('chat-topic').textContent = c.topic || '';
   const { messages } = await api('/api/channels/' + cid + '/messages');
   state.messages = messages;
@@ -882,6 +972,8 @@ function messageNode(m, grouped, animate) {
 
   const authorEl = node.querySelector('.author');
   if (authorEl) authorEl.addEventListener('click', () => openProfile(a));
+  const gutterAv = node.querySelector('.gutter .avatar');
+  if (gutterAv) { gutterAv.style.cursor = 'pointer'; gutterAv.addEventListener('click', () => openProfile(a)); }
 
   const jump = node.querySelector('.reply-ref');
   if (jump) jump.addEventListener('click', () => flashMessage(jump.dataset.jump));
@@ -1310,6 +1402,8 @@ function openEmojiPickerForInput() {
 
 function closePopovers() {
   document.querySelectorAll('.emoji-picker, .context-menu, .dropdown-menu, .notif-panel').forEach(el => el.remove());
+  closeMiniProfile();
+  closeCustomSelects();
   closeMentionPop();
 }
 
@@ -1695,6 +1789,7 @@ async function startDM(userId) {
    ============================================================ */
 async function openProfile(user, opts = {}) {
   const isMe = user.id === me.id;
+  state.openProfileId = user.id;
   let relationship = isMe ? 'self' : 'none';
   let mutualServers = [];
   let mutualFriends = [];
@@ -1721,21 +1816,22 @@ function renderOwnProfile(user) {
     : `background:${bannerColor}`;
   const memberSince = new Date(user.created_at).toLocaleDateString([], { year: 'numeric', month: 'long', day: 'numeric' });
   const swatches = PALETTE.map(c => `<span class="pnav-swatch${bannerColor.toLowerCase() === c.toLowerCase() ? ' sel' : ''}" data-color="${c}" style="background:${c}"></span>`).join('');
+  const statusColor = { online: '#23a55a', idle: '#f0b232', dnd: '#f23f43', offline: '#80848e' }[user.status || 'online'] || '#23a55a';
 
   openModal(`
     <div class="profile-topbar">
-      <div class="pt-title">${icon('id-badge')} Your Profile</div>
+      <div class="pt-title">Your Profile</div>
       <button class="pt-close" id="pf-x">${icon('xmark')}</button>
     </div>
     <div class="profile-body-grid">
       <div class="profile-nav">
         <div class="pnav-item">
-          <div class="pnav-label">Avatar &amp; Description</div>
+          <div class="pnav-label">Preview</div>
           <div class="pnav-preview">
-            <div class="pnav-avatar">${avatarHTML(user, 40)}</div>
+            <div class="pnav-avatar">${avatarHTML(user, 40, user.status || 'online')}</div>
             <div class="pnav-text">
               <div class="n1">${escapeHtml(displayName)}</div>
-              <div class="n2">${escapeHtml(user.bio || 'No description yet')}</div>
+              <div class="n2">${escapeHtml(fullTag(user))}</div>
             </div>
           </div>
         </div>
@@ -1744,8 +1840,12 @@ function renderOwnProfile(user) {
           <div class="pnav-swatches" id="pf-swatches">${swatches}</div>
         </div>
         <div class="pnav-item">
-          <div class="pnav-label">Display Name Style</div>
-          <div class="pnav-namestyle" style="color:${escapeHtml(bannerColor)}">${escapeHtml(displayName)}</div>
+          <div class="pnav-label">Status</div>
+          <div class="pnav-status-pill"><span class="dot" style="background:${statusColor}"></span><span>${escapeHtml(user.custom_status || statusLabel(user.status))}</span></div>
+        </div>
+        <div class="pnav-item">
+          <div class="pnav-label">Member Since</div>
+          <div class="pnav-meta">${escapeHtml(memberSince)}</div>
         </div>
       </div>
 
@@ -1758,12 +1858,13 @@ function renderOwnProfile(user) {
           <div class="pic-avatar">${avatarHTML(user, 96, user.status || 'offline')}</div>
           <div class="pic-name">${escapeHtml(displayName)}</div>
           <div class="pic-tag">${escapeHtml(fullTag(user))}</div>
-          <div class="pic-status"><span class="dot" style="background:${user.status === 'offline' ? '#80848e' : '#23a55a'}"></span>${escapeHtml(user.custom_status || statusLabel(user.status))}</div>
+          <div class="pic-status"><span class="dot" style="background:${statusColor}"></span>${escapeHtml(user.custom_status || statusLabel(user.status))}</div>
           ${user.pronouns ? `<div class="pic-date">${escapeHtml(user.pronouns)}</div>` : ''}
           <div class="pic-date">Member since ${memberSince}</div>
         </div>
         <div class="profile-actions-row">
           <button class="pa primary" id="pf-edit">Edit Profile</button>
+          <button class="pa" id="pf-avatar">Change Avatar</button>
         </div>
         <div class="profile-section-block">
           <h5>About Me</h5>
@@ -1775,14 +1876,13 @@ function renderOwnProfile(user) {
   $('pf-x').addEventListener('click', closeModal);
   $('pf-edit').addEventListener('click', () => openSettings('account'));
   $('pf-banner').addEventListener('click', () => openSettings('account'));
+  $('pf-avatar').addEventListener('click', () => openSettings('account'));
   document.querySelectorAll('#pf-swatches .pnav-swatch').forEach(sw => {
     sw.addEventListener('click', async () => {
       const color = sw.dataset.color;
       document.querySelectorAll('#pf-swatches .pnav-swatch').forEach(x => x.classList.toggle('sel', x === sw));
       const hero = document.querySelector('.profile-hero');
       if (hero && !user.banner_url) hero.style.background = color;
-      const nameStyle = document.querySelector('.pnav-namestyle');
-      if (nameStyle) nameStyle.style.color = color;
       try {
         const { user: updated } = await api('/api/me', { method: 'PATCH', body: JSON.stringify({ banner_color: color }) });
         me = updated; localStorage.setItem('cr_user', JSON.stringify(me)); renderMe();
@@ -2100,10 +2200,9 @@ function settingsPanelHTML(section) {
       return `
         <h4>Profiles</h4>
         <p style="color:var(--text-muted);font-size:14px;margin-bottom:18px;line-height:1.5">Personalise how your name and banner appear across Crossroads.</p>
-        <div class="field"><label>Display Name Style</label>
-          <div class="pnav-namestyle" id="prof-namestyle" style="color:${escapeHtml(u.banner_color || '#5865F2')}">${escapeHtml(u.display_name || u.username)}</div></div>
         <div class="field"><label>Banner Color</label>
           <div class="color-row" id="prof-banner-row">${PALETTE.map(c => `<span class="swatch${(u.banner_color || '#5865F2').toLowerCase() === c.toLowerCase() ? ' sel' : ''}" data-color="${c}" style="background:${c}"></span>`).join('')}</div>
+          <div class="hint">Used for your banner whenever you have not uploaded a banner image.</div>
         </div>
         <div class="modal-actions" style="justify-content:flex-start"><button class="btn" id="prof-save">Save Changes</button></div>`;
     case 'privacy':
@@ -2325,7 +2424,6 @@ function wireProfilesPanel() {
     color = sw.dataset.color;
     settingsDirty = true;
     document.querySelectorAll('#prof-banner-row .swatch').forEach(x => x.classList.toggle('sel', x === sw));
-    $('prof-namestyle').style.color = color;
   }));
   const doSave = async () => {
     try {
@@ -2456,22 +2554,23 @@ function invitePreviewCardHTML(s) {
 }
 
 function invitePanelHTML(s) {
+  const usesOptions = [
+    { value: 'unlimited', label: 'No limit', sub: 'Anyone with the link can join' },
+    { value: '1', label: '1 use' },
+    { value: '5', label: '5 uses' },
+    { value: '10', label: '10 uses' },
+    { value: '25', label: '25 uses' },
+    { value: '50', label: '50 uses' },
+    { value: '100', label: '100 uses' }
+  ];
   return `
     ${invitePreviewCardHTML(s)}
     <div class="invite-controls">
       <div class="field"><label>Expire After</label>
-        <select id="inv-expiry">${INVITE_EXPIRY_OPTIONS.map(o => `<option value="${o.value}"${o.value === '10080' ? ' selected' : ''}>${o.label}</option>`).join('')}</select>
+        ${customSelect('inv-expiry', INVITE_EXPIRY_OPTIONS, '10080')}
       </div>
       <div class="field"><label>Max Number of Uses</label>
-        <select id="inv-uses">
-          <option value="unlimited">No limit</option>
-          <option value="1">1 use</option>
-          <option value="5">5 uses</option>
-          <option value="10">10 uses</option>
-          <option value="25">25 uses</option>
-          <option value="50">50 uses</option>
-          <option value="100">100 uses</option>
-        </select>
+        ${customSelect('inv-uses', usesOptions, 'unlimited')}
       </div>
       <button class="btn inv-generate" id="inv-generate">${icon('link')} Generate New Link</button>
     </div>
@@ -2481,11 +2580,12 @@ function invitePanelHTML(s) {
 }
 
 function wireInvitePanel(s) {
+  wireCustomSelects(document.querySelector('.invite-panel') || document.querySelector('.invite-modal-body') || document);
   const gen = $('inv-generate');
   if (gen) gen.addEventListener('click', async () => {
     gen.disabled = true;
     try {
-      const { invite } = await api('/api/servers/' + s.id + '/invites', { method: 'POST', body: JSON.stringify({ expires_in: $('inv-expiry').value, max_uses: $('inv-uses').value }) });
+      const { invite } = await api('/api/servers/' + s.id + '/invites', { method: 'POST', body: JSON.stringify({ expires_in: csValue('inv-expiry'), max_uses: csValue('inv-uses') }) });
       showInviteResult(invite);
       loadInviteList(s);
     } catch (e) { toast(e.message, 'error'); }
@@ -2598,17 +2698,31 @@ function renderServerTab(tab, s, isOwner) {
   }
   if (tab === 'members') {
     const members = state.members || [];
+    const iAmOwner = s.owner_id === me.id;
     body.innerHTML = `
       <div class="ss-section-title">Members \u2014 ${members.length}</div>
-      <div class="ss-members">${members.map(m => `
-        <div class="ss-member-row">
+      <div class="ss-members">${members.map(m => {
+        const isOwner = m.id === s.owner_id;
+        const role = isOwner ? 'owner' : (m.role || 'member');
+        const badge = isOwner ? '<span class="role-badge owner">Owner</span>' : (role === 'admin' ? '<span class="role-badge admin">Admin</span>' : '');
+        let action = '';
+        if (iAmOwner && !isOwner) {
+          action = role === 'admin'
+            ? `<button class="ss-member-role-btn" data-demote="${m.id}">Demote</button>`
+            : `<button class="ss-member-role-btn promote" data-promote="${m.id}">Make Admin</button>`;
+        }
+        return `<div class="ss-member-row">
           ${avatarHTML(m, 36, m.status || 'offline')}
           <div class="ss-member-info">
-            <div class="ss-member-name">${escapeHtml(m.display_name || m.username)}${m.id === s.owner_id ? ` <span class="ss-crown">${icon('crown')}</span>` : ''}</div>
+            <div class="ss-member-name">${escapeHtml(m.display_name || m.username)}${badge}</div>
             <div class="ss-member-tag">${escapeHtml(fullTag(m))}</div>
           </div>
-        </div>`).join('') || '<div class="inv-empty">No members.</div>'}</div>`;
+          ${action}
+        </div>`;
+      }).join('') || '<div class="inv-empty">No members.</div>'}</div>`;
     hydrateIcons(body);
+    body.querySelectorAll('[data-promote]').forEach(b => b.addEventListener('click', () => setMemberRole(s, b.dataset.promote, 'admin')));
+    body.querySelectorAll('[data-demote]').forEach(b => b.addEventListener('click', () => setMemberRole(s, b.dataset.demote, 'member')));
     return;
   }
   // Overview
@@ -2636,7 +2750,12 @@ function renderServerTab(tab, s, isOwner) {
       </div>
       <div class="ss-fields">
         <div class="field"><label>Server Name</label><input id="ss-name" value="${escapeHtml(s.name)}" maxlength="40" ${isOwner ? '' : 'disabled'} placeholder="Give your server a memorable name"></div>
-        <div class="field"><label>Server Description</label><textarea id="ss-desc" maxlength="500" ${isOwner ? '' : 'disabled'} placeholder="Tell people what your server is about, who it is for, and what to expect when they join\u2026">${escapeHtml(s.description || '')}</textarea></div>
+        <div class="field"><label>Server Description</label>
+          <div class="ss-desc-wrap">
+            <textarea id="ss-desc" maxlength="500" ${isOwner ? '' : 'disabled'} placeholder="Tell people what your server is about, who it is for, and what to expect when they join\u2026">${escapeHtml(s.description || '')}</textarea>
+            <div class="ss-desc-count" id="ss-desc-count">${(s.description || '').length}/500</div>
+          </div>
+        </div>
         <div class="ss-stats">
           <div class="ss-stat"><div class="ss-stat-num">${s.member_count || 0}</div><div class="ss-stat-lbl">Members</div></div>
           <div class="ss-stat"><div class="ss-stat-num">${s.online_count || 0}</div><div class="ss-stat-lbl">Online</div></div>
@@ -2647,6 +2766,10 @@ function renderServerTab(tab, s, isOwner) {
       </div>
     </div>`;
   hydrateIcons(body);
+
+  const descEl = $('ss-desc');
+  const descCount = $('ss-desc-count');
+  if (descEl && descCount) descEl.addEventListener('input', () => { descCount.textContent = descEl.value.length + '/500'; });
 
   let iconUrl = s.icon_url || null;
   let bannerUrl = s.banner_url || null;
@@ -2699,6 +2822,281 @@ function renderServerTab(tab, s, isOwner) {
 }
 
 /* ============================================================
+   REALTIME REFRESH HELPERS
+   ============================================================ */
+/* Re-paint the avatar + author name on every rendered message from a user. */
+function refreshMessageAuthor(u) {
+  document.querySelectorAll(`.msg-group[data-uid="${u.id}"]`).forEach(node => {
+    const av = node.querySelector('.gutter .avatar');
+    if (av) av.outerHTML = avatarHTML(u, 40);
+    const author = node.querySelector('.author');
+    if (author) author.textContent = u.display_name || u.username;
+  });
+}
+
+/* If a profile modal is open for this user, rebuild it with fresh data. */
+function refreshOpenProfile(u) {
+  if (!state.openProfileId || state.openProfileId !== u.id) return;
+  const overlay = $('modal-overlay');
+  if (!overlay || overlay.classList.contains('hidden')) return;
+  if (!document.querySelector('.profile-modal, .oprofile-modal')) return;
+  if (u.id === me.id) renderOwnProfile(Object.assign({}, me, u));
+  else openProfile(u);
+}
+
+/* Reload the member list for the current server (after a role change etc.). */
+async function reloadServerMembers() {
+  if (!state.server) return;
+  try {
+    const data = await api('/api/servers/' + state.server.id);
+    state.server = Object.assign({}, state.server, data.server);
+    if (data.channels) state.channels = data.channels;
+    state.members = data.members || [];
+    renderMembers();
+    const activeTab = document.querySelector('.ss-tab.active');
+    if (activeTab && activeTab.dataset.tab === 'members') renderServerTab('members', state.server, state.server.owner_id === me.id);
+  } catch (e) { /* ignore */ }
+}
+
+/* Owner-only: promote a member to admin or demote them back. */
+async function setMemberRole(s, uid, role) {
+  try {
+    await api('/api/servers/' + s.id + '/members/' + uid, { method: 'PATCH', body: JSON.stringify({ role }) });
+    toast(role === 'admin' ? 'Member promoted to admin' : 'Admin demoted to member', 'success');
+    reloadServerMembers();
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+/* ============================================================
+   CHANNEL MANAGEMENT (owner / admins)
+   ============================================================ */
+function amIAdmin() {
+  const s = state.server;
+  if (!s) return false;
+  if (s.owner_id === me.id) return true;
+  const m = state.members.find(x => x.id === me.id);
+  return !!(m && (m.role === 'owner' || m.role === 'admin'));
+}
+
+function copyChannelLink(c) {
+  const link = location.origin + '/app.html?invite=' + (state.server ? state.server.id : '') + '#ch-' + c.id;
+  navigator.clipboard.writeText(link).then(() => toast('Channel link copied', 'success')).catch(() => toast('#' + c.name));
+}
+
+function openChannelContextMenu(x, y, cid) {
+  const c = state.channels.find(ch => ch.id === cid);
+  if (!c) return;
+  const items = [];
+  if (amIAdmin()) {
+    items.push({ label: 'New Text Channel', icon: 'plus', onClick: () => openCreateChannel('text') });
+    items.push({ label: 'New Voice Channel', icon: 'volume-high', onClick: () => openCreateChannel('voice') });
+    items.push({ sep: true });
+    items.push({ label: 'Rename Channel', icon: 'pencil', onClick: () => renameChannel(c) });
+    items.push({ label: 'Edit Channel Topic', icon: 'note', onClick: () => editChannelTopic(c) });
+    items.push({ label: 'Copy Channel Link', icon: 'link', onClick: () => copyChannelLink(c) });
+    items.push({ sep: true });
+    items.push({ label: 'Delete Channel', icon: 'trash', danger: true, onClick: () => deleteChannel(c) });
+  } else {
+    items.push({ label: 'Copy Channel Link', icon: 'link', onClick: () => copyChannelLink(c) });
+  }
+  showContextMenu(x, y, items);
+}
+
+async function renameChannel(c) {
+  const name = await promptDialog({ title: 'Rename Channel', body: 'Give this channel a new name.', label: 'Channel name', value: c.name, confirmText: 'Rename', maxlength: 40 });
+  if (name === null) return;
+  const clean = name.trim();
+  if (!clean) { toast('Channel name cannot be empty', 'error'); return; }
+  try {
+    await api('/api/servers/' + state.server.id + '/channels/' + c.id, { method: 'PATCH', body: JSON.stringify({ name: clean }) });
+    toast('Channel renamed', 'success');
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+async function editChannelTopic(c) {
+  const topic = await promptDialog({ title: 'Edit Channel Topic', body: 'Set a short topic that appears under the channel name.', label: 'Topic', value: c.topic || '', confirmText: 'Save Topic', maxlength: 200, placeholder: 'What is this channel about?' });
+  if (topic === null) return;
+  try {
+    await api('/api/servers/' + state.server.id + '/channels/' + c.id, { method: 'PATCH', body: JSON.stringify({ topic }) });
+    toast('Channel topic updated', 'success');
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+async function deleteChannel(c) {
+  const ok = await confirmDialog({ title: 'Delete Channel', body: `Delete <b>#${escapeHtml(c.name)}</b>? Every message in this channel will be permanently removed.`, confirmText: 'Delete Channel', danger: true });
+  if (!ok) return;
+  try {
+    await api('/api/servers/' + state.server.id + '/channels/' + c.id, { method: 'DELETE' });
+    toast('Channel deleted', 'success');
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+/* ============================================================
+   CUSTOM SELECT (website-aligned dropdowns)
+   ============================================================ */
+function customSelect(id, options, selected) {
+  const cur = options.find(o => String(o.value) === String(selected)) || options[0];
+  return `<div class="cs-wrap" data-cs="${id}" data-value="${escapeHtml(String(cur.value))}">
+    <button type="button" class="cs-trigger" data-cs-trigger>
+      <span class="cs-trigger-label">${escapeHtml(cur.label)}</span>
+      <span class="cs-caret">${icon('chevron-down')}</span>
+    </button>
+    <div class="cs-menu hidden" data-cs-menu>
+      ${options.map(o => `<div class="cs-option${String(o.value) === String(cur.value) ? ' sel' : ''}" data-value="${escapeHtml(String(o.value))}"><span>${escapeHtml(o.label)}</span>${o.sub ? `<span class="cs-sub">${escapeHtml(o.sub)}</span>` : ''}<span class="cs-check">${icon('check')}</span></div>`).join('')}
+    </div>
+  </div>`;
+}
+
+function closeCustomSelects(except) {
+  document.querySelectorAll('[data-cs-menu]').forEach(m => { if (m !== except) m.classList.add('hidden'); });
+  document.querySelectorAll('.cs-trigger').forEach(t => { if (!except || !except.parentElement.contains(t)) t.classList.remove('open'); });
+}
+
+function wireCustomSelects(root) {
+  (root || document).querySelectorAll('[data-cs]').forEach(wrap => {
+    const trigger = wrap.querySelector('[data-cs-trigger]');
+    const menu = wrap.querySelector('[data-cs-menu]');
+    if (!trigger || !menu) return;
+    trigger.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const isOpen = !menu.classList.contains('hidden');
+      closeCustomSelects();
+      if (!isOpen) { menu.classList.remove('hidden'); trigger.classList.add('open'); }
+    });
+    menu.querySelectorAll('.cs-option').forEach(opt => opt.addEventListener('click', (e) => {
+      e.stopPropagation();
+      wrap.dataset.value = opt.dataset.value;
+      const label = opt.querySelector('span');
+      wrap.querySelector('.cs-trigger-label').textContent = label ? label.textContent : opt.dataset.value;
+      menu.querySelectorAll('.cs-option').forEach(o => o.classList.toggle('sel', o === opt));
+      menu.classList.add('hidden');
+      trigger.classList.remove('open');
+    }));
+  });
+}
+
+function csValue(id) {
+  const w = document.querySelector(`[data-cs="${id}"]`);
+  return w ? w.dataset.value : null;
+}
+
+/* ============================================================
+   MINI PROFILE (bottom-left user panel)
+   ============================================================ */
+function positionMiniProfile(wrap) {
+  const panel = $('user-panel-me');
+  if (!panel) return;
+  const rect = panel.getBoundingClientRect();
+  const w = wrap.offsetWidth, h = wrap.offsetHeight;
+  let left = rect.left;
+  let top = rect.top - h - 8;
+  if (left + w > window.innerWidth - 8) left = window.innerWidth - w - 8;
+  if (left < 8) left = 8;
+  if (top < 8) top = rect.bottom + 8;
+  wrap.style.left = left + 'px';
+  wrap.style.top = top + 'px';
+}
+
+function closeMiniProfile() {
+  const el = $('mini-profile');
+  if (el) el.remove();
+}
+
+function updateMiniProfileDom(u) {
+  const wrap = $('mini-profile');
+  if (!wrap) return;
+  const av = wrap.querySelector('.mini-avatar-wrap');
+  if (av) av.innerHTML = avatarHTML(u, 64, u.status || 'online');
+  const nm = wrap.querySelector('.mini-name');
+  if (nm) nm.textContent = u.display_name || u.username;
+  const tg = wrap.querySelector('.mini-tag');
+  if (tg) tg.textContent = fullTag(u);
+  const inp = wrap.querySelector('#mini-status-input');
+  if (inp && document.activeElement !== inp) inp.value = u.custom_status || '';
+  wrap.querySelectorAll('.mini-status-opt').forEach(o => o.classList.toggle('sel', o.dataset.status === (u.status || 'online')));
+  const banner = wrap.querySelector('.mini-banner');
+  if (banner) {
+    if (u.banner_url) { banner.style.background = `url('${u.banner_url}') center/cover no-repeat`; }
+    else { banner.style.background = u.banner_color || u.accent_color || '#5865F2'; }
+  }
+}
+
+function refreshMiniProfileStatus() { updateMiniProfileDom(me); }
+function refreshMiniProfileUser(u) { if (u.id === me.id) updateMiniProfileDom(Object.assign({}, me, u)); }
+
+async function saveMiniStatus(text) {
+  try {
+    const { user } = await api('/api/me', { method: 'PATCH', body: JSON.stringify({ custom_status: text }) });
+    me = user; localStorage.setItem('cr_user', JSON.stringify(me));
+    state.usersCache[me.id] = Object.assign({}, state.usersCache[me.id] || {}, me);
+    toast(text ? 'Custom status updated' : 'Custom status cleared', 'success');
+    updateMiniProfileDom(me);
+    if (state.openProfileId === me.id) refreshOpenProfile(me);
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+async function setMyStatus(status) {
+  try {
+    const { user } = await api('/api/me', { method: 'PATCH', body: JSON.stringify({ status }) });
+    me = user; localStorage.setItem('cr_user', JSON.stringify(me));
+    state.usersCache[me.id] = Object.assign({}, state.usersCache[me.id] || {}, me);
+    renderMe();
+    updateMiniProfileDom(me);
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+function openMiniProfile() {
+  closeMiniProfile();
+  const u = Object.assign({}, me, state.usersCache[me.id] || {});
+  const wrap = document.createElement('div');
+  wrap.className = 'mini-profile';
+  wrap.id = 'mini-profile';
+  const bannerStyle = u.banner_url
+    ? `background-image:url('${escapeHtml(u.banner_url)}')`
+    : `background:${escapeHtml(u.banner_color || u.accent_color || '#5865F2')}`;
+  const statuses = [
+    { id: 'online', label: 'Online' },
+    { id: 'idle', label: 'Idle' },
+    { id: 'dnd', label: 'Do Not Disturb' },
+    { id: 'offline', label: 'Invisible' }
+  ];
+  wrap.innerHTML = `
+    <div class="mini-banner" style="${bannerStyle}"></div>
+    <div class="mini-body">
+      <div class="mini-avatar-wrap">${avatarHTML(u, 64, u.status || 'online')}</div>
+      <div class="mini-name">${escapeHtml(u.display_name || u.username)}</div>
+      <div class="mini-tag">${escapeHtml(fullTag(u))}</div>
+      <div class="mini-divider"></div>
+      <div class="mini-label">Custom Status</div>
+      <input class="mini-status-input" id="mini-status-input" maxlength="128" placeholder="What are you up to?" value="${escapeHtml(u.custom_status || '')}">
+      <div class="mini-status-row">
+        <button class="mini-status-save" id="mini-status-save">Set Status</button>
+        <button class="mini-status-clear" id="mini-status-clear">Clear</button>
+      </div>
+      <div class="mini-divider"></div>
+      <div class="mini-label">Status</div>
+      <div class="mini-statuses" id="mini-statuses">
+        ${statuses.map(s => `<div class="mini-status-opt${(u.status || 'online') === s.id ? ' sel' : ''}" data-status="${s.id}"><span class="ms-dot ${s.id}"></span><span>${s.label}</span><span class="ms-check">${icon('check')}</span></div>`).join('')}
+      </div>
+      <div class="mini-actions">
+        <button class="primary" id="mini-edit">${icon('pencil')} Edit Profile</button>
+        <button id="mini-settings">${icon('settings')} Settings</button>
+      </div>
+    </div>`;
+  document.body.appendChild(wrap);
+  hydrateIcons(wrap);
+  positionMiniProfile(wrap);
+
+  const save = () => saveMiniStatus(($('mini-status-input').value || '').trim());
+  $('mini-status-save').addEventListener('click', save);
+  $('mini-status-input').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); save(); } });
+  $('mini-status-clear').addEventListener('click', () => { $('mini-status-input').value = ''; saveMiniStatus(''); });
+  wrap.querySelectorAll('.mini-status-opt').forEach(opt => opt.addEventListener('click', () => setMyStatus(opt.dataset.status)));
+  $('mini-edit').addEventListener('click', () => { closeMiniProfile(); openSettings('account'); });
+  $('mini-settings').addEventListener('click', () => { closeMiniProfile(); openSettings('account'); });
+}
+
+/* ============================================================
    GLOBAL EVENTS
    ============================================================ */
 function bindGlobalEvents() {
@@ -2706,7 +3104,10 @@ function bindGlobalEvents() {
   $('rail-add').addEventListener('click', openCreateServer);
   $('rail-explore').addEventListener('click', () => openJoinServer());
   $('sidebar-header').addEventListener('click', serverMenu);
-  $('user-panel-me').addEventListener('click', () => openProfile(me));
+  $('user-panel-me').addEventListener('click', (e) => {
+    e.stopPropagation();
+    if ($('mini-profile')) closeMiniProfile(); else openMiniProfile();
+  });
   $('btn-settings').addEventListener('click', () => openSettings('account'));
   $('btn-mic').addEventListener('click', () => openSettings('voice'));
   $('hdr-notifs').addEventListener('click', (e) => { e.stopPropagation(); openNotifPanel(); });
@@ -2764,6 +3165,8 @@ function bindGlobalEvents() {
   /* Disable the native right-click menu and show a custom one. */
   document.addEventListener('contextmenu', (e) => {
     e.preventDefault();
+    const chEl = e.target.closest('.channel');
+    if (chEl && chEl.dataset.cid && state.server) { openChannelContextMenu(e.clientX, e.clientY, chEl.dataset.cid); return; }
     const msg = e.target.closest('.msg-group');
     if (msg) {
       const m = state.messages.find(x => x.id === msg.dataset.mid);

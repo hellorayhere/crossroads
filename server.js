@@ -20,6 +20,10 @@ const app = express();
 const server = http.createServer(app);
 const io = new Server(server, { maxHttpBufferSize: 1e8 });
 
+/* Set of user ids that currently have at least one live socket connection.
+   Used to compute accurate "online" counts and to broadcast presence. */
+const onlineUids = new Set();
+
 app.use(express.json({ limit: '25mb' }));
 app.use(express.urlencoded({ extended: true }));
 app.use('/uploads', express.static(UPLOAD_DIR));
@@ -111,12 +115,42 @@ function getServerForUser(serverId, userId) {
   return db.prepare('SELECT * FROM servers WHERE id = ?').get(serverId);
 }
 
+function memberRole(serverId, userId) {
+  const row = db.prepare('SELECT role FROM server_members WHERE server_id = ? AND user_id = ?').get(serverId, userId);
+  return row ? (row.role || 'member') : null;
+}
+
+/* Owner + admins can manage channels, invites and member roles. */
+function isServerAdmin(server, userId) {
+  if (!server) return false;
+  if (server.owner_id === userId) return true;
+  const r = memberRole(server.id, userId);
+  return r === 'owner' || r === 'admin';
+}
+
+/* Push the current channel list for a server to every connected client so
+   channel changes appear instantly everywhere (clients filter by server id). */
+function broadcastChannels(serverId) {
+  const channels = db.prepare('SELECT * FROM channels WHERE server_id = ? ORDER BY position ASC, created_at ASC').all(serverId);
+  io.emit('channels_update', { server_id: serverId, channels });
+}
+
+/* Broadcast a profile change to every client so avatars / banners / names /
+   statuses update live everywhere (member lists, DM lists, message authors). */
+function broadcastProfile(user) {
+  if (!user) return;
+  io.emit('profile_update', publicUser(user));
+}
+
 /* ---------------- Servers: serialisation + invites ---------------- */
 
 function serverStats(serverId) {
   const memberCount = db.prepare('SELECT COUNT(*) AS c FROM server_members WHERE server_id = ?').get(serverId).c;
-  const onlineCount = db.prepare(`SELECT COUNT(*) AS c FROM server_members m JOIN users u ON u.id = m.user_id
-    WHERE m.server_id = ? AND u.status != 'offline'`).get(serverId).c;
+  const rows = db.prepare(`SELECT u.id, u.status FROM server_members m JOIN users u ON u.id = m.user_id
+    WHERE m.server_id = ?`).all(serverId);
+  // A member counts as online only when they are actually connected AND have
+  // not chosen the invisible/offline status.
+  const onlineCount = rows.filter(r => r.status !== 'offline' && onlineUids.has(r.id)).length;
   return { member_count: memberCount, online_count: onlineCount };
 }
 
@@ -398,7 +432,6 @@ app.post('/api/login', (req, res) => {
   if (!user || !bcrypt.compareSync(password, user.password_hash)) {
     return res.status(401).json({ error: 'Invalid username or password' });
   }
-  db.prepare('UPDATE users SET status = ? WHERE id = ?').run('online', user.id);
   const token = sign(user);
   res.json({ token, user: publicUser(user) });
 });
@@ -430,11 +463,16 @@ app.patch('/api/me', auth, (req, res) => {
       updates.push('discriminator = ?'); values.push(disc);
     }
   }
+  const statusChanged = 'status' in req.body;
   if (updates.length) {
     values.push(uid);
     db.prepare(`UPDATE users SET ${updates.join(', ')} WHERE id = ?`).run(...values);
   }
   const user = db.prepare('SELECT * FROM users WHERE id = ?').get(uid);
+  // Push the change to every client so avatars, banners, names and statuses
+  // update live across member lists, DM lists, message authors and profiles.
+  broadcastProfile(user);
+  if (statusChanged) io.emit('presence', { user_id: uid, status: user.status });
   res.json({ user: publicUser(user) });
 });
 
@@ -650,7 +688,7 @@ app.post('/api/servers', auth, (req, res) => {
   const now = Date.now();
   db.prepare('INSERT INTO servers (id, name, icon, icon_url, banner_url, description, owner_id, created_at) VALUES (?,?,?,?,?,?,?,?)')
     .run(id, name.slice(0, 40), icon || null, icon_url || null, banner_url || null, (description || '').slice(0, 500), req.user.id, now);
-  db.prepare('INSERT INTO server_members (server_id, user_id, joined_at) VALUES (?,?,?)').run(id, req.user.id, now);
+  db.prepare('INSERT INTO server_members (server_id, user_id, joined_at, role) VALUES (?,?,?,?)').run(id, req.user.id, now, 'owner');
   createDefaultChannels(id);
   const srv = db.prepare('SELECT * FROM servers WHERE id = ?').get(id);
   res.json({ server: publicServer(srv) });
@@ -672,7 +710,7 @@ app.post('/api/servers/join', auth, (req, res) => {
     if (!srv) return res.status(404).json({ error: 'Invalid invite code' });
     const already = db.prepare('SELECT 1 FROM server_members WHERE server_id = ? AND user_id = ?').get(srv.id, req.user.id);
     if (!already) {
-      db.prepare('INSERT INTO server_members (server_id, user_id, joined_at) VALUES (?,?,?)').run(srv.id, req.user.id, Date.now());
+      db.prepare('INSERT INTO server_members (server_id, user_id, joined_at, role) VALUES (?,?,?,?)').run(srv.id, req.user.id, Date.now(), 'member');
       db.prepare('UPDATE invites SET uses = uses + 1 WHERE code = ?').run(found.invite.code);
     }
     return res.json({ server: publicServer(srv), invite: { code: found.invite.code, server_id: srv.id } });
@@ -683,7 +721,7 @@ app.post('/api/servers/join', auth, (req, res) => {
   if (!srv) return res.status(404).json({ error: 'Invalid invite code' });
   const existing = db.prepare('SELECT 1 FROM server_members WHERE server_id = ? AND user_id = ?').get(srv.id, req.user.id);
   if (!existing) {
-    db.prepare('INSERT INTO server_members (server_id, user_id, joined_at) VALUES (?,?,?)').run(srv.id, req.user.id, Date.now());
+    db.prepare('INSERT INTO server_members (server_id, user_id, joined_at, role) VALUES (?,?,?,?)').run(srv.id, req.user.id, Date.now(), 'member');
   }
   res.json({ server: publicServer(srv) });
 });
@@ -693,14 +731,16 @@ app.get('/api/servers/:id', auth, (req, res) => {
   if (!srv) return res.status(404).json({ error: 'Server not found' });
   const channels = db.prepare('SELECT * FROM channels WHERE server_id = ? ORDER BY position ASC, created_at ASC').all(srv.id);
   const members = db.prepare(`
-    SELECT u.* FROM users u JOIN server_members m ON m.user_id = u.id
-    WHERE m.server_id = ? ORDER BY m.joined_at ASC`).all(srv.id).map(publicUser);
+    SELECT u.*, m.role AS member_role FROM users u JOIN server_members m ON m.user_id = u.id
+    WHERE m.server_id = ? ORDER BY m.joined_at ASC`).all(srv.id)
+    .map(u => Object.assign(publicUser(u), { role: u.member_role || (srv.owner_id === u.id ? 'owner' : 'member') }));
   res.json({ server: publicServer(srv), channels, members });
 });
 
 app.post('/api/servers/:id/channels', auth, (req, res) => {
   const srv = getServerForUser(req.params.id, req.user.id);
   if (!srv) return res.status(404).json({ error: 'Server not found' });
+  if (!isServerAdmin(srv, req.user.id)) return res.status(403).json({ error: 'Only the owner and admins can manage channels' });
   let { name, type, topic } = req.body || {};
   name = (name || '').trim();
   if (!name) return res.status(400).json({ error: 'Channel name required' });
@@ -709,7 +749,64 @@ app.post('/api/servers/:id/channels', auth, (req, res) => {
   db.prepare('INSERT INTO channels (id, server_id, name, type, topic, position, created_at) VALUES (?,?,?,?,?,?,?)')
     .run(id, srv.id, name, type || 'text', topic || '', maxPos + 1, Date.now());
   const ch = db.prepare('SELECT * FROM channels WHERE id = ?').get(id);
+  broadcastChannels(srv.id);
   res.json({ channel: ch });
+});
+
+/* Rename / re-topic a channel (owner + admins). */
+app.patch('/api/servers/:id/channels/:cid', auth, (req, res) => {
+  const srv = getServerForUser(req.params.id, req.user.id);
+  if (!srv) return res.status(404).json({ error: 'Server not found' });
+  if (!isServerAdmin(srv, req.user.id)) return res.status(403).json({ error: 'Only the owner and admins can manage channels' });
+  const ch = db.prepare('SELECT * FROM channels WHERE id = ? AND server_id = ?').get(req.params.cid, srv.id);
+  if (!ch) return res.status(404).json({ error: 'Channel not found' });
+  const updates = [];
+  const values = [];
+  if ('name' in req.body && String(req.body.name || '').trim()) {
+    updates.push('name = ?'); values.push(String(req.body.name).trim().toLowerCase().replace(/\s+/g, '-').slice(0, 40));
+  }
+  if ('topic' in req.body) { updates.push('topic = ?'); values.push(String(req.body.topic || '').slice(0, 200)); }
+  if (updates.length) {
+    values.push(ch.id);
+    db.prepare(`UPDATE channels SET ${updates.join(', ')} WHERE id = ?`).run(...values);
+  }
+  const updated = db.prepare('SELECT * FROM channels WHERE id = ?').get(ch.id);
+  broadcastChannels(srv.id);
+  res.json({ channel: updated });
+});
+
+/* Delete a channel and all of its messages (owner + admins). */
+app.delete('/api/servers/:id/channels/:cid', auth, (req, res) => {
+  const srv = getServerForUser(req.params.id, req.user.id);
+  if (!srv) return res.status(404).json({ error: 'Server not found' });
+  if (!isServerAdmin(srv, req.user.id)) return res.status(403).json({ error: 'Only the owner and admins can manage channels' });
+  const ch = db.prepare('SELECT * FROM channels WHERE id = ? AND server_id = ?').get(req.params.cid, srv.id);
+  if (!ch) return res.status(404).json({ error: 'Channel not found' });
+  const remaining = db.prepare('SELECT COUNT(*) AS c FROM channels WHERE server_id = ?').get(srv.id).c;
+  if (remaining <= 1) return res.status(400).json({ error: 'A server needs at least one channel' });
+  const wipe = db.transaction(() => {
+    db.prepare('DELETE FROM reactions WHERE message_id IN (SELECT id FROM messages WHERE channel_id = ?)').run(ch.id);
+    db.prepare('DELETE FROM messages WHERE channel_id = ?').run(ch.id);
+    db.prepare('DELETE FROM channels WHERE id = ?').run(ch.id);
+  });
+  wipe();
+  broadcastChannels(srv.id);
+  res.json({ ok: true, id: ch.id });
+});
+
+/* Promote / demote a member to admin (owner only). Body: { role: 'admin'|'member' } */
+app.patch('/api/servers/:id/members/:uid', auth, (req, res) => {
+  const srv = db.prepare('SELECT * FROM servers WHERE id = ?').get(req.params.id);
+  if (!srv) return res.status(404).json({ error: 'Server not found' });
+  if (srv.owner_id !== req.user.id) return res.status(403).json({ error: 'Only the owner can manage member roles' });
+  const target = req.params.uid;
+  if (target === srv.owner_id) return res.status(400).json({ error: 'The owner role cannot be changed' });
+  const member = db.prepare('SELECT 1 FROM server_members WHERE server_id = ? AND user_id = ?').get(srv.id, target);
+  if (!member) return res.status(404).json({ error: 'Member not found' });
+  const role = req.body && req.body.role === 'admin' ? 'admin' : 'member';
+  db.prepare('UPDATE server_members SET role = ? WHERE server_id = ? AND user_id = ?').run(role, srv.id, target);
+  io.emit('server_members_update', { server_id: srv.id });
+  res.json({ ok: true, role });
 });
 
 /* Update server name / icon / banner / description (owner only). */
@@ -729,7 +826,9 @@ app.patch('/api/servers/:id', auth, (req, res) => {
     values.push(srv.id);
     db.prepare(`UPDATE servers SET ${updates.join(', ')} WHERE id = ?`).run(...values);
   }
-  res.json({ server: publicServer(db.prepare('SELECT * FROM servers WHERE id = ?').get(srv.id)) });
+  const updated = publicServer(db.prepare('SELECT * FROM servers WHERE id = ?').get(srv.id));
+  io.emit('server_update', updated);
+  res.json({ server: updated });
 });
 
 /* ---------------- Server invites ---------------- */
@@ -1041,8 +1140,12 @@ io.use((socket, next) => {
 io.on('connection', (socket) => {
   const uid = socket.uid;
   socket.join(`user:${uid}`);
-  db.prepare('UPDATE users SET status = ? WHERE id = ?').run('online', uid);
-  io.emit('presence', { user_id: uid, status: 'online' });
+  onlineUids.add(uid);
+  // Announce the user's chosen status (online / idle / dnd / invisible). We do
+  // NOT overwrite it here so a chosen status survives refreshes and reconnects.
+  const row = db.prepare('SELECT status FROM users WHERE id = ?').get(uid);
+  const currentStatus = (row && row.status) ? row.status : 'online';
+  io.emit('presence', { user_id: uid, status: currentStatus });
 
   socket.on('join_channel', (channelId) => {
     if (channelId) socket.join(`channel:${channelId}`);
@@ -1062,8 +1165,12 @@ io.on('connection', (socket) => {
   });
 
   socket.on('disconnect', () => {
-    db.prepare('UPDATE users SET status = ? WHERE id = ?').run('offline', uid);
-    io.emit('presence', { user_id: uid, status: 'offline' });
+    // Only mark the user offline once every tab/socket has closed.
+    const remaining = io.sockets.adapter.rooms.get(`user:${uid}`);
+    if (!remaining || remaining.size === 0) {
+      onlineUids.delete(uid);
+      io.emit('presence', { user_id: uid, status: 'offline' });
+    }
   });
 });
 

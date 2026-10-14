@@ -10,6 +10,17 @@
   <link rel="stylesheet" href="/css/app.css" />
 </head>
 <body data-theme="dark" data-bg="graphite">
+  <script>
+    /* Apply the saved theme/background synchronously, before the first paint,
+       so switching themes never flashes back to the default on refresh. */
+    (function () {
+      try {
+        var s = JSON.parse(localStorage.getItem('cr_settings') || '{}');
+        if (s.theme) document.body.setAttribute('data-theme', s.theme);
+        if (s.bg) document.body.setAttribute('data-bg', s.bg);
+      } catch (e) { /* ignore */ }
+    })();
+  </script>
   <div id="app">
     <!-- Server rail -->
     <nav class="server-rail" id="server-rail">
