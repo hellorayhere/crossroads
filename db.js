@@ -13,8 +13,12 @@ CREATE TABLE IF NOT EXISTS users (
   id TEXT PRIMARY KEY,
   username TEXT NOT NULL,
   discriminator TEXT NOT NULL,
-  email TEXT UNIQUE NOT NULL,
+  email TEXT UNIQUE,
   password_hash TEXT NOT NULL,
+  display_name TEXT,
+  pronouns TEXT DEFAULT '',
+  custom_status TEXT DEFAULT '',
+  banner_color TEXT DEFAULT '#5865F2',
   avatar TEXT,
   avatar_url TEXT,
   banner TEXT,
@@ -95,5 +99,60 @@ CREATE INDEX IF NOT EXISTS idx_messages_channel ON messages(channel_id);
 CREATE INDEX IF NOT EXISTS idx_messages_dm ON messages(dm_id);
 CREATE INDEX IF NOT EXISTS idx_reactions_message ON reactions(message_id);
 `);
+
+/* ---------------- Migrations ----------------
+   Older databases were created before the email field became optional and
+   before the profile columns (display_name, pronouns, custom_status,
+   banner_color) existed. Bring any existing database up to date. */
+function migrate() {
+  const cols = db.prepare('PRAGMA table_info(users)').all();
+  const names = cols.map(c => c.name);
+  const emailCol = cols.find(c => c.name === 'email');
+  const emailNotNull = emailCol ? emailCol.notnull === 1 : false;
+
+  // 1. Add any missing profile columns.
+  const additions = {
+    display_name: 'TEXT',
+    pronouns: "TEXT DEFAULT ''",
+    custom_status: "TEXT DEFAULT ''",
+    banner_color: "TEXT DEFAULT '#5865F2'"
+  };
+  for (const [col, def] of Object.entries(additions)) {
+    if (!names.includes(col)) {
+      db.exec(`ALTER TABLE users ADD COLUMN ${col} ${def}`);
+    }
+  }
+
+  // 2. If email is still NOT NULL, rebuild the table so it becomes optional.
+  if (emailNotNull) {
+    db.exec(`
+      CREATE TABLE users_new (
+        id TEXT PRIMARY KEY,
+        username TEXT NOT NULL,
+        discriminator TEXT NOT NULL,
+        email TEXT UNIQUE,
+        password_hash TEXT NOT NULL,
+        display_name TEXT,
+        pronouns TEXT DEFAULT '',
+        custom_status TEXT DEFAULT '',
+        banner_color TEXT DEFAULT '#5865F2',
+        avatar TEXT,
+        avatar_url TEXT,
+        banner TEXT,
+        banner_url TEXT,
+        accent_color TEXT DEFAULT '#5865F2',
+        bio TEXT DEFAULT '',
+        status TEXT DEFAULT 'online',
+        created_at INTEGER NOT NULL,
+        UNIQUE(username, discriminator)
+      );
+      INSERT INTO users_new (id, username, discriminator, email, password_hash, display_name, pronouns, custom_status, banner_color, avatar, avatar_url, banner, banner_url, accent_color, bio, status, created_at)
+        SELECT id, username, discriminator, email, password_hash, display_name, pronouns, custom_status, banner_color, avatar, avatar_url, banner, banner_url, accent_color, bio, status, created_at FROM users;
+      DROP TABLE users;
+      ALTER TABLE users_new RENAME TO users;
+    `);
+  }
+}
+migrate();
 
 module.exports = db;

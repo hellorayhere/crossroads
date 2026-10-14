@@ -46,6 +46,10 @@ function publicUser(u) {
     username: u.username,
     discriminator: u.discriminator,
     tag: `${u.username}#${u.discriminator}`,
+    display_name: u.display_name || u.username,
+    pronouns: u.pronouns || '',
+    custom_status: u.custom_status || '',
+    banner_color: u.banner_color || '#5865F2',
     email: u.email,
     avatar: u.avatar,
     avatar_url: u.avatar_url,
@@ -133,46 +137,51 @@ function messageWithMeta(m, currentUserId) {
 }
 
 /* ---------------- Auth routes ---------------- */
+app.get('/api/check-username', (req, res) => {
+  const username = (req.query.username || '').trim();
+  if (!username) return res.json({ available: false, reason: 'Enter a username' });
+  if (username.length < 2 || username.length > 32) return res.json({ available: false, reason: 'Username must be 2-32 characters' });
+  if (!/^[a-zA-Z0-9._]+$/.test(username)) return res.json({ available: false, reason: 'Only letters, numbers, periods and underscores are allowed' });
+  const taken = db.prepare('SELECT 1 FROM users WHERE LOWER(username) = LOWER(?)').get(username);
+  res.json({ available: !taken, reason: taken ? 'That username is already taken' : 'Username is available' });
+});
+
 app.post('/api/register', (req, res) => {
-  let { username, email, password } = req.body || {};
+  let { username, password } = req.body || {};
   username = (username || '').trim();
-  email = (email || '').trim().toLowerCase();
-  if (!username || !email || !password) return res.status(400).json({ error: 'All fields are required' });
+  if (!username || !password) return res.status(400).json({ error: 'Username and password are required' });
   if (username.length < 2 || username.length > 32) return res.status(400).json({ error: 'Username must be 2-32 characters' });
   if (!/^[a-zA-Z0-9._]+$/.test(username)) return res.status(400).json({ error: 'Username may only contain letters, numbers, periods and underscores' });
   if (password.length < 6) return res.status(400).json({ error: 'Password must be at least 6 characters' });
-  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return res.status(400).json({ error: 'Invalid email address' });
-  const emailExists = db.prepare('SELECT 1 FROM users WHERE email = ?').get(email);
-  if (emailExists) return res.status(409).json({ error: 'Email is already registered' });
+  const taken = db.prepare('SELECT 1 FROM users WHERE LOWER(username) = LOWER(?)').get(username);
+  if (taken) return res.status(409).json({ error: 'That username is already taken' });
 
   const discriminator = uniqueUsernameDiscriminator(username);
   const id = newId();
   const hash = bcrypt.hashSync(password, 10);
   const now = Date.now();
   const accent = randomColor();
-  db.prepare(`INSERT INTO users (id, username, discriminator, email, password_hash, accent_color, status, created_at)
-              VALUES (?,?,?,?,?,?,?,?)`)
-    .run(id, username, discriminator, email, hash, accent, 'online', now);
+  db.prepare(`INSERT INTO users (id, username, discriminator, password_hash, accent_color, status, created_at)
+              VALUES (?,?,?,?,?,?,?)`)
+    .run(id, username, discriminator, hash, accent, 'online', now);
   const user = db.prepare('SELECT * FROM users WHERE id = ?').get(id);
   const token = sign(user);
   res.json({ token, user: publicUser(user) });
 });
 
 app.post('/api/login', (req, res) => {
-  let { identifier, email, username, password } = req.body || {};
-  const login = (identifier || email || username || '').trim();
+  let { identifier, username, password } = req.body || {};
+  const login = (identifier || username || '').trim();
   if (!login || !password) return res.status(400).json({ error: 'Credentials required' });
   let user;
   if (login.includes('#')) {
     const [uname, disc] = login.split('#');
-    user = db.prepare('SELECT * FROM users WHERE username = ? AND discriminator = ?').get(uname, disc);
-  } else if (login.includes('@')) {
-    user = db.prepare('SELECT * FROM users WHERE email = ?').get(login.toLowerCase());
+    user = db.prepare('SELECT * FROM users WHERE LOWER(username) = LOWER(?) AND discriminator = ?').get(uname, disc);
   } else {
-    user = db.prepare('SELECT * FROM users WHERE username = ? ORDER BY created_at ASC LIMIT 1').get(login);
+    user = db.prepare('SELECT * FROM users WHERE LOWER(username) = LOWER(?) ORDER BY created_at ASC LIMIT 1').get(login);
   }
   if (!user || !bcrypt.compareSync(password, user.password_hash)) {
-    return res.status(401).json({ error: 'Invalid login or password' });
+    return res.status(401).json({ error: 'Invalid username or password' });
   }
   db.prepare('UPDATE users SET status = ? WHERE id = ?').run('online', user.id);
   const token = sign(user);
@@ -184,7 +193,7 @@ app.get('/api/me', auth, (req, res) => {
 });
 
 app.patch('/api/me', auth, (req, res) => {
-  const allowed = ['bio', 'accent_color', 'avatar', 'avatar_url', 'banner', 'banner_url', 'status'];
+  const allowed = ['bio', 'accent_color', 'avatar', 'avatar_url', 'banner', 'banner_url', 'status', 'display_name', 'pronouns', 'custom_status', 'banner_color'];
   const updates = [];
   const values = [];
   for (const key of allowed) {
@@ -227,13 +236,13 @@ app.get('/api/servers', auth, (req, res) => {
 });
 
 app.post('/api/servers', auth, (req, res) => {
-  let { name, icon } = req.body || {};
+  let { name, icon, icon_url } = req.body || {};
   name = (name || '').trim();
   if (!name) return res.status(400).json({ error: 'Server name required' });
   const id = newId();
   const now = Date.now();
-  db.prepare('INSERT INTO servers (id, name, icon, owner_id, created_at) VALUES (?,?,?,?,?)')
-    .run(id, name, icon || null, req.user.id, now);
+  db.prepare('INSERT INTO servers (id, name, icon, icon_url, owner_id, created_at) VALUES (?,?,?,?,?,?)')
+    .run(id, name, icon || null, icon_url || null, req.user.id, now);
   db.prepare('INSERT INTO server_members (server_id, user_id, joined_at) VALUES (?,?,?)').run(id, req.user.id, now);
   createDefaultChannels(id);
   const srv = db.prepare('SELECT * FROM servers WHERE id = ?').get(id);
