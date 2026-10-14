@@ -292,6 +292,7 @@ function messageWithMeta(m, currentUserId) {
     reply_to_id: m.reply_to_id || null,
     reply_to: replyPreviewOf(m),
     mentions: safeParse(m.mentions, []),
+    pinned: !!m.pinned,
     author: publicUser(author),
     reactions: groupReactions(reactions, currentUserId)
   };
@@ -351,6 +352,7 @@ function messagesWithMeta(rows, currentUserId) {
     reply_to_id: m.reply_to_id || null,
     reply_to: m.reply_to_id ? (replyMap[m.reply_to_id] || null) : null,
     mentions: safeParse(m.mentions, []),
+    pinned: !!m.pinned,
     author: publicUser(authorMap[m.user_id]),
     reactions: groupReactions(reactMap[m.id] || [], currentUserId)
   }));
@@ -519,7 +521,7 @@ app.get('/api/users', auth, (req, res) => {
   const q = (req.query.q || '').trim();
   let rows;
   if (q) {
-    rows = db.prepare('SELECT * FROM users WHERE username LIKE ? OR (username || "#" || discriminator) LIKE ? LIMIT 25')
+    rows = db.prepare("SELECT * FROM users WHERE username LIKE ? OR (username || '#' || discriminator) LIKE ? LIMIT 25")
       .all(`%${q}%`, `%${q}%`);
   } else {
     rows = db.prepare('SELECT * FROM users WHERE id != ? ORDER BY created_at DESC LIMIT 25').all(req.user.id);
@@ -561,6 +563,8 @@ app.post('/api/friends/request', auth, (req, res) => {
   if (!target) return res.status(404).json({ error: 'User not found. Check the spelling and try again.' });
   if (target.id === uid) return res.status(400).json({ error: 'You cannot add yourself' });
   if (relationshipBetween(uid, target.id) === 'blocked') return res.status(403).json({ error: 'Unable to send a friend request to this user' });
+  const targetSettings = safeParse(target.settings, {});
+  if (targetSettings.friendRequests === false) return res.status(403).json({ error: 'This user is not accepting friend requests right now.' });
   const existing = db.prepare('SELECT * FROM friendships WHERE (requester_id = ? AND addressee_id = ?) OR (requester_id = ? AND addressee_id = ?)')
     .get(uid, target.id, target.id, uid);
   if (existing) {
@@ -1004,9 +1008,68 @@ app.post('/api/messages/:id/reactions', auth, (req, res) => {
   res.json({ reactions: full.reactions });
 });
 
+/* ---------------- Pinned messages ----------------
+   Anyone who can see a channel/DM can pin and unpin its messages. */
+function canAccessMessage(m, userId) {
+  if (m.channel_id) {
+    const ch = db.prepare('SELECT * FROM channels WHERE id = ?').get(m.channel_id);
+    if (!ch) return null;
+    const srv = getServerForUser(ch.server_id, userId);
+    if (!srv) return null;
+    return { kind: 'channel', channel_id: ch.id, server_id: ch.server_id };
+  }
+  if (m.dm_id) {
+    const dm = db.prepare('SELECT * FROM dm_channels WHERE id = ?').get(m.dm_id);
+    if (!dm || (dm.user1_id !== userId && dm.user2_id !== userId)) return null;
+    return { kind: 'dm', dm_id: dm.id };
+  }
+  return null;
+}
+
+app.get('/api/channels/:id/pins', auth, (req, res) => {
+  const ch = db.prepare('SELECT * FROM channels WHERE id = ?').get(req.params.id);
+  if (!ch) return res.status(404).json({ error: 'Channel not found' });
+  const srv = getServerForUser(ch.server_id, req.user.id);
+  if (!srv) return res.status(403).json({ error: 'Not a member of this server' });
+  const rows = db.prepare('SELECT * FROM messages WHERE channel_id = ? AND pinned = 1 ORDER BY created_at DESC LIMIT 50').all(ch.id);
+  res.json({ pins: messagesWithMeta(rows, req.user.id) });
+});
+
+app.get('/api/dms/:id/pins', auth, (req, res) => {
+  const dm = db.prepare('SELECT * FROM dm_channels WHERE id = ?').get(req.params.id);
+  if (!dm || (dm.user1_id !== req.user.id && dm.user2_id !== req.user.id)) return res.status(404).json({ error: 'DM not found' });
+  const rows = db.prepare('SELECT * FROM messages WHERE dm_id = ? AND pinned = 1 ORDER BY created_at DESC LIMIT 50').all(dm.id);
+  res.json({ pins: messagesWithMeta(rows, req.user.id) });
+});
+
+app.post('/api/messages/:id/pin', auth, (req, res) => {
+  const m = db.prepare('SELECT * FROM messages WHERE id = ?').get(req.params.id);
+  if (!m) return res.status(404).json({ error: 'Message not found' });
+  if (!canAccessMessage(m, req.user.id)) return res.status(403).json({ error: 'You cannot pin this message' });
+  db.prepare('UPDATE messages SET pinned = 1 WHERE id = ?').run(m.id);
+  const payload = { message_id: m.id, pinned: true, channel_id: m.channel_id, dm_id: m.dm_id };
+  if (m.channel_id) io.to(`channel:${m.channel_id}`).emit('message_pin', payload);
+  if (m.dm_id) io.to(`dm:${m.dm_id}`).emit('message_pin', payload);
+  res.json({ ok: true, pinned: true });
+});
+
+app.delete('/api/messages/:id/pin', auth, (req, res) => {
+  const m = db.prepare('SELECT * FROM messages WHERE id = ?').get(req.params.id);
+  if (!m) return res.status(404).json({ error: 'Message not found' });
+  if (!canAccessMessage(m, req.user.id)) return res.status(403).json({ error: 'You cannot unpin this message' });
+  db.prepare('UPDATE messages SET pinned = 0 WHERE id = ?').run(m.id);
+  const payload = { message_id: m.id, pinned: false, channel_id: m.channel_id, dm_id: m.dm_id };
+  if (m.channel_id) io.to(`channel:${m.channel_id}`).emit('message_pin', payload);
+  if (m.dm_id) io.to(`dm:${m.dm_id}`).emit('message_pin', payload);
+  res.json({ ok: true, pinned: false });
+});
+
 /* ---------------- Direct Messages ---------------- */
 app.get('/api/dms', auth, (req, res) => {
-  const rows = db.prepare('SELECT * FROM dm_channels WHERE user1_id = ? OR user2_id = ? ORDER BY created_at DESC').all(req.user.id, req.user.id);
+  const rows = db.prepare(`SELECT d.* FROM dm_channels d
+    WHERE (d.user1_id = ? OR d.user2_id = ?)
+      AND NOT EXISTS (SELECT 1 FROM dm_hidden h WHERE h.dm_id = d.id AND h.user_id = ?)
+    ORDER BY d.created_at DESC`).all(req.user.id, req.user.id, req.user.id);
   const dms = rows.map(d => {
     const otherId = d.user1_id === req.user.id ? d.user2_id : d.user1_id;
     const other = db.prepare('SELECT * FROM users WHERE id = ?').get(otherId);
@@ -1029,7 +1092,17 @@ app.post('/api/dms', auth, (req, res) => {
     db.prepare('INSERT INTO dm_channels (id, user1_id, user2_id, created_at) VALUES (?,?,?,?)').run(id, a, b, Date.now());
     dm = db.prepare('SELECT * FROM dm_channels WHERE id = ?').get(id);
   }
+  // Opening a conversation un-hides it for the person who opened it.
+  db.prepare('DELETE FROM dm_hidden WHERE dm_id = ? AND user_id = ?').run(dm.id, req.user.id);
   res.json({ dm: { id: dm.id, user: publicUser(other) } });
+});
+
+/* Close (hide) a DM from your sidebar. It reappears when a new message arrives. */
+app.post('/api/dms/:id/close', auth, (req, res) => {
+  const dm = db.prepare('SELECT * FROM dm_channels WHERE id = ?').get(req.params.id);
+  if (!dm || (dm.user1_id !== req.user.id && dm.user2_id !== req.user.id)) return res.status(404).json({ error: 'DM not found' });
+  db.prepare('INSERT OR REPLACE INTO dm_hidden (dm_id, user_id, created_at) VALUES (?,?,?)').run(dm.id, req.user.id, Date.now());
+  res.json({ ok: true });
 });
 
 app.get('/api/dms/:id/messages', auth, (req, res) => {
@@ -1053,6 +1126,8 @@ app.post('/api/dms/:id/messages', auth, (req, res) => {
     .run(id, dm.id, req.user.id, (content || '').trim(), attachment_url || null, attachment_name || null, attachment_type || null, now, reply_to_id || null, JSON.stringify(mentionIds));
   const m = db.prepare('SELECT * FROM messages WHERE id = ?').get(id);
   const full = messageWithMeta(m, req.user.id);
+  // A new message un-hides the conversation for everyone in it.
+  db.prepare('DELETE FROM dm_hidden WHERE dm_id = ?').run(dm.id);
   io.to(`dm:${dm.id}`).emit('dm_message', full);
   const otherId = dm.user1_id === req.user.id ? dm.user2_id : dm.user1_id;
   io.to(`user:${otherId}`).emit('dm_notify', { dm_id: dm.id, message: full });

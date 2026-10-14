@@ -54,11 +54,74 @@ const BG_COLORS = [
 
 const SETTINGS_DEFAULTS = {
   theme: 'dark', bg: 'graphite', compact: false, showMembers: true,
-  safeMode: true, dmFromMembers: true, dataPersonalisation: false, readReceipts: true,
+  friendRequests: true, safeMode: true, dmFromMembers: true, dataPersonalisation: false, readReceipts: true,
   notifDesktop: true, notifSounds: true, notifBadge: false,
   echoCancel: true, noiseSuppress: true, inputVolume: 70,
   language: 'English, US'
 };
+
+/* ---------------- Localisation (i18n) ----------------
+   A compact dictionary for the most visible interface strings. English (US)
+   is the source of truth and the fallback for any missing key. */
+const I18N = {
+  'English, US': {},
+  'English, UK': {
+    'Direct Messages': 'Direct Messages', 'Friends': 'Friends', 'Text Channels': 'Text Channels',
+    'Voice Channels': 'Voice Channels', 'Create Channel': 'Create Channel', 'Add Friend': 'Add Friend',
+    'Send Friend Request': 'Send Friend Request', 'Online': 'Online', 'All': 'All', 'Pending': 'Pending',
+    'Blocked': 'Blocked', 'Save': 'Save', 'Log Out': 'Log Out', 'Start a conversation': 'Start a conversation',
+    'User Settings': 'User Settings', 'App Settings': 'App Settings', 'My Account': 'My Account',
+    'Profiles': 'Profiles', 'Privacy & Safety': 'Privacy & Safety', 'Authorized Apps': 'Authorised Apps',
+    'Devices': 'Devices', 'Connections': 'Connections', 'Appearance': 'Appearance',
+    'Notifications': 'Notifications', 'Voice & Video': 'Voice & Video', 'Keybinds': 'Keybinds', 'Language': 'Language'
+  },
+  'Español': {
+    'Direct Messages': 'Mensajes directos', 'Friends': 'Amigos', 'Text Channels': 'Canales de texto',
+    'Voice Channels': 'Canales de voz', 'Create Channel': 'Crear canal', 'Add Friend': 'Añadir amigo',
+    'Send Friend Request': 'Enviar solicitud', 'Online': 'En línea', 'All': 'Todos', 'Pending': 'Pendiente',
+    'Blocked': 'Bloqueados', 'Save': 'Guardar', 'Log Out': 'Cerrar sesión', 'Start a conversation': 'Iniciar una conversación',
+    'User Settings': 'Ajustes de usuario', 'App Settings': 'Ajustes de la app', 'My Account': 'Mi cuenta',
+    'Profiles': 'Perfiles', 'Privacy & Safety': 'Privacidad y seguridad', 'Authorized Apps': 'Apps autorizadas',
+    'Devices': 'Dispositivos', 'Connections': 'Conexiones', 'Appearance': 'Apariencia',
+    'Notifications': 'Notificaciones', 'Voice & Video': 'Voz y vídeo', 'Keybinds': 'Atajos', 'Language': 'Idioma'
+  },
+  'Français': {
+    'Direct Messages': 'Messages privés', 'Friends': 'Amis', 'Text Channels': 'Salons textuels',
+    'Voice Channels': 'Salons vocaux', 'Create Channel': 'Créer un salon', 'Add Friend': 'Ajouter un ami',
+    'Send Friend Request': 'Envoyer une demande', 'Online': 'En ligne', 'All': 'Tous', 'Pending': 'En attente',
+    'Blocked': 'Bloqués', 'Save': 'Enregistrer', 'Log Out': 'Se déconnecter', 'Start a conversation': 'Démarrer une conversation',
+    'User Settings': 'Paramètres utilisateur', 'App Settings': 'Paramètres de l’app', 'My Account': 'Mon compte',
+    'Profiles': 'Profils', 'Privacy & Safety': 'Confidentialité et sécurité', 'Authorized Apps': 'Applications autorisées',
+    'Devices': 'Appareils', 'Connections': 'Connexions', 'Appearance': 'Apparence',
+    'Notifications': 'Notifications', 'Voice & Video': 'Voix et vidéo', 'Keybinds': 'Raccourcis', 'Language': 'Langue'
+  },
+  'Deutsch': {
+    'Direct Messages': 'Direktnachrichten', 'Friends': 'Freunde', 'Text Channels': 'Textkanäle',
+    'Voice Channels': 'Sprachkanäle', 'Create Channel': 'Kanal erstellen', 'Add Friend': 'Freund hinzufügen',
+    'Send Friend Request': 'Anfrage senden', 'Online': 'Online', 'All': 'Alle', 'Pending': 'Ausstehend',
+    'Blocked': 'Blockiert', 'Save': 'Speichern', 'Log Out': 'Abmelden', 'Start a conversation': 'Unterhaltung starten',
+    'User Settings': 'Benutzereinstellungen', 'App Settings': 'App-Einstellungen', 'My Account': 'Mein Konto',
+    'Profiles': 'Profile', 'Privacy & Safety': 'Datenschutz & Sicherheit', 'Authorized Apps': 'Autorisierte Apps',
+    'Devices': 'Geräte', 'Connections': 'Verbindungen', 'Appearance': 'Erscheinungsbild',
+    'Notifications': 'Benachrichtigungen', 'Voice & Video': 'Sprache & Video', 'Keybinds': 'Tastenkürzel', 'Language': 'Sprache'
+  }
+};
+
+function t(key) {
+  if (key == null) return '';
+  const lang = setting('language') || 'English, US';
+  const dict = I18N[lang] || I18N['English, US'];
+  return (dict && dict[key]) || key;
+}
+
+/* Re-render the surfaces that contain translated strings. */
+function applyLanguage() {
+  document.documentElement.lang = ({ 'English, US': 'en-US', 'English, UK': 'en-GB', 'Español': 'es', 'Français': 'fr', 'Deutsch': 'de' })[setting('language')] || 'en';
+  if (state.view === 'home') { $('sidebar-name').textContent = t('Direct Messages'); if (state.dm) { /* keep */ } renderDMList(); }
+  else if (state.view === 'friends') { renderDMList(); renderFriendsView(); }
+  if (state.server) renderChannelList();
+  if ($('settings-nav')) openSettings(document.querySelector('#settings-nav .sn-item.active')?.dataset.sec || 'account');
+}
 
 const REL_LABEL = {
   none: 'Add Friend',
@@ -150,6 +213,15 @@ function hydrateIcons(root) {
 /* ---------------- DOM helpers ---------------- */
 const $ = (id) => document.getElementById(id);
 
+/* Coalesce bursts of work (presence/profile churn) into a single re-render. */
+function debounce(fn, wait) {
+  let timer = null;
+  return function (...args) {
+    clearTimeout(timer);
+    timer = setTimeout(() => fn.apply(this, args), wait);
+  };
+}
+
 function escapeHtml(s) {
   if (s == null) return '';
   return String(s)
@@ -178,7 +250,7 @@ function avatarHTML(user, size = 40, status = null) {
   if (!user) user = { username: '?' };
   const bg = user.avatar_url ? '#5865f2' : (user.accent_color || '#5865f2');
   const inner = user.avatar_url
-    ? `<img src="${escapeHtml(user.avatar_url)}" alt="">`
+    ? `<img src="${escapeHtml(user.avatar_url)}" alt="" loading="lazy" decoding="async">`
     : (user.avatar ? escapeHtml(user.avatar) : escapeHtml((user.username || '?')[0].toUpperCase()));
   const dot = status ? `<span class="status-dot ${status}"></span>` : '';
   return `<div class="avatar" style="width:${size}px;height:${size}px;font-size:${Math.round(size * 0.42)}px;background:${bg}">${inner}${dot}</div>`;
@@ -205,6 +277,9 @@ function saveSetting(key, value) {
   state.settings[key] = value;
   mirrorSettingsLocal();
   applyTheme();
+  if (key === 'notifDesktop' && value && typeof Notification !== 'undefined' && Notification.permission === 'default') {
+    try { Notification.requestPermission(); } catch (e) { /* ignore */ }
+  }
   clearTimeout(saveTimers[key]);
   saveTimers[key] = setTimeout(() => {
     api('/api/settings', { method: 'PATCH', body: JSON.stringify({ [key]: value }) }).catch(() => {});
@@ -305,12 +380,12 @@ async function init() {
   hydrateIcons(document);
   renderMe();
   connectSocket();
-  await loadServers();
-  await loadFriends();
-  await loadDMs();
-  await loadNotifications();
+  /* Load everything in parallel so the first paint is not blocked by a chain
+     of sequential round-trips. */
+  await Promise.all([loadServers(), loadFriends(), loadDMs(), loadNotifications()]);
   showHome();
   bindGlobalEvents();
+  applyLanguage();
 }
 
 function renderMe(u = me) {
@@ -337,6 +412,13 @@ function previewSelf(patch) {
   if (sa) sa.innerHTML = avatarHTML(p, 80, p.status || 'online');
 }
 
+/* Debounced re-render of the lists that react to presence / profile churn. */
+const rerenderLists = debounce(() => {
+  if (state.server) renderMembers();
+  if (state.view === 'home') renderDMList();
+  if (state.view === 'friends') renderFriendsView();
+}, 120);
+
 /* ============================================================
    SOCKET
    ============================================================ */
@@ -358,7 +440,9 @@ function connectSocket() {
   socket.on('dm_notify', (data) => {
     loadDMs();
     if (!state.dm || state.dm.id !== data.dm_id) {
-      toast('New message from ' + fullTag(data.message.author), '');
+      const who = fullTag(data.message.author);
+      toast('New message from ' + who, '');
+      maybeDesktopNotify('New message from ' + who, data.message.content || '');
       if (setting('notifSounds') !== false) beep();
     }
   });
@@ -371,6 +455,11 @@ function connectSocket() {
     const m = state.messages.find(x => x.id === data.message_id);
     if (m) { m.reactions = data.reactions; updateReactions(data.message_id, data.reactions); }
   });
+  socket.on('message_pin', (data) => {
+    const m = state.messages.find(x => x.id === data.message_id);
+    if (m) { m.pinned = !!data.pinned; updatePinIndicator(data.message_id, data.pinned); }
+    if ($('pins-panel')) loadPins();
+  });
   socket.on('typing', (data) => {
     if (data.username) showTyping(data.username, data.channel_id || data.dm_id);
   });
@@ -382,9 +471,7 @@ function connectSocket() {
     state.dms.forEach(d => { if (d.user && d.user.id === data.user_id) d.user.status = data.status; });
     if (me && data.user_id === me.id) { me.status = data.status; renderMe(); }
     document.querySelectorAll(`[data-uid="${data.user_id}"] .status-dot`).forEach(dot => { dot.className = 'status-dot ' + data.status; });
-    if (state.server) renderMembers();
-    if (state.view === 'home') renderDMList();
-    if (state.view === 'friends') renderFriendsView();
+    rerenderLists();
     refreshMiniProfileStatus();
   });
   /* A user changed their avatar / banner / name / custom status: refresh every
@@ -407,9 +494,7 @@ function connectSocket() {
       });
     }
     refreshMessageAuthor(u);
-    if (state.server) renderMembers();
-    if (state.view === 'home') renderDMList();
-    if (state.view === 'friends') renderFriendsView();
+    rerenderLists();
     refreshOpenProfile(u);
     refreshMiniProfileUser(u);
   });
@@ -460,9 +545,24 @@ function connectSocket() {
     renderNotifBadge();
     const info = notifInfo(n);
     toast(info.plain, 'alert');
+    maybeDesktopNotify('Crossroads', info.plain);
     if (setting('notifSounds') !== false) beep();
     if ($('notif-panel')) renderNotifList();
   });
+}
+
+/* Native desktop notification (respects the "Enable desktop notifications" setting). */
+function maybeDesktopNotify(title, body) {
+  try {
+    if (setting('notifDesktop') === false) return;
+    if (typeof Notification === 'undefined') return;
+    if (Notification.permission === 'granted') {
+      const n = new Notification(title, { body: body || '', icon: '/favicon.png', tag: 'crossroads' });
+      n.onclick = () => { try { window.focus(); } catch (e) {} };
+    } else if (Notification.permission !== 'denied') {
+      Notification.requestPermission();
+    }
+  } catch (e) { /* ignore */ }
 }
 
 /* Short WebAudio blip for pings (no external asset). */
@@ -516,14 +616,15 @@ function showHome() {
   setReplyTo(null);
   renderRail();
   $('rail-home').classList.add('active');
-  $('sidebar-name').textContent = 'Direct Messages';
+  $('sidebar-name').textContent = t('Direct Messages');
   $('chat-hash').style.display = 'none';
-  $('chat-title').textContent = 'Direct Messages';
+  $('chat-title').textContent = t('Direct Messages');
   $('chat-topic').textContent = '';
   $('members').innerHTML = '';
   $('composer').classList.add('hidden');
   renderDMList();
   renderEmptyChat();
+  animateView();
 }
 
 async function loadDMs() {
@@ -540,24 +641,26 @@ function renderDMList() {
   friendsBtn.className = 'dm-item friends-entry' + (state.view === 'friends' ? ' active' : '');
   friendsBtn.id = 'friends-entry';
   const pendingCount = (state.friends && state.friends.incoming) ? state.friends.incoming.length : 0;
-  friendsBtn.innerHTML = `${icon('user-group')}<span class="dm-name">Friends</span>${pendingCount ? `<span class="friend-badge">${pendingCount}</span>` : ''}`;
+  friendsBtn.innerHTML = `${icon('user-group')}<span class="dm-name">${t('Friends')}</span>${pendingCount ? `<span class="friend-badge">${pendingCount}</span>` : ''}`;
   friendsBtn.addEventListener('click', openFriends);
   list.appendChild(friendsBtn);
 
   const cat = document.createElement('div');
   cat.className = 'channel-category';
-  cat.innerHTML = `${icon('caret-down')} Direct Messages`;
+  cat.innerHTML = `${icon('caret-down')} ${t('Direct Messages')}`;
   list.appendChild(cat);
   for (const d of state.dms) {
     const item = document.createElement('div');
     item.className = 'dm-item' + (state.dm && state.dm.id === d.id ? ' active' : '');
+    item.dataset.dmid = d.id;
+    if (d.user) item.dataset.uid = d.user.id;
     item.innerHTML = `${avatarHTML(d.user, 32, d.user.status || 'offline')}<span class="dm-name">${escapeHtml(d.user ? (d.user.display_name || d.user.username) : 'Unknown')}</span>`;
     item.addEventListener('click', () => openDM(d));
     list.appendChild(item);
   }
   const add = document.createElement('div');
   add.className = 'dm-item';
-  add.innerHTML = `<div class="avatar" style="width:32px;height:32px;font-size:14px;background:#5865f2">${icon('plus')}</div><span class="dm-name">Start a conversation</span>`;
+  add.innerHTML = `<div class="avatar" style="width:32px;height:32px;font-size:14px;background:#5865f2">${icon('plus')}</div><span class="dm-name">${t('Start a conversation')}</span>`;
   add.addEventListener('click', openNewDM);
   list.appendChild(add);
 }
@@ -586,6 +689,40 @@ async function openDM(d) {
   $('message-input').placeholder = 'Write a direct message to @' + d.user.username + '\u2026';
   $('composer-hint').textContent = '';
   $('message-input').focus();
+}
+
+/* Right-click menu for a direct message in the sidebar. */
+function openDMContextMenu(x, y, dmid) {
+  const d = state.dms.find(x => x.id === dmid);
+  if (!d) return;
+  const u = d.user || {};
+  const isFriend = !!(state.friends && state.friends.friends.some(f => f.id === u.id));
+  const isBlocked = !!(state.friends && state.friends.blocked.some(f => f.id === u.id));
+  const items = [
+    { label: 'Mark As Read', icon: 'check', onClick: () => { toast('Marked as read', 'success'); } },
+    { label: 'Close DM', icon: 'xmark', onClick: () => closeDM(d) },
+    { sep: true },
+    { label: 'Copy User ID', icon: 'id-badge', onClick: () => { navigator.clipboard.writeText(u.id || '').then(() => toast('User ID copied', 'success')).catch(() => {}); } }
+  ];
+  if (isFriend) {
+    items.push({ sep: true });
+    items.push({ label: 'Unfriend', icon: 'user-minus', danger: true, onClick: () => friendAction('remove', u.id) });
+  }
+  if (isBlocked) {
+    items.push({ label: 'Unblock', icon: 'unlock', onClick: () => friendAction('unblock', u.id) });
+  } else {
+    items.push({ label: 'Block', icon: 'ban', danger: true, onClick: () => friendAction('block', u.id) });
+  }
+  showContextMenu(x, y, items);
+}
+
+async function closeDM(d) {
+  try {
+    await api('/api/dms/' + d.id + '/close', { method: 'POST' });
+    if (state.dm && state.dm.id === d.id) { state.dm = null; showHome(); }
+    await loadDMs();
+    toast('Conversation closed', 'success');
+  } catch (e) { toast(e.message, 'error'); }
 }
 
 /* ============================================================
@@ -621,6 +758,7 @@ async function openFriends() {
   await loadFriends();
   renderDMList();
   renderFriendsView();
+  animateView();
 }
 
 function emptyFriends(msg) { return `<div class="fr-empty">${msg}</div>`; }
@@ -664,13 +802,14 @@ function renderFriendsView() {
   let body = '';
   if (tab === 'add') {
     body = `<div class="fr-add-wrap">
-      <h4>Add Friend</h4>
-      <p>You can add friends with their username. It is case sensitive.</p>
+      <h4>${t('Add Friend')}</h4>
+      <p>You can add friends with their username and tag. Type a full tag like <b>test#6842</b>, or search by username to pick from the list below.</p>
       <div class="fr-add-row">
-        <input id="fr-add-input" placeholder="Search by username, then send a friend request\u2026" autocomplete="off">
-        <button class="btn" id="fr-add-btn">Send Friend Request</button>
+        <input id="fr-add-input" placeholder="Enter a username or tag, e.g. test#6842" autocomplete="off">
+        <button class="btn" id="fr-add-btn">${t('Send Friend Request')}</button>
       </div>
       <div class="fr-add-hint" id="fr-add-hint"></div>
+      <div class="fr-search-results" id="fr-search-results"></div>
     </div>`;
   } else if (tab === 'pending') {
     const inc = f.incoming.map(u => friendRow(u, 'incoming')).join('');
@@ -689,12 +828,12 @@ function renderFriendsView() {
   box.innerHTML = `<div class="friends-view">
     <div class="fr-head">
       <div class="fr-tabs">
-        ${tabBtn('online', 'Online', counts.online)}
-        ${tabBtn('all', 'All', counts.all)}
-        ${tabBtn('pending', 'Pending', counts.pending)}
-        ${tabBtn('blocked', 'Blocked', counts.blocked)}
+        ${tabBtn('online', t('Online'), counts.online)}
+        ${tabBtn('all', t('All'), counts.all)}
+        ${tabBtn('pending', t('Pending'), counts.pending)}
+        ${tabBtn('blocked', t('Blocked'), counts.blocked)}
       </div>
-      <button class="fr-add-friend${tab === 'add' ? ' active' : ''}" data-tab="add">${icon('user-plus')} Add Friend</button>
+      <button class="fr-add-friend${tab === 'add' ? ' active' : ''}" data-tab="add">${icon('user-plus')} ${t('Add Friend')}</button>
     </div>
     <div class="fr-body">${body}</div>
   </div>`;
@@ -714,7 +853,50 @@ function renderFriendsView() {
     const send = () => addFriendByTag(ai.value.trim());
     $('fr-add-btn').addEventListener('click', send);
     ai.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); send(); } });
+    let searchTimer = null;
+    ai.addEventListener('input', () => {
+      clearTimeout(searchTimer);
+      const q = ai.value.trim();
+      const res = $('fr-search-results');
+      if (!q || q.length < 2) { if (res) res.innerHTML = ''; return; }
+      searchTimer = setTimeout(() => searchUsersForFriend(q), 250);
+    });
   }
+}
+
+function relationshipOf(uid) {
+  const f = state.friends;
+  if (!f) return 'none';
+  if (f.friends.some(x => x.id === uid)) return 'friends';
+  if (f.outgoing.some(x => x.id === uid)) return 'pending_outgoing';
+  if (f.incoming.some(x => x.id === uid)) return 'pending_incoming';
+  if (f.blocked.some(x => x.id === uid)) return 'blocked';
+  return 'none';
+}
+
+async function searchUsersForFriend(q) {
+  const box = $('fr-search-results');
+  if (!box) return;
+  try {
+    const { users } = await api('/api/users?q=' + encodeURIComponent(q));
+    const list = users.filter(u => u.id !== me.id).slice(0, 12);
+    if (!list.length) { box.innerHTML = `<div class="fr-search-empty">No users match \u201c${escapeHtml(q)}\u201d.</div>`; return; }
+    box.innerHTML = list.map(u => {
+      const rel = relationshipOf(u.id);
+      const label = REL_LABEL[rel] || 'Add Friend';
+      const disabled = rel !== 'none';
+      return `<div class="fr-search-row" data-uid="${u.id}">
+        ${avatarHTML(u, 32, u.status || 'offline')}
+        <div class="fr-search-info"><div class="fr-name">${escapeHtml(u.display_name || u.username)}<span class="fr-tag">#${escapeHtml(u.discriminator)}</span></div></div>
+        <button class="btn fr-search-add" data-uid="${u.id}" ${disabled ? 'disabled' : ''}>${escapeHtml(label)}</button>
+      </div>`;
+    }).join('');
+    box.querySelectorAll('.fr-search-add').forEach(btn => btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const u = list.find(x => x.id === btn.dataset.uid);
+      if (u) { await addFriendByTag(fullTag(u)); searchUsersForFriend(q); }
+    }));
+  } catch (e) { /* ignore */ }
 }
 
 function refreshFriendCounts() {
@@ -809,26 +991,26 @@ function renderChannelList() {
 
   const tcat = document.createElement('div');
   tcat.className = 'channel-category';
-  tcat.innerHTML = `${icon('caret-down')} Text Channels`;
+  tcat.innerHTML = `${icon('caret-down')} ${t('Text Channels')}`;
   list.appendChild(tcat);
   for (const c of textChannels) list.appendChild(channelRow(c));
   if (admin) {
     const tadd = document.createElement('div');
     tadd.className = 'channel-add';
-    tadd.innerHTML = `${icon('plus')} Create Channel`;
+    tadd.innerHTML = `${icon('plus')} ${t('Create Channel')}`;
     tadd.addEventListener('click', () => openCreateChannel('text'));
     list.appendChild(tadd);
   }
 
   const vcat = document.createElement('div');
   vcat.className = 'channel-category';
-  vcat.innerHTML = `${icon('caret-down')} Voice Channels`;
+  vcat.innerHTML = `${icon('caret-down')} ${t('Voice Channels')}`;
   list.appendChild(vcat);
   for (const c of voiceChannels) list.appendChild(channelRow(c));
   if (admin) {
     const vadd = document.createElement('div');
     vadd.className = 'channel-add';
-    vadd.innerHTML = `${icon('plus')} Create Channel`;
+    vadd.innerHTML = `${icon('plus')} ${t('Create Channel')}`;
     vadd.addEventListener('click', () => openCreateChannel('voice'));
     list.appendChild(vadd);
   }
@@ -964,7 +1146,7 @@ function messageNode(m, grouped, animate) {
       <button data-act="more" title="More">${icon('ellipsis-vertical')}</button>
     </div>`;
   node.innerHTML = `${toolbar}${gutter}<div class="body">${m.reply_to ? replyRefHTML(m.reply_to) : ''}${head}
-    <div class="text" data-content>${formatContent(m.content)}</div>
+    <div class="text" data-content>${m.pinned ? `<span class="msg-pin" title="Pinned message">${icon('pin')}</span>` : ''}${formatContent(m.content)}</div>
     <div class="attachment-slot"></div>
     <div class="embed-slot"></div>
     <div class="reactions">${reactionsHTML(m.reactions)}</div>
@@ -1057,6 +1239,18 @@ function updateReactions(mid, reactions) {
   node.querySelectorAll('.reaction').forEach(r => r.addEventListener('click', () => toggleReaction(mid, r.dataset.emoji)));
 }
 
+/* Show / hide the little pin badge on a message without a full re-render. */
+function updatePinIndicator(mid, pinned) {
+  const text = document.querySelector(`[data-mid="${mid}"] .text[data-content]`);
+  if (!text) return;
+  let badge = text.querySelector('.msg-pin');
+  if (pinned && !badge) {
+    text.insertAdjacentHTML('afterbegin', `<span class="msg-pin" title="Pinned message">${icon('pin')}</span>`);
+  } else if (!pinned && badge) {
+    badge.remove();
+  }
+}
+
 function attachmentNode(m) {
   const wrap = document.createElement('div');
   wrap.className = 'attachment';
@@ -1086,7 +1280,7 @@ function embedNode(url) {
         <div class="embed-site">${escapeHtml(data.site || '')}</div>
         <div class="embed-title"><a href="${escapeHtml(url)}" target="_blank" rel="noopener">${escapeHtml(data.title || url)}</a></div>
         ${desc ? `<div class="embed-desc">${escapeHtml(desc)}</div>` : ''}
-      </div>${data.image ? `<img class="embed-thumb" src="${escapeHtml(data.image)}" alt="" onerror="this.remove()">` : ''}`;
+      </div>${data.image ? `<img class="embed-thumb" src="${escapeHtml(data.image)}" alt="" loading="lazy" decoding="async" onerror="this.remove()">` : ''}`;
   }).catch(() => { wrap.remove(); });
   return wrap;
 }
@@ -1164,6 +1358,15 @@ function inviteEmbedNode(code) {
 function scrollToBottom() {
   const box = $('messages');
   box.scrollTop = box.scrollHeight;
+}
+
+/* Subtle enter animation whenever the user switches server / DM / channel. */
+function animateView() {
+  const box = $('messages');
+  if (!box) return;
+  box.classList.remove('view-enter');
+  void box.offsetWidth;
+  box.classList.add('view-enter');
 }
 
 function flashMessage(mid) {
@@ -1401,7 +1604,7 @@ function openEmojiPickerForInput() {
 }
 
 function closePopovers() {
-  document.querySelectorAll('.emoji-picker, .context-menu, .dropdown-menu, .notif-panel').forEach(el => el.remove());
+  document.querySelectorAll('.emoji-picker, .context-menu, .dropdown-menu, .notif-panel, .pins-panel').forEach(el => el.remove());
   closeMiniProfile();
   closeCustomSelects();
   closeMentionPop();
@@ -1463,6 +1666,7 @@ function openMessageContextMenu(x, y, m) {
   const items = [
     { label: 'Add Reaction', icon: 'smile-plus', onClick: () => openReactionPickerAt(x, y, m.id) },
     { label: 'Reply', icon: 'reply', onClick: () => setReplyTo(m) },
+    { label: m.pinned ? 'Unpin Message' : 'Pin Message', icon: 'pin', onClick: () => togglePin(m) },
     { label: 'Copy Text', icon: 'copy', onClick: () => { navigator.clipboard.writeText(m.content || '').then(() => toast('Copied to clipboard', 'success')).catch(() => {}); } },
     { label: 'Copy Message Link', icon: 'link', onClick: () => { navigator.clipboard.writeText(location.origin + '/app.html?msg=' + m.id).then(() => toast('Message link copied', 'success')).catch(() => {}); } }
   ];
@@ -1471,6 +1675,22 @@ function openMessageContextMenu(x, y, m) {
     items.push({ label: 'Delete Message', icon: 'trash', danger: true, onClick: () => deleteMessage(m.id) });
   }
   showContextMenu(x, y, items);
+}
+
+async function togglePin(m) {
+  try {
+    if (m.pinned) {
+      await api('/api/messages/' + m.id + '/pin', { method: 'DELETE' });
+      m.pinned = false;
+      toast('Message unpinned', 'success');
+    } else {
+      await api('/api/messages/' + m.id + '/pin', { method: 'POST' });
+      m.pinned = true;
+      toast('Message pinned to this conversation', 'success');
+    }
+    updatePinIndicator(m.id, m.pinned);
+    if ($('pins-panel')) loadPins();
+  } catch (e) { toast(e.message, 'error'); }
 }
 
 /* ============================================================
@@ -1584,6 +1804,79 @@ async function goToNotification(n) {
 }
 
 /* ============================================================
+   PINNED MESSAGES
+   ============================================================ */
+function openPinsPanel() {
+  const existing = $('pins-panel');
+  if (existing) { existing.remove(); return; }
+  if (!state.channel && !state.dm) { toast('Open a channel or direct message first'); return; }
+  closePopovers();
+  const panel = document.createElement('div');
+  panel.className = 'pins-panel';
+  panel.id = 'pins-panel';
+  panel.innerHTML = `<div class="np-head"><h4>${icon('pin')} Pinned Messages</h4><button id="pins-close">Close</button></div>
+    <div class="pins-list" id="pins-list"><div class="notif-empty">Loading pins\u2026</div></div>`;
+  document.body.appendChild(panel);
+  const r = $('hdr-pins').getBoundingClientRect();
+  panel.style.top = (r.bottom + 8) + 'px';
+  panel.style.left = Math.max(8, Math.min(r.right - 400, window.innerWidth - 408)) + 'px';
+  $('pins-close').addEventListener('click', () => panel.remove());
+  loadPins();
+}
+
+async function loadPins() {
+  const list = $('pins-list');
+  if (!list) return;
+  try {
+    let pins = [];
+    if (state.channel) { const res = await api('/api/channels/' + state.channel.id + '/pins'); pins = res.pins || []; }
+    else if (state.dm) { const res = await api('/api/dms/' + state.dm.id + '/pins'); pins = res.pins || []; }
+    renderPinsList(pins);
+  } catch (e) {
+    list.innerHTML = `<div class="notif-empty">${escapeHtml(e.message)}</div>`;
+  }
+}
+
+function renderPinsList(pins) {
+  const list = $('pins-list');
+  if (!list) return;
+  if (!pins || !pins.length) {
+    list.innerHTML = `<div class="notif-empty"><div class="ne-ico">${icon('pin')}</div>No pinned messages yet.<br><span class="pin-hint">Right-click a message and choose Pin Message.</span></div>`;
+    hydrateIcons(list);
+    return;
+  }
+  list.innerHTML = pins.map(m => {
+    const a = m.author || {};
+    const name = escapeHtml(a.display_name || a.username || 'Unknown');
+    const body = m.content ? formatContent(m.content) : (m.attachment_name ? `<span class="pin-attach">${escapeHtml(m.attachment_name)}</span>` : '<em>(no text)</em>');
+    return `<div class="pin-item" data-mid="${m.id}">
+      <div class="pin-ava">${avatarHTML(a, 36, a.status || 'offline')}</div>
+      <div class="pin-body">
+        <div class="pin-head"><span class="pin-author">${name}</span><span class="pin-time">${formatTime(m.created_at)}</span></div>
+        <div class="pin-text">${body}</div>
+      </div>
+      <button class="pin-unpin" data-unpin="${m.id}" title="Unpin">${icon('xmark')}</button>
+    </div>`;
+  }).join('');
+  hydrateIcons(list);
+  list.querySelectorAll('.pin-item').forEach(el => el.addEventListener('click', (e) => {
+    if (e.target.closest('[data-unpin]')) return;
+    flashMessage(el.dataset.mid);
+    const panel = $('pins-panel'); if (panel) panel.remove();
+  }));
+  list.querySelectorAll('[data-unpin]').forEach(btn => btn.addEventListener('click', async (e) => {
+    e.stopPropagation();
+    try {
+      await api('/api/messages/' + btn.dataset.unpin + '/pin', { method: 'DELETE' });
+      const m = state.messages.find(x => x.id === btn.dataset.unpin);
+      if (m) { m.pinned = false; updatePinIndicator(m.id, false); }
+      toast('Message unpinned', 'success');
+      loadPins();
+    } catch (err) { toast(err.message, 'error'); }
+  }));
+}
+
+/* ============================================================
    MODALS
    ============================================================ */
 function openModal(html, opts = {}) {
@@ -1656,10 +1949,132 @@ function wireDropzone(dz, input, onFile) {
   dz.addEventListener('drop', (e) => { e.preventDefault(); dz.classList.remove('drag'); const f = e.dataTransfer.files[0]; if (f) onFile(f); });
   input.addEventListener('change', (e) => { const f = e.target.files[0]; if (f) onFile(f); e.target.value = ''; });
 }
-async function uploadImage(file) {
+async function uploadImage(file, filename) {
   if (file.size > 25 * 1024 * 1024) throw new Error('Image is too large (maximum 25 MB)');
-  const fd = new FormData(); fd.append('file', file);
+  const fd = new FormData();
+  fd.append('file', file, filename || file.name || 'upload.png');
   return api('/api/upload', { method: 'POST', body: fd });
+}
+
+/* ---------------- Image scaler / cropper ----------------
+   Lets the user zoom and reposition an avatar or banner before it is uploaded.
+   The visible area is exported to a canvas at the target resolution. */
+function openImageEditor(file, opts = {}) {
+  const isBanner = opts.kind === 'banner';
+  const cw = isBanner ? 420 : 260;
+  const ch = isBanner ? Math.round(420 * 240 / 600) : 260;
+  const outW = isBanner ? 600 : 512;
+  const outH = isBanner ? 240 : 512;
+  const isGif = /gif/i.test(file.type) || /\.gif$/i.test(file.name || '');
+
+  const url = URL.createObjectURL(file);
+  const wrap = document.createElement('div');
+  wrap.className = 'img-editor-overlay';
+  wrap.innerHTML = `
+    <div class="img-editor">
+      <h3>${escapeHtml(opts.title || 'Adjust Image')}</h3>
+      <p class="ie-sub">Drag the image to reposition it, then use the slider to zoom. ${isBanner ? 'This is how your banner will appear.' : 'This is how your avatar will appear.'}</p>
+      <div class="img-editor-stage" id="ie-stage" style="width:${cw}px;height:${ch}px;border-radius:${isBanner ? '12px' : '50%'}">
+        <img id="ie-img" alt="" draggable="false">
+      </div>
+      <div class="img-editor-zoom">
+        <span>Zoom</span>
+        <input type="range" id="ie-zoom" min="1" max="3" step="0.01" value="1">
+        <span id="ie-zoom-val">100%</span>
+      </div>
+      <div class="modal-actions">
+        <button class="btn secondary" id="ie-cancel">Cancel</button>
+        <button class="btn" id="ie-save">Save</button>
+      </div>
+    </div>`;
+  document.body.appendChild(wrap);
+
+  const stage = wrap.querySelector('#ie-stage');
+  const el = wrap.querySelector('#ie-img');
+  const zoom = wrap.querySelector('#ie-zoom');
+  const zoomVal = wrap.querySelector('#ie-zoom-val');
+  let baseScale = 1, scale = 1, ox = 0, oy = 0, ready = false;
+  let dragging = false, startX = 0, startY = 0, startOx = 0, startOy = 0;
+
+  function render() {
+    if (!ready) return;
+    const dispW = el.naturalWidth * baseScale * scale;
+    const dispH = el.naturalHeight * baseScale * scale;
+    const maxOx = Math.max(0, (dispW - cw) / 2);
+    const maxOy = Math.max(0, (dispH - ch) / 2);
+    ox = Math.min(maxOx, Math.max(-maxOx, ox));
+    oy = Math.min(maxOy, Math.max(-maxOy, oy));
+    el.style.width = dispW + 'px';
+    el.style.height = dispH + 'px';
+    el.style.left = ((cw - dispW) / 2 + ox) + 'px';
+    el.style.top = ((ch - dispH) / 2 + oy) + 'px';
+  }
+
+  el.addEventListener('load', () => {
+    baseScale = Math.max(cw / el.naturalWidth, ch / el.naturalHeight);
+    ready = true;
+    render();
+  });
+  el.src = url;
+
+  stage.addEventListener('pointerdown', (e) => {
+    if (!ready) return;
+    dragging = true; startX = e.clientX; startY = e.clientY; startOx = ox; startOy = oy;
+    try { stage.setPointerCapture(e.pointerId); } catch (err) {}
+    stage.classList.add('grabbing');
+  });
+  stage.addEventListener('pointermove', (e) => {
+    if (!dragging) return;
+    ox = startOx + (e.clientX - startX);
+    oy = startOy + (e.clientY - startY);
+    render();
+  });
+  const endDrag = () => { dragging = false; stage.classList.remove('grabbing'); };
+  stage.addEventListener('pointerup', endDrag);
+  stage.addEventListener('pointercancel', endDrag);
+  stage.addEventListener('wheel', (e) => {
+    if (!ready) return;
+    e.preventDefault();
+    scale = Math.min(3, Math.max(1, scale - e.deltaY * 0.0015));
+    zoom.value = scale;
+    zoomVal.textContent = Math.round(scale * 100) + '%';
+    render();
+  }, { passive: false });
+  zoom.addEventListener('input', () => {
+    scale = parseFloat(zoom.value);
+    zoomVal.textContent = Math.round(scale * 100) + '%';
+    render();
+  });
+
+  const cleanup = () => { try { URL.revokeObjectURL(url); } catch (e) {} wrap.remove(); };
+  const done = (blob, filename) => { cleanup(); if (opts.onSave) opts.onSave(blob, filename); };
+  wrap.querySelector('#ie-cancel').addEventListener('click', cleanup);
+  wrap.addEventListener('click', (e) => { if (e.target === wrap) cleanup(); });
+
+  wrap.querySelector('#ie-save').addEventListener('click', () => {
+    if (!ready) return;
+    // Keep the original animated GIF when it has not been scaled or moved.
+    if (isGif && scale === 1 && ox === 0 && oy === 0) { done(file, file.name); return; }
+    const canvas = document.createElement('canvas');
+    canvas.width = outW; canvas.height = outH;
+    const ctx = canvas.getContext('2d');
+    const totalScale = baseScale * scale;
+    const dispW = el.naturalWidth * totalScale;
+    const dispH = el.naturalHeight * totalScale;
+    const tlX = (cw - dispW) / 2 + ox;
+    const tlY = (ch - dispH) / 2 + oy;
+    const sx = (-tlX) / totalScale;
+    const sy = (-tlY) / totalScale;
+    const sw = cw / totalScale;
+    const sh = ch / totalScale;
+    try {
+      ctx.drawImage(el, sx, sy, sw, sh, 0, 0, outW, outH);
+    } catch (err) { toast('Could not process this image', 'error'); return; }
+    canvas.toBlob((blob) => {
+      if (!blob) { toast('Could not process this image', 'error'); return; }
+      done(blob, (isBanner ? 'banner' : 'avatar') + '.png');
+    }, 'image/png');
+  });
 }
 
 /* ---------------- Create / join server ---------------- */
@@ -1858,7 +2273,7 @@ function renderOwnProfile(user) {
           <div class="pic-avatar">${avatarHTML(user, 96, user.status || 'offline')}</div>
           <div class="pic-name">${escapeHtml(displayName)}</div>
           <div class="pic-tag">${escapeHtml(fullTag(user))}</div>
-          <div class="pic-status"><span class="dot" style="background:${statusColor}"></span>${escapeHtml(user.custom_status || statusLabel(user.status))}</div>
+          <div class="pic-status"><span class="dot ${user.status || 'online'}"></span>${escapeHtml(user.custom_status || statusLabel(user.status))}</div>
           ${user.pronouns ? `<div class="pic-date">${escapeHtml(user.pronouns)}</div>` : ''}
           <div class="pic-date">Member since ${memberSince}</div>
         </div>
@@ -2053,9 +2468,9 @@ function openSettings(section) {
   settingsDirty = false;
   settingsSaveFn = null;
   const nav = SETTINGS_NAV.map(item => {
-    if (item.cat) return `<div class="sn-cat">${item.cat}</div>`;
-    return `<div class="sn-item" data-sec="${item.id}">${item.label} <span class="chev">${icon('chevron-right')}</span></div>`;
-  }).join('') + `<div class="sn-item sn-danger" id="sn-logout">${icon('log-out')} Log Out</div>`;
+    if (item.cat) return `<div class="sn-cat">${t(item.cat)}</div>`;
+    return `<div class="sn-item" data-sec="${item.id}">${t(item.label)} <span class="chev">${icon('chevron-right')}</span></div>`;
+  }).join('');
 
   openModal(`
     <div class="settings-body">
@@ -2074,9 +2489,9 @@ function openSettings(section) {
       <div class="settings-panel" id="settings-panel"></div>
     </div>
     <div class="settings-footer">
-      <button class="btn secondary" id="set-logout">Log Out</button>
+      <button class="btn secondary" id="set-logout">${t('Log Out')}</button>
       <div style="flex:1"></div>
-      <button class="btn" id="set-done">Done</button>
+      <button class="btn" id="set-done">${t('Save')}</button>
     </div>`, { modalClass: 'settings-modal' });
 
   const discardThen = (after) => {
@@ -2090,8 +2505,12 @@ function openSettings(section) {
     return ok;
   };
   const guardLogout = () => {
-    if (settingsDirty) showUnsavedDialog({ onSave: () => saveThen(logout), onDiscard: () => discardThen(logout) });
-    else logout();
+    const doLogout = async () => {
+      const ok = await confirmDialog({ title: 'Log Out', body: 'Are you sure you want to log out of Crossroads?', confirmText: 'Log Out', danger: true });
+      if (ok) logout();
+    };
+    if (settingsDirty) showUnsavedDialog({ onSave: () => saveThen(doLogout), onDiscard: () => discardThen(doLogout) });
+    else doLogout();
   };
 
   modalCloseGuard = () => {
@@ -2099,9 +2518,15 @@ function openSettings(section) {
     showUnsavedDialog({ onSave: () => saveThen(closeModal), onDiscard: () => discardThen(closeModal) });
   };
 
-  $('set-done').addEventListener('click', requestCloseModal);
+  $('set-done').addEventListener('click', async () => {
+    if (settingsDirty && settingsSaveFn) {
+      const ok = await settingsSaveFn();
+      if (!ok) return;
+      settingsDirty = false;
+    }
+    closeModal();
+  });
   $('set-logout').addEventListener('click', guardLogout);
-  $('sn-logout').addEventListener('click', guardLogout);
   document.querySelectorAll('#settings-nav .sn-item[data-sec]').forEach(el => {
     el.addEventListener('click', () => renderSettings(el.dataset.sec));
   });
@@ -2207,13 +2632,13 @@ function settingsPanelHTML(section) {
     case 'privacy':
       return `
         <h4>Privacy &amp; Safety</h4>
+        ${toggleRow('friendRequests', 'Allow friend requests', 'Let other people send you friend requests. Turn this off to only be added by people you choose to add first.')}
         ${toggleRow('safeMode', 'Keep me safe', 'Scan and blur media from unverified sources.')}
         ${toggleRow('dmFromMembers', 'Allow direct messages from server members', 'Members of servers you share can start a conversation with you.')}
         ${toggleRow('dataPersonalisation', 'Allow data personalisation', 'Use my activity to improve recommendations.')}
         ${toggleRow('readReceipts', 'Show my read receipts', 'Let others know when you have read their messages.')}
         <div class="pw-section">
           <div class="pw-head">
-            <div class="pw-head-ico">${icon('key')}</div>
             <div>
               <h5>Change Password</h5>
               <p class="pw-sub">Keep your account secure by updating your password regularly. You will stay signed in on this device.</p>
@@ -2225,7 +2650,7 @@ function settingsPanelHTML(section) {
             <input type="password" id="pw-new" autocomplete="new-password" placeholder="Create a new password (at least 6 characters)"></div>
           <div class="field"><label>Confirm New Password</label>
             <input type="password" id="pw-confirm" autocomplete="new-password" placeholder="Re-enter your new password to confirm"></div>
-          <div class="pw-actions"><button class="btn" id="pw-save">${icon('key')} Update Password</button></div>
+          <div class="pw-actions"><button class="btn" id="pw-save">Update Password</button></div>
         </div>`;
     case 'apps':
       return `<h4>Authorized Apps</h4><div class="empty-panel"><div class="ep-ico">${icon('plug')}</div><h5>No authorized apps</h5><p>When you connect an application to your account, it will appear here.</p></div>`;
@@ -2307,15 +2732,17 @@ function wireAccountPanel() {
   const markDirty = () => { settingsDirty = true; };
 
   $('sa-upload').addEventListener('click', () => $('sa-file').click());
-  $('sa-file').addEventListener('change', async (e) => {
-    const f = e.target.files[0]; if (!f) return;
-    try {
-      const d = await uploadImage(f);
-      settingsUploads.avatar_url = d.url;
-      previewSelf({ avatar_url: d.url });
-      markDirty();
-      toast('Avatar ready \u2014 remember to save', 'success');
-    } catch (err) { toast(err.message, 'error'); }
+  $('sa-file').addEventListener('change', (e) => {
+    const f = e.target.files[0]; e.target.value = ''; if (!f) return;
+    openImageEditor(f, { kind: 'avatar', title: 'Adjust Avatar', onSave: async (blob, filename) => {
+      try {
+        const d = await uploadImage(blob, filename);
+        settingsUploads.avatar_url = d.url;
+        previewSelf({ avatar_url: d.url });
+        markDirty();
+        toast('Avatar ready \u2014 remember to save', 'success');
+      } catch (err) { toast(err.message, 'error'); }
+    } });
   });
   $('sa-remove').addEventListener('click', () => {
     settingsUploads.avatar_url = null;
@@ -2336,13 +2763,15 @@ function wireAccountPanel() {
     previewSelf({ banner_url: settingsUploads.banner_url, banner_color: bannerColor });
   };
   $('set-banner-file-btn').addEventListener('click', () => $('set-banner-file').click());
-  $('set-banner-file').addEventListener('change', async (e) => {
-    const f = e.target.files[0]; if (!f) return;
-    try {
-      const d = await uploadImage(f);
-      settingsUploads.banner_url = d.url; paintBanner(); markDirty();
-      toast('Banner ready \u2014 remember to save', 'success');
-    } catch (err) { toast(err.message, 'error'); }
+  $('set-banner-file').addEventListener('change', (e) => {
+    const f = e.target.files[0]; e.target.value = ''; if (!f) return;
+    openImageEditor(f, { kind: 'banner', title: 'Adjust Banner', onSave: async (blob, filename) => {
+      try {
+        const d = await uploadImage(blob, filename);
+        settingsUploads.banner_url = d.url; paintBanner(); markDirty();
+        toast('Banner ready \u2014 remember to save', 'success');
+      } catch (err) { toast(err.message, 'error'); }
+    } });
   });
   $('set-banner-remove').addEventListener('click', () => { settingsUploads.banner_url = null; paintBanner(); markDirty(); });
   document.querySelectorAll('#banner-color-row .swatch').forEach(sw => sw.addEventListener('click', () => {
@@ -2463,7 +2892,11 @@ function wireLanguage() {
   const sel = $('lang-select');
   if (!sel) return;
   sel.value = setting('language') || 'English, US';
-  sel.addEventListener('change', () => saveSetting('language', sel.value));
+  sel.addEventListener('change', () => {
+    saveSetting('language', sel.value);
+    applyLanguage();
+    toast('Language updated', 'success');
+  });
   const vol = $('voice-volume');
   if (vol) vol.addEventListener('change', () => saveSetting('inputVolume', Number(vol.value)));
 }
@@ -3111,7 +3544,7 @@ function bindGlobalEvents() {
   $('btn-mic').addEventListener('click', () => openSettings('voice'));
   $('hdr-notifs').addEventListener('click', (e) => { e.stopPropagation(); openNotifPanel(); });
   $('hdr-members').addEventListener('click', () => { saveSetting('showMembers', !state.showMembers); });
-  $('hdr-pins').addEventListener('click', () => toast('Pinned messages are not available yet'));
+  $('hdr-pins').addEventListener('click', (e) => { e.stopPropagation(); openPinsPanel(); });
   $('hdr-search').addEventListener('click', () => toast('Search is not available yet'));
   const ec = $('empty-create'); if (ec) ec.addEventListener('click', openCreateServer);
 
@@ -3164,6 +3597,8 @@ function bindGlobalEvents() {
   /* Disable the native right-click menu and show a custom one. */
   document.addEventListener('contextmenu', (e) => {
     e.preventDefault();
+    const dmEl = e.target.closest('.dm-item');
+    if (dmEl && dmEl.dataset.dmid) { openDMContextMenu(e.clientX, e.clientY, dmEl.dataset.dmid); return; }
     const chEl = e.target.closest('.channel');
     if (chEl && chEl.dataset.cid && state.server) { openChannelContextMenu(e.clientX, e.clientY, chEl.dataset.cid); return; }
     const msg = e.target.closest('.msg-group');

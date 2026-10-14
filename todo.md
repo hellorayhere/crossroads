@@ -1,29 +1,39 @@
-# Crossroads — Data Persistence + Favicon  ✅ DONE
+# Crossroads — UI/UX Revamp Task List
 
-## Problem
-- Render service `crossroadsv2` is on the FREE plan → NO persistent disk → filesystem is
-  EPHEMERAL. Every deploy/restart wipes `data/crossroads.db` and `uploads/`.
-- That is why users "keep" and "test" no longer existed.
-- Render disks require payment info (API: "Payment information is required").
+## 1. Status icons from uploaded images ✅
+- [x] online.png / idle.png / dnd.png placed in public/img/ (status-online/idle/dnd.png)
+- [x] CSS wired for avatar dots, mini status, profile pills
 
-## Solution: free durable persistence via a private GitHub repo
-- [x] Add persist.js: restore DB+uploads on boot, backup on interval + SIGTERM
-- [x] db.js: restore from remote BEFORE opening the DB (sync child process)
-- [x] server.js: start auto-backup + back up new uploads
-- [x] Verify GitHub token works (repo scope)
-- [x] Create private repo `hellorayhere/crossroads-data`
-- [x] Commit + push code changes (persist.js, db.js, server.js, favicon, html)
-- [x] Set Render env vars (GH_DATA_TOKEN, GH_DATA_REPO, GH_DATA_BRANCH, JWT_SECRET)
-- [x] Deploy / trigger redeploy (live @ 0c9f9b0)
-- [x] Confirm durable storage active (DB pushed to data repo every 20s on change)
-- [x] Harden: skip no-op DB backups via SHA-256 hash (no repo bloat)
+## 2. Auth UI revamp (less cartoony, no emojis/SVG icons) ✅
+- [x] Redesign public/index.html (clean, professional)
+- [x] Rewrite public/css/auth.css
+- [x] Keep all element IDs so auth.js still works
+- [x] Verify locally with screenshot
 
-## Favicon
-- [x] Convert uploaded image to favicon.png / favicon.ico / apple-touch-icon.png
-- [x] Update index.html + app.html <link rel="icon">
-- [x] Verify served on live site (image/png 192x192, image/x-icon multi-size)
+## 3. Navigation animation on server/DM click ✅
+- [x] view-enter + navPop animations wired on server/DM/channel/friends open
 
-## Preserve users "keep" and "test"
-- [x] Created keep#2198 and test#2485
-- [x] Triggered TWO redeploys → both users SURVIVED (proves persistence works)
-- [x] Confirmed present in durable store db/crossroads.db
+## 4. DM right-click dropdown (Close, Unfriend, Block, etc.) ✅
+- [x] Context menu verified (Mark As Read, Close DM, Copy User ID, Unfriend, Block)
+
+## 5. Friends: include tag number (test#6842) ✅
+- [x] Live search + tag display verified via API
+
+## 6. Performance / lag fixes ✅
+- [x] Parallel init, debounced rerenders, lazy images
+
+## 7. Pinned messages system ✅
+- [x] Pin/unpin + panel verified via API + UI
+
+## 8. Settings fixes ✅
+- [x] Language applies, desktop notifications, friend-request toggle
+- [x] Remove Change Password SVG icon
+- [x] Save button, single white Log Out with confirm
+
+## 9. Profile pic/banner scale control ✅
+- [x] Image editor zoom slider + drag verified
+
+## 10. Deploy
+- [ ] Commit + push to GitHub main
+- [ ] Verify Render redeploy + live site
+- [ ] Confirm data preserved (never wipe)

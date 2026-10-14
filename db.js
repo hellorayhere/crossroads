@@ -96,7 +96,8 @@ CREATE TABLE IF NOT EXISTS messages (
   attachment_name TEXT,
   attachment_type TEXT,
   created_at INTEGER NOT NULL,
-  edited_at INTEGER
+  edited_at INTEGER,
+  pinned INTEGER DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS reactions (
@@ -114,6 +115,13 @@ CREATE TABLE IF NOT EXISTS dm_channels (
   user2_id TEXT NOT NULL,
   created_at INTEGER NOT NULL,
   UNIQUE(user1_id, user2_id)
+);
+
+CREATE TABLE IF NOT EXISTS dm_hidden (
+  dm_id TEXT NOT NULL,
+  user_id TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY (dm_id, user_id)
 );
 
 CREATE TABLE IF NOT EXISTS friendships (
@@ -160,6 +168,7 @@ CREATE INDEX IF NOT EXISTS idx_blocks_blocker ON blocks(blocker_id);
 CREATE INDEX IF NOT EXISTS idx_notes_owner ON notes(owner_id);
 CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_id);
 CREATE INDEX IF NOT EXISTS idx_invites_server ON invites(server_id);
+CREATE INDEX IF NOT EXISTS idx_dm_hidden_user ON dm_hidden(user_id);
 `);
 
 /* ---------------- Migrations ----------------
@@ -194,6 +203,12 @@ function migrate() {
   if (!msgCols.includes('mentions')) {
     try { db.exec("ALTER TABLE messages ADD COLUMN mentions TEXT DEFAULT '[]'"); } catch (e) {}
   }
+  // 1b-2. Additive migration for pinned messages (never destructive).
+  if (!msgCols.includes('pinned')) {
+    try { db.exec('ALTER TABLE messages ADD COLUMN pinned INTEGER DEFAULT 0'); } catch (e) {}
+  }
+  // The pinned index must be created AFTER the column exists (safe for old DBs).
+  try { db.exec('CREATE INDEX IF NOT EXISTS idx_messages_pinned ON messages(pinned)'); } catch (e) {}
 
   // 1c. Additive migrations for servers (banner + description). Never destructive.
   const srvCols = db.prepare('PRAGMA table_info(servers)').all().map(c => c.name);

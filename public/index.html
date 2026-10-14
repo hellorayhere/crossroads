@@ -11,42 +11,31 @@
   <link rel="stylesheet" href="/css/auth.css" />
 </head>
 <body>
-  <!-- Ambient background -->
-  <div class="ambient" aria-hidden="true">
-    <span class="orb orb-a"></span>
-    <span class="orb orb-b"></span>
-    <span class="orb orb-c"></span>
-    <span class="grain"></span>
-  </div>
-
   <main class="auth-shell">
     <!-- Information panel -->
     <section class="info-panel">
       <div class="wordmark">
-        <span class="mark">C</span>
+        <span class="mark" aria-hidden="true">C</span>
         <span class="name">Crossroads</span>
       </div>
 
-      <h1>Where communities<br />come together.</h1>
-      <p class="lead">Crossroads gives you the tools to build a place where you and your people can talk, share, and stay connected — all in real time.</p>
+      <h1>Where communities come together.</h1>
+      <p class="lead">Crossroads gives you the tools to build a place where you and your people can talk, share, and stay connected in real time.</p>
 
       <ul class="features">
         <li>
-          <span class="bar"></span>
           <div class="txt">
             <strong>Organized conversations</strong>
             <span>Text and voice channels that keep every topic in its place.</span>
           </div>
         </li>
         <li>
-          <span class="bar"></span>
           <div class="txt">
             <strong>Rich sharing</strong>
             <span>Link previews, media uploads, and reactions on every message.</span>
           </div>
         </li>
         <li>
-          <span class="bar"></span>
           <div class="txt">
             <strong>Your identity</strong>
             <span>Custom profiles with banners, colors, and personal status.</span>
@@ -60,10 +49,6 @@
     <!-- Auth card -->
     <section class="auth-card">
       <div class="card-head">
-        <div class="brandline">
-          <span class="mark">C</span>
-          <span class="name">Crossroads</span>
-        </div>
         <h2 id="form-title">Welcome back</h2>
         <p class="sub" id="form-subtitle">Sign in to continue to your workspace.</p>
       </div>
@@ -75,7 +60,7 @@
         <div class="field" id="f-login-id">
           <label for="login-identifier">Username or Tag <span class="req">*</span></label>
           <div class="input-wrap">
-            <input type="text" id="login-identifier" placeholder="Enter your username or username#0000" autocomplete="username" />
+            <input type="text" id="login-identifier" placeholder="username or username#0000" autocomplete="username" />
           </div>
           <div class="msg error">Please enter your username or tag.</div>
         </div>
@@ -83,7 +68,7 @@
         <div class="field" id="f-login-pass">
           <label for="login-password">Password <span class="req">*</span></label>
           <div class="input-wrap">
-            <input type="password" id="login-password" placeholder="Enter your password to continue" autocomplete="current-password" />
+            <input type="password" id="login-password" placeholder="Enter your password" autocomplete="current-password" />
             <button type="button" class="peek" data-target="login-password" aria-label="Show password">Show</button>
           </div>
           <div class="msg error">Please enter your password.</div>
@@ -98,7 +83,7 @@
         <div class="field" id="f-reg-user">
           <label for="reg-username">Username <span class="req">*</span></label>
           <div class="input-wrap">
-            <input type="text" id="reg-username" placeholder="Pick a unique username\u2026" autocomplete="username" />
+            <input type="text" id="reg-username" placeholder="Pick a unique username" autocomplete="username" />
             <span class="check-ind" id="reg-user-ind" aria-hidden="true"></span>
           </div>
           <div class="msg error" id="reg-user-err">Please choose a valid username.</div>
@@ -109,7 +94,7 @@
         <div class="field" id="f-reg-pass">
           <label for="reg-password">Password <span class="req">*</span></label>
           <div class="input-wrap">
-            <input type="password" id="reg-password" placeholder="Create a password (at least 6 characters)" autocomplete="new-password" />
+            <input type="password" id="reg-password" placeholder="At least 6 characters" autocomplete="new-password" />
             <button type="button" class="peek" data-target="reg-password" aria-label="Show password">Show</button>
           </div>
           <div class="msg error">Password must be at least 6 characters.</div>
