@@ -23,5 +23,5 @@
 
 ## 5. Test & deploy
 - [x] Test locally
-- [ ] Commit + push
-- [ ] Render deploy + verify live, data preserved
+- [x] Commit + push
+- [x] Render deploy + verify live, data preserved
