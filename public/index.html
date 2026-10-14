@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Crossroads | Login</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🚦</text></svg>" />
+  <link rel="stylesheet" href="/css/auth.css" />
+<script src="https://sites.super.myninja.ai/_assets/ninja-daytona-script.js"></script>
+</head>
+<body>
+  <div class="bg-layer"></div>
+
+  <div class="auth-wrap">
+    <div class="feature-panel">
+      <h2>Welcome to Crossroads</h2>
+      <p>Your place to talk, hang out, and build communities. Create a server, invite your friends, share media, and react to everything — all in real time.</p>
+      <div class="feature-list">
+        <div class="feature-item"><span class="dot">💬</span> Real-time text channels &amp; DMs</div>
+        <div class="feature-item"><span class="dot">🎭</span> Reactions, replies &amp; rich link embeds</div>
+        <div class="feature-item"><span class="dot">🖼️</span> Share images &amp; files instantly</div>
+        <div class="feature-item"><span class="dot">👤</span> Custom profiles with banners &amp; colors</div>
+      </div>
+    </div>
+
+    <div class="auth-card">
+      <div class="logo">
+        <div class="logo-mark">
+          <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path d="M12 2 L20 7 V17 L12 22 L4 17 V7 Z" fill="#fff" opacity="0.95"/>
+            <path d="M8 9 h8 M8 12 h8 M8 15 h5" stroke="#5865f2" stroke-width="1.6" stroke-linecap="round"/>
+          </svg>
+        </div>
+        <span class="brand-name">Crossroads</span>
+      </div>
+
+      <h1 id="form-title">Welcome back!</h1>
+      <p class="subtitle" id="form-subtitle">We're so excited to see you again!</p>
+
+      <div class="global-error" id="global-error"></div>
+
+      <!-- LOGIN FORM -->
+      <form id="login-form">
+        <div class="field" id="f-login-id">
+          <label>Email or Username <span class="req">*</span></label>
+          <input type="text" id="login-identifier" autocomplete="username" placeholder="you@example.com or name#0000" />
+          <div class="error">Please enter your email or username.</div>
+        </div>
+        <div class="field" id="f-login-pass">
+          <label>Password <span class="req">*</span></label>
+          <input type="password" id="login-password" autocomplete="current-password" placeholder="Your password" />
+          <div class="error">Please enter your password.</div>
+        </div>
+        <button type="submit" class="btn" id="login-btn">Log In</button>
+        <p class="switch">Need an account? <a id="to-register">Register</a></p>
+      </form>
+
+      <!-- REGISTER FORM -->
+      <form id="register-form" class="hidden">
+        <div class="field" id="f-reg-email">
+          <label>Email <span class="req">*</span></label>
+          <input type="email" id="reg-email" autocomplete="email" placeholder="you@example.com" />
+          <div class="error">Please enter a valid email.</div>
+        </div>
+        <div class="field" id="f-reg-user">
+          <label>Username <span class="req">*</span></label>
+          <input type="text" id="reg-username" autocomplete="off" placeholder="Choose a username" />
+          <div class="hint">You'll get a tag like <b>username#7362</b> with a random 4-digit number.</div>
+          <div class="error">Username must be 2-32 characters (letters, numbers, . or _).</div>
+        </div>
+        <div class="field" id="f-reg-pass">
+          <label>Password <span class="req">*</span></label>
+          <input type="password" id="reg-password" autocomplete="new-password" placeholder="At least 6 characters" />
+          <div class="error">Password must be at least 6 characters.</div>
+        </div>
+        <button type="submit" class="btn" id="register-btn">Create Account</button>
+        <p class="switch"><a id="to-login">Already have an account?</a></p>
+      </form>
+
+      <p class="footer-note">By registering you agree to the Crossroads Terms of Service.</p>
+    </div>
+  </div>
+
+  <script src="/js/auth.js"></script>
+</body>
+</html>

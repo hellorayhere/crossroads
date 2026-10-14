@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Crossroads</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🚦</text></svg>" />
+  <link rel="stylesheet" href="/css/app.css" />
+</head>
+<body>
+  <div id="app">
+    <!-- ===== SERVER RAIL ===== -->
+    <nav class="server-rail" id="server-rail">
+      <div class="rail-item home tip" id="rail-home" data-tip="Direct Messages">
+        <svg viewBox="0 0 24 24" width="26" height="26" fill="#fff"><path d="M20.3 4.4A19.8 19.8 0 0 0 15.4 3c-.2.4-.5.9-.6 1.3a18.3 18.3 0 0 0-5.5 0C9.1 3.9 8.8 3.4 8.6 3a19.7 19.7 0 0 0-4.9 1.4C.6 9 -.1 13.4.3 17.7a19.9 19.9 0 0 0 6 3c.5-.6.9-1.3 1.3-2-.7-.3-1.4-.6-2-1l.5-.4a14.2 14.2 0 0 0 12.2 0l.5.4c-.6.4-1.3.7-2 1 .4.7.8 1.4 1.3 2a19.8 19.8 0 0 0 6-3c.5-5-.9-9.3-3.8-13.3ZM8.3 15c-1.2 0-2.1-1.1-2.1-2.4s.9-2.4 2.1-2.4 2.2 1.1 2.1 2.4c0 1.3-.9 2.4-2.1 2.4Zm7.4 0c-1.2 0-2.1-1.1-2.1-2.4s.9-2.4 2.1-2.4 2.2 1.1 2.1 2.4c0 1.3-.9 2.4-2.1 2.4Z"/></svg>
+      </div>
+      <div class="rail-divider"></div>
+      <div class="rail-servers" id="rail-servers"></div>
+      <div class="rail-item add tip" id="rail-add" data-tip="Add a Server">+</div>
+      <div class="rail-item explore tip" id="rail-explore" data-tip="Explore Servers">🧭</div>
+    </nav>
+
+    <!-- ===== SIDEBAR ===== -->
+    <aside class="sidebar" id="sidebar">
+      <header class="sidebar-header" id="sidebar-header">
+        <span class="name" id="sidebar-name">Direct Messages</span>
+        <span class="chev">▾</span>
+      </header>
+      <div class="channel-list" id="channel-list"></div>
+      <div class="user-panel">
+        <div class="me" id="user-panel-me">
+          <div class="avatar" id="my-avatar" style="width:32px;height:32px;font-size:13px;"></div>
+          <div class="meta">
+            <div class="uname" id="my-username">...</div>
+            <div class="tag" id="my-tag">#0000</div>
+          </div>
+        </div>
+        <div class="icons">
+          <button id="btn-mic" title="Mute">🎤</button>
+          <button id="btn-settings" title="User Settings">⚙️</button>
+        </div>
+      </div>
+    </aside>
+
+    <!-- ===== MAIN ===== -->
+    <main class="chat" id="chat">
+      <header class="chat-header" id="chat-header">
+        <span class="hash" id="chat-hash">#</span>
+        <span class="title" id="chat-title">Welcome</span>
+        <span class="topic" id="chat-topic"></span>
+        <div class="spacer"></div>
+        <div class="hdr-icons">
+          <button id="hdr-members" title="Members">👥</button>
+          <button id="hdr-pins" title="Pinned">📌</button>
+          <button id="hdr-search" title="Search">🔍</button>
+        </div>
+      </header>
+
+      <div class="messages" id="messages">
+        <div class="empty-state" id="empty-state">
+          <div class="inner">
+            <h2>👋 Welcome to Crossroads</h2>
+            <p>Select a server or start a direct message to begin chatting. Create your own server and invite friends with a single link.</p>
+            <button class="btn" id="empty-create">Create a Server</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="typing-bar" id="typing-bar"></div>
+
+      <div class="composer hidden" id="composer">
+        <div class="attach-preview hidden" id="attach-preview"></div>
+        <div class="composer-box" id="composer-box">
+          <button class="cbtn" id="attach-btn" title="Upload a file">＋</button>
+          <textarea id="message-input" rows="1" placeholder="Message #general"></textarea>
+          <button class="cbtn" id="emoji-btn" title="Emoji">😊</button>
+          <button class="send-btn" id="send-btn" title="Send">➤</button>
+        </div>
+        <div class="composer-hint" id="composer-hint"></div>
+        <input type="file" id="file-input" class="hidden" />
+      </div>
+    </main>
+
+    <!-- ===== MEMBERS ===== -->
+    <aside class="members" id="members"></aside>
+  </div>
+
+  <!-- ===== MODALS ===== -->
+  <div class="overlay hidden" id="modal-overlay">
+    <div class="modal" id="modal"></div>
+  </div>
+
+  <div class="toast-wrap" id="toast-wrap"></div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="/js/app.js"></script>
+</body>
+</html>
