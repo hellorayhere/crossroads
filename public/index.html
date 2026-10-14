@@ -9,6 +9,11 @@
   <link rel="icon" type="image/png" href="/favicon.png" />
   <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
   <link rel="stylesheet" href="/css/auth.css" />
+  <script>
+    /* If the visitor is already signed in, jump straight to the app before the
+       auth page ever paints, so the sign-in screen never flashes on the way in. */
+    try { if (localStorage.getItem('cr_token')) { location.replace('/app.html'); } } catch (e) { /* ignore */ }
+  </script>
 </head>
 <body>
   <main class="auth-shell">

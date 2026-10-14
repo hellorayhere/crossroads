@@ -195,6 +195,38 @@ function broadcastProfile(user) {
   io.emit('profile_update', publicUser(user));
 }
 
+/* ---------------- Voice channels (in-memory signaling state) ----------------
+   Voice is ephemeral: we never persist it. `voiceStates` maps a channel id to
+   a Map of userId -> { user_id, muted, deafened, speaking, joined_at }. The
+   server only relays WebRTC signaling between peers; audio flows peer-to-peer. */
+const voiceStates = new Map();
+
+function voiceMembers(channelId) {
+  const m = voiceStates.get(channelId);
+  return m ? Array.from(m.values()) : [];
+}
+
+function voiceChannelOf(userId) {
+  for (const [cid, m] of voiceStates) if (m.has(userId)) return cid;
+  return null;
+}
+
+function broadcastVoiceState(channelId) {
+  const ch = db.prepare('SELECT server_id FROM channels WHERE id = ?').get(channelId);
+  if (!ch) return;
+  io.emit('voice_state', { channel_id: channelId, server_id: ch.server_id, members: voiceMembers(channelId) });
+}
+
+function removeFromVoice(socket, channelId) {
+  const m = voiceStates.get(channelId);
+  if (!m || !m.has(socket.uid)) return;
+  m.delete(socket.uid);
+  if (!m.size) voiceStates.delete(channelId);
+  socket.leave(`voice:${channelId}`);
+  socket.to(`voice:${channelId}`).emit('voice_peer_left', { channel_id: channelId, user_id: socket.uid });
+  broadcastVoiceState(channelId);
+}
+
 /* ---------------- Servers: serialisation + invites ---------------- */
 
 function serverStats(serverId) {
@@ -832,6 +864,16 @@ app.get('/api/servers/:id', auth, (req, res) => {
   res.json({ server: publicServer(srv), channels, members, settings: getServerSettings(srv.id), roles: listServerRoles(srv.id) });
 });
 
+/* Current voice occupancy for a server (used to seed the UI on load). */
+app.get('/api/servers/:id/voice', auth, (req, res) => {
+  const srv = getServerForUser(req.params.id, req.user.id);
+  if (!srv) return res.status(404).json({ error: 'Server not found' });
+  const voiceChans = db.prepare("SELECT id FROM channels WHERE server_id = ? AND type = 'voice'").all(srv.id);
+  const states = {};
+  for (const c of voiceChans) states[c.id] = voiceMembers(c.id);
+  res.json({ states });
+});
+
 app.post('/api/servers/:id/channels', auth, (req, res) => {
   const srv = getServerForUser(req.params.id, req.user.id);
   if (!srv) return res.status(404).json({ error: 'Server not found' });
@@ -846,6 +888,26 @@ app.post('/api/servers/:id/channels', auth, (req, res) => {
   const ch = db.prepare('SELECT * FROM channels WHERE id = ?').get(id);
   broadcastChannels(srv.id);
   res.json({ channel: ch });
+});
+
+/* Reorder channels (owner + admins only). Body: { order: [channelId, ...] }.
+   The client sends the full list of channel ids in the desired order (text
+   group then voice group); positions are renumbered 0..n-1. The new order is
+   broadcast to everyone so it syncs in real time. Additive, never destructive. */
+app.patch('/api/servers/:id/channels/order', auth, (req, res) => {
+  const srv = getServerForUser(req.params.id, req.user.id);
+  if (!srv) return res.status(404).json({ error: 'Server not found' });
+  if (!isServerAdmin(srv, req.user.id)) return res.status(403).json({ error: 'Only the owner and admins can manage channels' });
+  const order = (req.body && Array.isArray(req.body.order)) ? req.body.order : null;
+  if (!order || !order.length) return res.status(400).json({ error: 'An order array is required' });
+  const existing = db.prepare('SELECT id FROM channels WHERE server_id = ?').all(srv.id).map(r => r.id);
+  const valid = new Set(existing);
+  for (const id of order) if (!valid.has(id)) return res.status(400).json({ error: 'Unknown channel in order' });
+  const update = db.prepare('UPDATE channels SET position = ? WHERE id = ? AND server_id = ?');
+  const apply = db.transaction(() => { order.forEach((id, i) => update.run(i, id, srv.id)); });
+  apply();
+  broadcastChannels(srv.id);
+  res.json({ ok: true });
 });
 
 /* Rename / re-topic a channel (owner + admins). */
@@ -1422,6 +1484,83 @@ app.post('/api/dms/:id/messages', auth, (req, res) => {
   res.json({ message: full });
 });
 
+/* ---------------- Search ---------------- */
+/* Search messages the caller is allowed to see. Scope is controlled by the
+   optional query params: channel_id (one channel), server_id (all text channels
+   in a server), dm_id (one conversation) or none (everything the user can see). */
+app.get('/api/search', auth, (req, res) => {
+  const q = (req.query.q || '').trim();
+  if (!q) return res.json({ results: [], query: '' });
+  const like = '%' + q.replace(/[\\%_]/g, m => '\\' + m) + '%';
+  const limit = Math.min(parseInt(req.query.limit) || 40, 100);
+
+  let channelIds = [];
+  let dmIds = [];
+
+  if (req.query.channel_id) {
+    const ch = db.prepare('SELECT * FROM channels WHERE id = ?').get(req.query.channel_id);
+    if (!ch) return res.status(404).json({ error: 'Channel not found' });
+    if (!getServerForUser(ch.server_id, req.user.id)) return res.status(403).json({ error: 'Not a member of this server' });
+    channelIds = [ch.id];
+  } else if (req.query.server_id) {
+    const srv = getServerForUser(req.query.server_id, req.user.id);
+    if (!srv) return res.status(403).json({ error: 'Not a member of this server' });
+    channelIds = db.prepare("SELECT id FROM channels WHERE server_id = ? AND (type IS NULL OR type = 'text')").all(srv.id).map(r => r.id);
+  } else if (req.query.dm_id) {
+    const dm = db.prepare('SELECT * FROM dm_channels WHERE id = ?').get(req.query.dm_id);
+    if (!dm || (dm.user1_id !== req.user.id && dm.user2_id !== req.user.id)) return res.status(404).json({ error: 'DM not found' });
+    dmIds = [dm.id];
+  } else {
+    channelIds = db.prepare(`SELECT c.id FROM channels c
+      JOIN server_members m ON m.server_id = c.server_id AND m.user_id = ?
+      WHERE (c.type IS NULL OR c.type = 'text')`).all(req.user.id).map(r => r.id);
+    dmIds = db.prepare('SELECT id FROM dm_channels WHERE user1_id = ? OR user2_id = ?').all(req.user.id, req.user.id).map(r => r.id);
+  }
+
+  const clauses = [];
+  const params = [];
+  if (channelIds.length) {
+    clauses.push(`(channel_id IN (${channelIds.map(() => '?').join(',')}) AND content LIKE ? ESCAPE '\\')`);
+    params.push(...channelIds, like);
+  }
+  if (dmIds.length) {
+    clauses.push(`(dm_id IN (${dmIds.map(() => '?').join(',')}) AND content LIKE ? ESCAPE '\\')`);
+    params.push(...dmIds, like);
+  }
+  if (!clauses.length) return res.json({ results: [], query: q });
+
+  const rows = db.prepare(`SELECT * FROM messages WHERE ${clauses.join(' OR ')} ORDER BY created_at DESC LIMIT ?`).all(...params, limit);
+  const metas = messagesWithMeta(rows, req.user.id);
+
+  const chanCache = {};
+  const dmCache = {};
+  const results = metas.map(m => {
+    let context = null;
+    if (m.channel_id) {
+      if (!chanCache[m.channel_id]) {
+        const ch = db.prepare('SELECT * FROM channels WHERE id = ?').get(m.channel_id);
+        const srv = ch ? db.prepare('SELECT * FROM servers WHERE id = ?').get(ch.server_id) : null;
+        chanCache[m.channel_id] = {
+          kind: 'channel', channel_id: m.channel_id, channel_name: ch ? ch.name : 'unknown',
+          server_id: srv ? srv.id : null, server_name: srv ? srv.name : ''
+        };
+      }
+      context = chanCache[m.channel_id];
+    } else if (m.dm_id) {
+      if (!dmCache[m.dm_id]) {
+        const dm = db.prepare('SELECT * FROM dm_channels WHERE id = ?').get(m.dm_id);
+        const otherId = dm ? (dm.user1_id === req.user.id ? dm.user2_id : dm.user1_id) : null;
+        const other = otherId ? db.prepare('SELECT * FROM users WHERE id = ?').get(otherId) : null;
+        dmCache[m.dm_id] = { kind: 'dm', dm_id: m.dm_id, user: publicUser(other) };
+      }
+      context = dmCache[m.dm_id];
+    }
+    return Object.assign({}, m, { context });
+  });
+
+  res.json({ results, query: q });
+});
+
 /* ---------------- Link Embeds ---------------- */
 function decodeEntities(s) {
   if (!s) return s;
@@ -1521,7 +1660,50 @@ io.on('connection', (socket) => {
     if (dm_id) socket.to(`dm:${dm_id}`).emit('typing', { dm_id, username });
   });
 
+  /* ---------------- Voice signaling ---------------- */
+  socket.on('voice_join', ({ channel_id }) => {
+    if (!channel_id) return;
+    const ch = db.prepare('SELECT * FROM channels WHERE id = ?').get(channel_id);
+    if (!ch || ch.type !== 'voice') return;
+    if (!getServerForUser(ch.server_id, uid)) return;
+    // Only one voice channel per user at a time.
+    const prev = voiceChannelOf(uid);
+    if (prev && prev !== channel_id) removeFromVoice(socket, prev);
+    let m = voiceStates.get(channel_id);
+    if (!m) { m = new Map(); voiceStates.set(channel_id, m); }
+    const existing = Array.from(m.keys()).filter(id => id !== uid);
+    m.set(uid, { user_id: uid, muted: false, deafened: false, speaking: false, joined_at: Date.now() });
+    socket.join(`voice:${channel_id}`);
+    // The newcomer receives the list of existing peers and offers to each of them.
+    socket.emit('voice_joined', { channel_id, peers: existing });
+    // Existing peers are told a new peer arrived so they can prepare to answer.
+    socket.to(`voice:${channel_id}`).emit('voice_peer_joined', { channel_id, user_id: uid });
+    broadcastVoiceState(channel_id);
+  });
+
+  socket.on('voice_leave', ({ channel_id }) => {
+    if (channel_id) removeFromVoice(socket, channel_id);
+  });
+
+  socket.on('voice_update', ({ channel_id, muted, deafened, speaking }) => {
+    const m = voiceStates.get(channel_id);
+    if (!m || !m.has(uid)) return;
+    const st = m.get(uid);
+    if (typeof muted === 'boolean') st.muted = muted;
+    if (typeof deafened === 'boolean') st.deafened = deafened;
+    if (typeof speaking === 'boolean') st.speaking = speaking;
+    broadcastVoiceState(channel_id);
+  });
+
+  /* Relay a WebRTC offer/answer/ICE candidate to a single peer. */
+  socket.on('voice_signal', ({ to, data }) => {
+    if (!to || !data) return;
+    io.to(`user:${to}`).emit('voice_signal', { from: uid, data });
+  });
+
   socket.on('disconnect', () => {
+    const vc = voiceChannelOf(uid);
+    if (vc) removeFromVoice(socket, vc);
     // Only mark the user offline once every tab/socket has closed.
     const remaining = io.sockets.adapter.rooms.get(`user:${uid}`);
     if (!remaining || remaining.size === 0) {
