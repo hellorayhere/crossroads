@@ -666,8 +666,8 @@ button:active, .rail-item:active, .channel:active, .dm-item:active, .member:acti
 .friend-badge { background: var(--red); color: #fff; font-size: 11px; font-weight: 700; border-radius: 8px; padding: 1px 6px; margin-left: auto; }
 
 /* ============ SETTINGS MODAL ============ */
-.settings-modal { max-width: 900px; width: 100%; padding: 0; overflow: hidden; background: var(--chat-bg); border-radius: var(--radius-lg); display: flex; flex-direction: column; max-height: 88vh; }
-.settings-body { display: grid; grid-template-columns: 220px 1fr; min-height: 0; flex: 1; }
+.settings-modal { max-width: 1080px; width: 100%; padding: 0; overflow: hidden; background: var(--chat-bg); border-radius: var(--radius-lg); display: flex; flex-direction: column; max-height: 92vh; min-height: min(680px, 90vh); }
+.settings-body { display: grid; grid-template-columns: 240px 1fr; min-height: 0; flex: 1; }
 .settings-nav { background: var(--sidebar-bg); padding: 16px 12px; overflow-y: auto; }
 .settings-nav .sn-item { display: flex; align-items: center; justify-content: space-between; padding: 8px 10px; border-radius: var(--radius-sm); font-size: 14px; font-weight: 500; color: var(--text-muted); cursor: pointer; margin-bottom: 2px; }
 .settings-nav .sn-item:hover { background: var(--hover); color: var(--text-normal); }
@@ -675,8 +675,8 @@ button:active, .rail-item:active, .channel:active, .dm-item:active, .member:acti
 .settings-nav .sn-item .chev { font-size: 12px; }
 .settings-nav .sn-cat { font-size: 11px; font-weight: 700; text-transform: uppercase; color: var(--text-faint); padding: 14px 10px 6px; letter-spacing: .02em; }
 .settings-nav .sn-danger { color: var(--red); }
-.settings-panel { overflow-y: auto; padding: 28px 32px; }
-.settings-panel h4 { font-size: 19px; font-weight: 700; color: var(--text-header); margin-bottom: 20px; }
+.settings-panel { overflow-y: auto; padding: 30px 40px 40px; }
+.settings-panel h4 { font-size: 20px; font-weight: 800; color: var(--text-header); margin-bottom: 22px; letter-spacing: -.2px; }
 .settings-panel .field label { font-size: 12px; font-weight: 600; text-transform: uppercase; color: var(--text-muted); margin-bottom: 8px; display: block; letter-spacing: .02em; }
 .settings-panel .field input, .settings-panel .field textarea, .settings-panel .field select { width: 100%; padding: 10px 12px; border-radius: var(--radius-sm); border: 1px solid transparent; background: color-mix(in srgb, var(--chat-bg) 80%, #000); color: var(--text-normal); font-size: 15px; outline: none; }
 .settings-panel .field input:focus, .settings-panel .field textarea:focus, .settings-panel .field select:focus { border-color: var(--brand); }
@@ -968,7 +968,7 @@ input:focus::placeholder, textarea:focus::placeholder { color: color-mix(in srgb
 .ir-revoke:hover { color: var(--red); background: color-mix(in srgb, var(--red) 14%, transparent); }
 
 /* ============ SERVER SETTINGS MODAL ============ */
-.ss-modal { max-width: 720px; width: 100%; padding: 0; overflow: hidden; background: var(--chat-bg); border-radius: var(--radius-lg); display: flex; flex-direction: column; max-height: 90vh; }
+.ss-modal { max-width: 1000px; width: 100%; padding: 0; overflow: hidden; background: var(--chat-bg); border-radius: var(--radius-lg); display: flex; flex-direction: column; max-height: 92vh; min-height: min(660px, 90vh); }
 .ss-modal-head { display: flex; align-items: center; justify-content: space-between; padding: 18px 24px; border-bottom: 1px solid var(--divider); }
 .ss-modal-head h3 { font-size: 18px; font-weight: 800; color: var(--text-header); }
 .ss-close { width: 32px; height: 32px; border-radius: 50%; display: grid; place-items: center; color: var(--text-muted); }
@@ -1193,9 +1193,9 @@ input:focus::placeholder, textarea:focus::placeholder { color: color-mix(in srgb
 .ss-role-desc { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
 .ss-role-count { font-size: 12px; font-weight: 700; color: var(--text-muted); background: var(--card); border: 1px solid var(--divider); border-radius: 999px; padding: 2px 9px; flex: 0 0 auto; }
 .ss-role-actions { margin-left: auto; display: flex; gap: 6px; }
-.ss-role-actions button { width: 32px; height: 32px; border-radius: 8px; display: grid; place-items: center; color: var(--text-muted); }
-.ss-role-actions button:hover { background: var(--hover); color: var(--text-normal); }
-.ss-role-actions button.danger:hover { color: var(--red); background: color-mix(in srgb, var(--red) 14%, transparent); }
+.ss-role-actions .ss-icon-btn { width: 32px; height: 32px; border-radius: 8px; display: grid; place-items: center; color: var(--text-muted); flex: 0 0 auto; transition: background .15s, color .15s; }
+.ss-role-actions .ss-icon-btn:hover { background: var(--hover); color: var(--text-normal); }
+.ss-role-actions .ss-icon-btn.ban:hover { color: var(--red); background: color-mix(in srgb, var(--red) 14%, transparent); }
 .ss-add-role { display: flex; align-items: center; justify-content: center; gap: 8px; margin: 4px 16px 22px; padding: 11px; border-radius: 10px; font-size: 14px; font-weight: 700; color: #fff; background: var(--brand); }
 .ss-add-role:hover { background: var(--brand-hover); }
 
@@ -1207,14 +1207,14 @@ input:focus::placeholder, textarea:focus::placeholder { color: color-mix(in srgb
 .role-preview { display: flex; align-items: center; gap: 10px; padding: 12px 14px; border-radius: 10px; background: color-mix(in srgb, var(--chat-bg) 84%, #000); border: 1px solid var(--divider); margin-bottom: 14px; }
 
 /* ---------- Server settings: member rows w/ actions ---------- */
-.ss-member-actions { margin-left: auto; display: flex; align-items: center; gap: 6px; }
-.ss-member-actions button { width: 32px; height: 32px; border-radius: 8px; display: grid; place-items: center; color: var(--text-muted); font-size: 15px; }
-.ss-member-actions button:hover { background: var(--hover); color: var(--text-normal); }
-.ss-member-actions button.kick:hover { color: var(--yellow); background: color-mix(in srgb, var(--yellow) 14%, transparent); }
-.ss-member-actions button.ban:hover { color: var(--red); background: color-mix(in srgb, var(--red) 14%, transparent); }
+.ss-member-actions { margin-left: auto; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+.ss-member-actions .ss-icon-btn { width: 32px; height: 32px; border-radius: 8px; display: grid; place-items: center; color: var(--text-muted); font-size: 15px; flex: 0 0 auto; border: 1px solid transparent; transition: background .15s, color .15s; }
+.ss-member-actions .ss-icon-btn:hover { background: var(--hover); color: var(--text-normal); }
+.ss-member-actions .ss-icon-btn.kick:hover { color: var(--yellow); background: color-mix(in srgb, var(--yellow) 14%, transparent); }
+.ss-member-actions .ss-icon-btn.ban:hover { color: var(--red); background: color-mix(in srgb, var(--red) 14%, transparent); }
 .ss-role-select {
-  padding: 6px 10px; border-radius: 8px; font-size: 12.5px; font-weight: 600;
-  background: var(--input-bg); color: var(--text-normal); border: 1px solid var(--divider); cursor: pointer;
+  padding: 7px 30px 7px 11px; border-radius: 8px; font-size: 12.5px; font-weight: 600; max-width: 150px;
+  background: var(--input-bg); color: var(--text-normal); border: 1px solid var(--divider); cursor: pointer; flex: 0 0 auto;
 }
 .ss-role-select:focus { outline: none; border-color: var(--brand); }
 .ss-custom-role-badge { font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: .03em; padding: 2px 6px; border-radius: 4px; color: #fff; }
@@ -1352,3 +1352,106 @@ body[data-theme="light"] .msg-group .text .spoiler { background: #c9ccd1; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .001ms !important; animation-iteration-count: 1 !important; transition-duration: .001ms !important; }
 }
+
+/* ============================================================
+   ROUND 2 — Settings polish (selects, member actions, spacing)
+   ============================================================ */
+
+/* ---------- Unified custom selects (caret, alignment) ---------- */
+.ss-field select, .ss-role-select, .ss-overview .field select, .ss-field-grid .field select,
+.ss-modal select, .settings-panel .field select, .modal .field select, .confirm-box .field select {
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%23b5bac1' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'><polyline points='6 9 12 15 18 9'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right 13px center;
+  background-size: 14px 14px;
+  padding-right: 38px;
+  cursor: pointer;
+  line-height: 1.3;
+}
+.ss-field select:hover, .ss-role-select:hover, .ss-overview .field select:hover, .ss-field-grid .field select:hover,
+.ss-modal select:hover,
+.settings-panel .field select:hover { border-color: color-mix(in srgb, var(--text-faint) 55%, transparent); }
+.ss-role-select { background-position: right 9px center; background-size: 13px 13px; padding-right: 28px; }
+body[data-theme="light"] .ss-field select, body[data-theme="light"] .settings-panel .field select,
+body[data-theme="light"] .ss-role-select, body[data-theme="light"] .modal .field select,
+body[data-theme="light"] .ss-modal select {
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%234e5058' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'><polyline points='6 9 12 15 18 9'/></svg>");
+}
+
+/* ---------- Safety tab: two-column field grid on wide modal ---------- */
+.ss-field-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 2px 32px; padding: 0 26px 26px; }
+.ss-field-grid .ss-field { padding: 16px 2px; }
+@media (max-width: 720px) { .ss-field-grid { grid-template-columns: 1fr; } }
+
+/* ---------- Members tab: roomier rows ---------- */
+.ss-members { padding: 0 18px 22px; gap: 2px; }
+.ss-member-row { padding: 9px 12px; gap: 14px; }
+.ss-member-name { font-size: 14.5px; }
+
+/* ---------- Role cards roomier ---------- */
+.ss-roles { padding: 0 26px; }
+
+/* ============================================================
+   ROUND 2 — My Account revamp, colour wheel, accent tinting
+   ============================================================ */
+
+/* ---------- Account: card stack ---------- */
+.acct-stack { display: flex; flex-direction: column; gap: 16px; max-width: 760px; }
+.acct-card { background: color-mix(in srgb, var(--chat-bg) 80%, #000); border: 1px solid var(--divider); border-radius: 14px; padding: 20px 22px; transition: border-color .15s ease; }
+.acct-card:hover { border-color: color-mix(in srgb, var(--text-faint) 35%, var(--divider)); }
+.acct-card-head { margin-bottom: 16px; }
+.acct-card-head h5 { font-size: 15px; font-weight: 800; color: var(--text-header); letter-spacing: -.1px; }
+.acct-card-sub { font-size: 12.5px; color: var(--text-muted); margin-top: 3px; line-height: 1.45; }
+.acct-card .field:last-child { margin-bottom: 0; }
+.acct-save { display: flex; justify-content: flex-start; padding-top: 2px; }
+.btn.sm { padding: 7px 14px; font-size: 13px; }
+.acct-card .settings-avatar-row { margin: 0; }
+
+/* ---------- Custom colour wheel ---------- */
+.cw { display: flex; gap: 20px; align-items: center; margin-top: 16px; flex-wrap: wrap; }
+.cw-wheel {
+  width: 156px; height: 156px; border-radius: 50%; position: relative; cursor: crosshair; flex: 0 0 auto; touch-action: none;
+  background:
+    radial-gradient(circle closest-side, #fff, rgba(255,255,255,0) 100%),
+    conic-gradient(from 90deg, hsl(0 100% 50%), hsl(60 100% 50%), hsl(120 100% 50%), hsl(180 100% 50%), hsl(240 100% 50%), hsl(300 100% 50%), hsl(360 100% 50%));
+  box-shadow: inset 0 0 0 1px rgba(0,0,0,.25), 0 6px 18px rgba(0,0,0,.35);
+}
+.cw-cursor { position: absolute; width: 16px; height: 16px; border-radius: 50%; border: 2px solid #fff; box-shadow: 0 0 0 1px rgba(0,0,0,.45), 0 1px 4px rgba(0,0,0,.5); transform: translate(-50%,-50%); pointer-events: none; }
+.cw-side { display: flex; flex-direction: column; gap: 12px; flex: 1; min-width: 180px; }
+.cw-preview { width: 100%; height: 42px; border-radius: 10px; border: 1px solid var(--divider); box-shadow: inset 0 0 0 1px rgba(255,255,255,.06); }
+.cw-field { display: flex; flex-direction: column; gap: 6px; font-size: 11px; color: var(--text-muted); font-weight: 800; text-transform: uppercase; letter-spacing: .04em; }
+.cw-field input[type=range] { width: 100%; accent-color: var(--brand); }
+.cw-field input[type=text] { width: 100%; padding: 9px 11px; border-radius: 8px; border: 1px solid var(--divider); background: var(--input-bg); color: var(--text-normal); font-size: 13px; text-transform: none; letter-spacing: 0; font-family: ui-monospace, Menlo, monospace; }
+.cw-field input[type=text]:focus { outline: none; border-color: var(--brand); }
+
+/* ---------- About Me clickable links ---------- */
+.bio-link { color: #4a9eff; text-decoration: none; word-break: break-word; }
+.bio-link:hover { text-decoration: underline; }
+.op-bio { font-size: 14px; color: var(--text-normal); line-height: 1.5; word-break: break-word; }
+body[data-theme="light"] .bio-link { color: #0066cc; }
+
+/* ---------- Accent tinting: other people's profile ---------- */
+.oprofile-modal { --accent: var(--brand); background: color-mix(in srgb, var(--accent) 22%, var(--sidebar-bg)); }
+.oprofile-left { background: color-mix(in srgb, var(--accent) 15%, var(--sidebar-bg)); }
+.oprofile-right { background: color-mix(in srgb, var(--accent) 9%, var(--chat-bg)); }
+.oprofile-banner { background: var(--accent); }
+.op-avatar .avatar { border-color: color-mix(in srgb, var(--accent) 15%, var(--sidebar-bg)); }
+.op-add { background: var(--accent); }
+.op-add:hover { background: color-mix(in srgb, var(--accent) 82%, #000); }
+.op-server-ico { background: var(--accent); }
+.op-message { background: var(--accent); }
+.op-message:hover { background: color-mix(in srgb, var(--accent) 82%, #000); }
+.op-tab.active { border-bottom-color: var(--accent); }
+.op-note:hover { border-color: color-mix(in srgb, var(--accent) 55%, var(--divider)); }
+
+/* ---------- Accent tinting: your own profile ---------- */
+.profile-modal { --accent: var(--brand); --profile-surface: color-mix(in srgb, var(--accent) 9%, var(--chat-bg)); background: color-mix(in srgb, var(--accent) 18%, var(--sidebar-bg)); }
+.profile-modal .profile-nav { background: color-mix(in srgb, var(--accent) 14%, var(--sidebar-bg)); }
+.profile-content { background: var(--profile-surface); }
+.profile-idcard .pic-avatar { border-color: var(--profile-surface); }
+.profile-hero { background: var(--accent); }
+.profile-actions-row .pa.primary { background: var(--accent); }
+.profile-actions-row .pa.primary:hover { background: color-mix(in srgb, var(--accent) 82%, #000); }

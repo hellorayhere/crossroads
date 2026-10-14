@@ -234,6 +234,141 @@ function escapeHtml(s) {
     .replace(/'/g, '&#39;');
 }
 
+/* Turn plain text (About Me / notes) into safe HTML with clickable links.
+   Handles full URLs, bare domains, and "gg/code" server invites. */
+function linkifyBio(text) {
+  if (!text) return '';
+  let html = escapeHtml(text);
+  const tokens = [];
+  const stash = (anchorHtml) => { tokens.push(anchorHtml); return '\u0000' + (tokens.length - 1) + '\u0000'; };
+
+  // 1. Full URLs (with protocol) — keep trailing punctuation outside the link.
+  html = html.replace(/(https?:\/\/[^\s<]+)/g, (u) => {
+    let trail = '';
+    let url = u;
+    while (/[.,!?;:)\]]$/.test(url)) { trail = url.slice(-1) + trail; url = url.slice(0, -1); }
+    return stash(`<a class="bio-link" href="${url}" target="_blank" rel="noopener noreferrer">${url}</a>`) + trail;
+  });
+
+  // 2. Server invite codes: gg/xxxx or invite/xxxx
+  html = html.replace(/(^|[\s(])((?:gg|invite)\/([A-Za-z0-9_-]{4,64}))/g, (m, pre, full, code) =>
+    pre + stash(`<a class="bio-link" href="/app.html?invite=${code}" target="_blank" rel="noopener noreferrer">${full}</a>`));
+
+  // 3. Bare domains (www.example.com or example.com/path)
+  html = html.replace(/(^|[\s(])((?:www\.)?[a-z0-9-]+(?:\.[a-z0-9-]{2,})+(?:\/[^\s<)]*)?)/gi, (m, pre, url) =>
+    pre + stash(`<a class="bio-link" href="https://${url}" target="_blank" rel="noopener noreferrer">${url}</a>`));
+
+  // 4. Line breaks
+  html = html.replace(/\n/g, '<br>');
+
+  // 5. Restore link placeholders
+  html = html.replace(/\u0000(\d+)\u0000/g, (m, i) => tokens[Number(i)] || '');
+  return html;
+}
+
+/* ---------- Colour helpers (hex <-> hsl) for the custom colour wheel ---------- */
+function hexToRgb(hex) {
+  hex = String(hex || '').replace('#', '');
+  if (hex.length === 3) hex = hex.split('').map(c => c + c).join('');
+  const n = parseInt(hex, 16);
+  if (isNaN(n)) return { r: 88, g: 101, b: 242 };
+  return { r: (n >> 16) & 255, g: (n >> 8) & 255, b: n & 255 };
+}
+function rgbToHex(r, g, b) {
+  const h = (x) => Math.max(0, Math.min(255, Math.round(x))).toString(16).padStart(2, '0');
+  return '#' + h(r) + h(g) + h(b);
+}
+function rgbToHsl(r, g, b) {
+  r /= 255; g /= 255; b /= 255;
+  const max = Math.max(r, g, b), min = Math.min(r, g, b);
+  let h = 0, s = 0; const l = (max + min) / 2; const d = max - min;
+  if (d) {
+    s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+    if (max === r) h = (g - b) / d + (g < b ? 6 : 0);
+    else if (max === g) h = (b - r) / d + 2;
+    else h = (r - g) / d + 4;
+    h *= 60;
+  }
+  return { h, s: s * 100, l: l * 100 };
+}
+function hslToRgb(h, s, l) {
+  h /= 360; s /= 100; l /= 100;
+  if (s === 0) { const v = Math.round(l * 255); return { r: v, g: v, b: v }; }
+  const hue2rgb = (p, q, t) => {
+    if (t < 0) t += 1; if (t > 1) t -= 1;
+    if (t < 1 / 6) return p + (q - p) * 6 * t;
+    if (t < 1 / 2) return q;
+    if (t < 2 / 3) return p + (q - p) * (2 / 3 - t) * 6;
+    return p;
+  };
+  const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+  const p = 2 * l - q;
+  return { r: Math.round(hue2rgb(p, q, h + 1 / 3) * 255), g: Math.round(hue2rgb(p, q, h) * 255), b: Math.round(hue2rgb(p, q, h - 1 / 3) * 255) };
+}
+function hslToHex(h, s, l) { const { r, g, b } = hslToRgb(h, s, l); return rgbToHex(r, g, b); }
+function hexToHsl(hex) { const { r, g, b } = hexToRgb(hex); return rgbToHsl(r, g, b); }
+
+/* Custom HSV colour wheel. root = element containing .cw-wheel/.cw-cursor/
+   .cw-light-range/.cw-hex-input/.cw-preview. onChange(hex) fires on every change. */
+function setupColorWheel(root, initialHex, onChange) {
+  if (!root) return null;
+  const wheel = root.querySelector('.cw-wheel');
+  const cursor = root.querySelector('.cw-cursor');
+  const lightEl = root.querySelector('.cw-light-range');
+  const hexEl = root.querySelector('.cw-hex-input');
+  const preview = root.querySelector('.cw-preview');
+  const start = hexToHsl(initialHex || '#5865F2');
+  let h = start.h, s = Math.max(35, start.s), l = start.l;
+
+  const render = (emit) => {
+    const hex = hslToHex(h, s, l);
+    if (preview) preview.style.background = hex;
+    if (hexEl && document.activeElement !== hexEl) hexEl.value = hex.toUpperCase();
+    if (cursor) {
+      const rad = h * Math.PI / 180;
+      const r = (s / 100) * 50;
+      cursor.style.left = (50 + r * Math.cos(rad)) + '%';
+      cursor.style.top = (50 + r * Math.sin(rad)) + '%';
+      cursor.style.background = hex;
+    }
+    if (lightEl && document.activeElement !== lightEl) lightEl.value = Math.round(l);
+    if (emit && onChange) onChange(hex);
+  };
+
+  const pick = (ev) => {
+    const rect = wheel.getBoundingClientRect();
+    const dx = ev.clientX - (rect.left + rect.width / 2);
+    const dy = ev.clientY - (rect.top + rect.height / 2);
+    let ang = Math.atan2(dy, dx) * 180 / Math.PI;
+    ang = (ang % 360 + 360) % 360;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    s = Math.min(1, dist / (rect.width / 2)) * 100;
+    h = ang;
+    render(true);
+  };
+
+  let dragging = false;
+  wheel.addEventListener('pointerdown', (e) => { dragging = true; try { wheel.setPointerCapture(e.pointerId); } catch (_) {} pick(e); });
+  wheel.addEventListener('pointermove', (e) => { if (dragging) pick(e); });
+  const stop = (e) => { dragging = false; try { wheel.releasePointerCapture(e.pointerId); } catch (_) {} };
+  wheel.addEventListener('pointerup', stop);
+  wheel.addEventListener('pointercancel', stop);
+  if (lightEl) lightEl.addEventListener('input', () => { l = Number(lightEl.value); render(true); });
+  if (hexEl) {
+    const applyHex = () => {
+      const v = hexEl.value.trim();
+      if (/^#?[0-9a-fA-F]{6}$/.test(v) || /^#?[0-9a-fA-F]{3}$/.test(v)) {
+        const hsl = hexToHsl(v.startsWith('#') ? v : '#' + v);
+        h = hsl.h; s = hsl.s; l = hsl.l; render(true);
+      } else { render(false); }
+    };
+    hexEl.addEventListener('change', applyHex);
+    hexEl.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); applyHex(); } });
+  }
+  render(false);
+  return { get: () => hslToHex(h, s, l), set: (hex) => { const hsl = hexToHsl(hex); h = hsl.h; s = hsl.s; l = hsl.l; render(false); } };
+}
+
 function formatTime(ts) {
   const d = new Date(ts);
   const now = new Date();
@@ -2089,7 +2224,7 @@ function openModal(html, opts = {}) {
   overlay.classList.remove('hidden');
   hydrateIcons(modal);
 }
-function closeModal() { modalCloseGuard = null; $('modal-overlay').classList.add('hidden'); $('modal').innerHTML = ''; $('modal').className = 'modal'; }
+function closeModal() { modalCloseGuard = null; $('modal-overlay').classList.add('hidden'); $('modal').innerHTML = ''; $('modal').className = 'modal'; $('modal').style.removeProperty('--accent'); }
 
 let modalCloseGuard = null;
 function requestCloseModal() {
@@ -2508,11 +2643,12 @@ function renderOwnProfile(user) {
         </div>
         <div class="profile-section-block">
           <h5>About Me</h5>
-          <p>${escapeHtml(user.bio || 'You have not written a description yet.')}</p>
+          <p>${user.bio ? linkifyBio(user.bio) : 'You have not written a description yet.'}</p>
         </div>
       </div>
     </div>`, { modalClass: 'profile-modal' });
 
+  const _pm = $('modal'); if (_pm) _pm.style.setProperty('--accent', user.accent_color || '#5865F2');
   $('pf-x').addEventListener('click', closeModal);
   $('pf-edit').addEventListener('click', () => openSettings('account'));
   $('pf-banner').addEventListener('click', () => openSettings('account'));
@@ -2573,6 +2709,10 @@ function renderOtherProfile(user, ctx) {
           ${addBtn}
           <button class="op-more" id="pf-more" title="More Options">${icon('ellipsis-vertical')}</button>
         </div>
+        ${user.bio ? `<div class="op-section">
+          <div class="op-label">${icon('note')} About Me</div>
+          <div class="op-bio">${linkifyBio(user.bio)}</div>
+        </div>` : ''}
         <div class="op-section">
           <div class="op-label">${icon('calendar-days')} Member Since</div>
           <div class="op-dates"><div class="op-date">${accountCreated}</div></div>
@@ -2805,47 +2945,93 @@ function toggleRow(key, title, desc) {
 function settingsPanelHTML(section) {
   const u = me;
   switch (section) {
-    case 'account':
+    case 'account': {
+      const accent = u.accent_color || '#5865F2';
+      const bannerColor = u.banner_color || '#5865F2';
       return `
         <h4>My Account</h4>
-        <div class="settings-avatar-row">
-          <div id="sa-avatar">${avatarHTML(u, 80, u.status || 'online')}</div>
-          <div class="sa-actions">
-            <button id="sa-upload">Change Avatar</button>
-            <button class="ghost" id="sa-remove">Remove Avatar</button>
-            <input type="file" id="sa-file" accept="image/*" class="hidden">
-          </div>
-        </div>
-        <div class="field"><label>Username</label>
-          <input id="set-username" maxlength="32" value="${escapeHtml(u.username)}" autocomplete="off">
-          <div class="hint" id="username-hint">Your unique tag is #${escapeHtml(u.discriminator)}</div>
-        </div>
-        <div class="field"><label>Display Name</label><input id="set-display" maxlength="32" value="${escapeHtml(u.display_name || u.username)}"></div>
-        <div class="field"><label>Pronouns</label><input id="set-pronouns" maxlength="24" value="${escapeHtml(u.pronouns || '')}" placeholder="e.g. she/her, he/him, they/them"></div>
-        <div class="field"><label>Custom Status</label><input id="set-custom" maxlength="128" value="${escapeHtml(u.custom_status || '')}" placeholder="What are you up to right now?"></div>
-        <div class="field"><label>About Me</label><textarea id="set-bio" maxlength="190" placeholder="Share a little about yourself \u2014 your hobbies, interests, or what you are working on\u2026">${escapeHtml(u.bio || '')}</textarea></div>
-        <div class="field"><label>Profile Banner</label>
-          <div class="banner-editor" id="banner-editor" style="${u.banner_url ? `background-image:url('${escapeHtml(u.banner_url)}')` : `background:${escapeHtml(u.banner_color || u.accent_color || '#5865F2')}`}">
-            <button class="banner-edit-btn" id="set-banner-file-btn">${icon('image')} Upload Banner</button>
-          </div>
-          <input type="file" id="set-banner-file" accept="image/*" class="hidden">
-          <div class="color-row" id="banner-color-row" style="margin-top:10px">${PALETTE.map(c => `<span class="swatch${(u.banner_color || '#5865F2').toLowerCase() === c.toLowerCase() ? ' sel' : ''}" data-color="${c}" style="background:${c}"></span>`).join('')}</div>
-          <div class="hint">Recommended size 600x240. Pick a color or upload an image (GIF supported, up to 25 MB).</div>
-          <button class="btn secondary" id="set-banner-remove" style="margin-top:8px;padding:6px 12px;font-size:13px">Remove Banner</button>
-        </div>
-        <div class="field"><label>Accent Color</label>
-          <div class="color-row" id="accent-row">${PALETTE.map(c => `<span class="swatch${(u.accent_color || '#5865F2').toLowerCase() === c.toLowerCase() ? ' sel' : ''}" data-color="${c}" style="background:${c}"></span>`).join('')}</div>
-        </div>
-        <div class="field"><label>Status</label>
-          <select id="set-status">
-            <option value="online">Online</option>
-            <option value="idle">Idle</option>
-            <option value="dnd">Do Not Disturb</option>
-            <option value="offline">Invisible</option>
-          </select></div>
-        <div class="modal-actions" style="justify-content:flex-start">
-          <button class="btn" id="set-save">Save Changes</button>
+        <div class="acct-stack">
+
+          <section class="acct-card">
+            <div class="acct-card-head">
+              <div><h5>Profile Picture</h5><p class="acct-card-sub">This is shown next to your name everywhere on Crossroads.</p></div>
+            </div>
+            <div class="settings-avatar-row">
+              <div id="sa-avatar">${avatarHTML(u, 80, u.status || 'online')}</div>
+              <div class="sa-actions">
+                <button id="sa-upload">Change Avatar</button>
+                <button class="ghost" id="sa-remove">Remove Avatar</button>
+                <input type="file" id="sa-file" accept="image/*" class="hidden">
+              </div>
+            </div>
+          </section>
+
+          <section class="acct-card">
+            <div class="acct-card-head">
+              <div><h5>Identity</h5><p class="acct-card-sub">How you appear across the app.</p></div>
+            </div>
+            <div class="field"><label>Username</label>
+              <input id="set-username" maxlength="32" value="${escapeHtml(u.username)}" autocomplete="off">
+              <div class="hint" id="username-hint">Your unique tag is #${escapeHtml(u.discriminator)}</div>
+            </div>
+            <div class="field"><label>Display Name</label><input id="set-display" maxlength="32" value="${escapeHtml(u.display_name || u.username)}"></div>
+            <div class="field"><label>Pronouns</label><input id="set-pronouns" maxlength="24" value="${escapeHtml(u.pronouns || '')}" placeholder="e.g. she/her, he/him, they/them"></div>
+            <div class="field"><label>Custom Status</label><input id="set-custom" maxlength="128" value="${escapeHtml(u.custom_status || '')}" placeholder="What are you up to right now?"></div>
+          </section>
+
+          <section class="acct-card">
+            <div class="acct-card-head">
+              <div><h5>About Me</h5><p class="acct-card-sub">Paste a link or a server invite (gg/code) and it becomes clickable on your profile.</p></div>
+            </div>
+            <div class="field">
+              <textarea id="set-bio" maxlength="190" placeholder="Share a little about yourself — your hobbies, interests, or a link to your favourite place…">${escapeHtml(u.bio || '')}</textarea>
+              <div class="hint">Links like https://example.com or gg/AbC123 are turned into blue links automatically.</div>
+            </div>
+          </section>
+
+          <section class="acct-card">
+            <div class="acct-card-head">
+              <div><h5>Profile Banner</h5><p class="acct-card-sub">Pick a colour or upload an image (GIF supported, up to 25 MB).</p></div>
+            </div>
+            <div class="banner-editor" id="banner-editor" style="${u.banner_url ? `background-image:url('${escapeHtml(u.banner_url)}')` : `background:${escapeHtml(bannerColor)}`}">
+              <button class="banner-edit-btn" id="set-banner-file-btn">${icon('image')} Upload Banner</button>
+            </div>
+            <input type="file" id="set-banner-file" accept="image/*" class="hidden">
+            <div class="color-row" id="banner-color-row" style="margin-top:12px">${PALETTE.map(c => `<span class="swatch${bannerColor.toLowerCase() === c.toLowerCase() ? ' sel' : ''}" data-color="${c}" style="background:${c}"></span>`).join('')}</div>
+            <button class="btn secondary sm" id="set-banner-remove">Remove Banner</button>
+          </section>
+
+          <section class="acct-card">
+            <div class="acct-card-head">
+              <div><h5>Accent Color</h5><p class="acct-card-sub">Tints your entire profile — banner, card background and highlights.</p></div>
+            </div>
+            <div class="color-row" id="accent-row">${PALETTE.map(c => `<span class="swatch${accent.toLowerCase() === c.toLowerCase() ? ' sel' : ''}" data-color="${c}" style="background:${c}"></span>`).join('')}</div>
+            <div class="cw" id="accent-wheel">
+              <div class="cw-wheel"><div class="cw-cursor"></div></div>
+              <div class="cw-side">
+                <div class="cw-preview" style="background:${escapeHtml(accent)}"></div>
+                <label class="cw-field"><span>Brightness</span><input type="range" class="cw-light-range" min="18" max="92" value="${Math.round(hexToHsl(accent).l)}"></label>
+                <label class="cw-field"><span>Hex code</span><input type="text" class="cw-hex-input" maxlength="7" value="${escapeHtml(accent.toUpperCase())}" placeholder="#5865F2"></label>
+              </div>
+            </div>
+          </section>
+
+          <section class="acct-card">
+            <div class="acct-card-head">
+              <div><h5>Status</h5><p class="acct-card-sub">Let people know whether you are around.</p></div>
+            </div>
+            <div class="field"><label>Presence</label>
+              <select id="set-status">
+                <option value="online">Online</option>
+                <option value="idle">Idle</option>
+                <option value="dnd">Do Not Disturb</option>
+                <option value="offline">Invisible</option>
+              </select></div>
+          </section>
+
+          <div class="acct-save"><button class="btn" id="set-save">${icon('check')} Save Changes</button></div>
         </div>`;
+    }
     case 'profiles':
       return `
         <h4>Profiles</h4>
@@ -3008,9 +3194,17 @@ function wireAccountPanel() {
   }));
 
   let accent = u.accent_color || '#5865F2';
+  const accentWheel = setupColorWheel($('accent-wheel'), accent, (hex) => {
+    accent = hex;
+    document.querySelectorAll('#accent-row .swatch').forEach(x => x.classList.toggle('sel', (x.dataset.color || '').toLowerCase() === hex.toLowerCase()));
+    previewSelf({ accent_color: hex });
+    markDirty();
+  });
   document.querySelectorAll('#accent-row .swatch').forEach(sw => sw.addEventListener('click', () => {
     accent = sw.dataset.color;
     document.querySelectorAll('#accent-row .swatch').forEach(x => x.classList.toggle('sel', x === sw));
+    if (accentWheel) accentWheel.set(accent);
+    previewSelf({ accent_color: accent });
     markDirty();
   }));
 
@@ -3385,9 +3579,9 @@ function renderServerTab(tab, s, isOwner) {
                </select>`
             : '';
           actions = `${roleSelect}${roleBtn}
-            <button class="ss-member-role-btn ghost" data-timeout="${m.id}" title="Time out member">${icon('clock')}</button>
-            <button class="ss-member-role-btn" data-kick="${m.id}" title="Kick member">${icon('user-minus')}</button>
-            <button class="ss-member-role-btn danger" data-ban="${m.id}" title="Ban member">${icon('ban')}</button>`;
+            <button class="ss-icon-btn" data-timeout="${m.id}" title="Time out member">${icon('clock')}</button>
+            <button class="ss-icon-btn kick" data-kick="${m.id}" title="Kick member">${icon('user-minus')}</button>
+            <button class="ss-icon-btn ban" data-ban="${m.id}" title="Ban member">${icon('ban')}</button>`;
         }
         return `<div class="ss-member-row">
           ${avatarHTML(m, 36, m.status || 'offline')}
@@ -3552,7 +3746,7 @@ function renderRolesTab(body, s) {
       ${roles.map(r => `<div class="ss-role-card">
         <span class="role-dot" style="background:${r.color}"></span>
         <div class="ss-role-info"><div class="ss-role-name" style="color:${r.color}">${escapeHtml(r.name)}</div><div class="ss-role-desc">${r.member_count || 0} member(s)</div></div>
-        ${admin ? `<div class="ss-role-actions"><button class="ss-member-role-btn ghost" data-edit-role="${r.id}" title="Edit">${icon('pencil')}</button><button class="ss-member-role-btn danger" data-del-role="${r.id}" title="Delete">${icon('trash')}</button></div>` : ''}
+        ${admin ? `<div class="ss-role-actions"><button class="ss-icon-btn" data-edit-role="${r.id}" title="Edit">${icon('pencil')}</button><button class="ss-icon-btn ban" data-del-role="${r.id}" title="Delete">${icon('trash')}</button></div>` : ''}
       </div>`).join('') || '<div class="inv-empty">No custom roles yet. Create one to tag members with a name and colour.</div>'}
     </div>
     ${admin ? `<div class="ss-actions"><button class="btn" id="ss-add-role">${icon('plus')} Create Role</button></div>` : '<div class="ss-note">Only the owner and admins can manage roles.</div>'}
@@ -3645,23 +3839,23 @@ function renderSafetyTab(body, s) {
   body.innerHTML = `
     <div class="ss-section-title">Safety & Moderation</div>
     <div class="ss-field-grid">
-      <div class="field"><label>Verification Level</label>
+      <div class="ss-field"><label>Verification Level</label>
         <select id="ss-verif" ${admin ? '' : 'disabled'}>
           ${['none','low','medium','high'].map(v => `<option value="${v}"${st.verification_level === v ? ' selected' : ''}>${{none:'None',low:'Low',medium:'Medium',high:'Highest'}[v]}</option>`).join('')}
         </select>
         <div class="hint">How strict membership checks are before members can chat.</div>
       </div>
-      <div class="field"><label>Default Notifications</label>
+      <div class="ss-field"><label>Default Notifications</label>
         <select id="ss-notif" ${admin ? '' : 'disabled'}>
           ${['all','mentions','none'].map(v => `<option value="${v}"${st.default_notifications === v ? ' selected' : ''}>${{all:'All Messages',mentions:'Only @mentions',none:'Nothing'}[v]}</option>`).join('')}
         </select>
         <div class="hint">What new members are notified about by default.</div>
       </div>
-      <div class="field"><label>Slow Mode (seconds between messages)</label>
+      <div class="ss-field"><label>Slow Mode (seconds between messages)</label>
         <input type="number" id="ss-slow" min="0" max="21600" value="${st.slow_mode || 0}" ${admin ? '' : 'disabled'}>
         <div class="hint">0 = off. Members must wait this long between messages.</div>
       </div>
-      <div class="field"><label>System Messages Channel</label>
+      <div class="ss-field"><label>System Messages Channel</label>
         <select id="ss-sys" ${admin ? '' : 'disabled'}>
           <option value="">None</option>
           ${channels.map(c => `<option value="${c.id}"${st.system_channel_id === c.id ? ' selected' : ''}>#${escapeHtml(c.name)}</option>`).join('')}
