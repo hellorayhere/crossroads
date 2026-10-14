@@ -927,7 +927,7 @@ function renderMessages() {
   } else if (state.dm) {
     const intro = document.createElement('div');
     intro.className = 'channel-intro';
-    intro.innerHTML = `${avatarHTML(state.dm.user, 68, state.dm.user.status || 'offline')}<h2>${escapeHtml(state.dm.user.display_name || state.dm.user.username)}</h2><p>This is the beginning of your direct message history with <b>${escapeHtml(fullTag(state.dm.user))}</b>.</p>`;
+    intro.innerHTML = `${avatarHTML(state.dm.user, 68)}<h2>${escapeHtml(state.dm.user.display_name || state.dm.user.username)}</h2><p>This is the beginning of your direct message history with <b>${escapeHtml(fullTag(state.dm.user))}</b>.</p>`;
     inner.appendChild(intro);
   }
   box.appendChild(inner);
@@ -956,7 +956,7 @@ function messageNode(m, grouped, animate) {
   const a = m.author;
   const gutter = grouped
     ? `<div class="gutter"><span class="mini-time">${shortTime(m.created_at)}</span></div>`
-    : `<div class="gutter">${avatarHTML(a, 40, a.status || 'offline')}</div>`;
+    : `<div class="gutter">${avatarHTML(a, 40)}</div>`;
   const head = grouped ? '' : `<div class="head"><span class="author">${escapeHtml(a.display_name || a.username)}</span><span class="time">${formatTime(m.created_at)}</span></div>`;
   const toolbar = `<div class="msg-toolbar">
       <button data-act="react" title="Add Reaction">${icon('smile-plus')}</button>
@@ -2827,7 +2827,7 @@ function renderServerTab(tab, s, isOwner) {
 function refreshMessageAuthor(u) {
   document.querySelectorAll(`.msg-group[data-uid="${u.id}"]`).forEach(node => {
     const av = node.querySelector('.gutter .avatar');
-    if (av) av.outerHTML = avatarHTML(u, 40, u.status || 'offline');
+    if (av) av.outerHTML = avatarHTML(u, 40);
     const author = node.querySelector('.author');
     if (author) author.textContent = u.display_name || u.username;
   });
