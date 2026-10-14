@@ -8,11 +8,12 @@ const multer = require('multer');
 const { Server } = require('socket.io');
 
 const db = require('./db');
+const persist = require('./persist');
 const { newId, randomColor, randomDiscriminator } = require('./util');
 
 const PORT = process.env.PORT || 3000;
 const JWT_SECRET = process.env.JWT_SECRET || 'crossroads-dev-secret-change-me';
-const UPLOAD_DIR = path.join(__dirname, 'uploads');
+const UPLOAD_DIR = process.env.UPLOAD_DIR ? path.resolve(process.env.UPLOAD_DIR) : path.join(__dirname, 'uploads');
 if (!fs.existsSync(UPLOAD_DIR)) fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 
 const app = express();
@@ -822,6 +823,7 @@ app.post('/api/upload', auth, (req, res) => {
       return res.status(400).json({ error: err.message || 'Upload failed' });
     }
     if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+    persist.backupUpload(req.file.filename);
     res.json({
       url: `/uploads/${req.file.filename}`,
       name: req.file.originalname,
@@ -879,4 +881,10 @@ io.on('connection', (socket) => {
 
 server.listen(PORT, () => {
   console.log(`Crossroads running on http://localhost:${PORT}`);
+  if (persist.enabled) {
+    console.log(`[persist] durable storage active -> ${process.env.GH_DATA_REPO}`);
+    persist.startAutoBackup(db);
+  } else {
+    console.log('[persist] durable storage disabled (no GH_DATA_REPO set)');
+  }
 });

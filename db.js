@@ -1,9 +1,26 @@
 const Database = require('better-sqlite3');
 const path = require('path');
 const fs = require('fs');
+const { execFileSync } = require('child_process');
 
-const DATA_DIR = path.join(__dirname, 'data');
+const DATA_DIR = process.env.DATA_DIR ? path.resolve(process.env.DATA_DIR) : path.join(__dirname, 'data');
 if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+
+/* Restore the database from durable storage (private GitHub repo) BEFORE it is
+   opened. Render's free plan has an ephemeral disk, so this is what keeps user
+   data alive across deploys. Runs in a child process so this synchronous module
+   can block until the download finishes. No-op unless GH_DATA_REPO is set. */
+if (process.env.GH_DATA_REPO && process.env.GH_DATA_TOKEN) {
+  try {
+    execFileSync(process.execPath, [path.join(__dirname, 'persist.js'), 'restore'], {
+      stdio: 'inherit',
+      timeout: 120000,
+      env: process.env
+    });
+  } catch (e) {
+    console.error('[db] remote restore skipped:', e.message);
+  }
+}
 
 const db = new Database(path.join(DATA_DIR, 'crossroads.db'));
 db.pragma('journal_mode = WAL');
