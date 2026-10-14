@@ -500,7 +500,7 @@ async function openDM(d) {
   state.messages = messages;
   renderMessages();
   $('composer').classList.remove('hidden');
-  $('message-input').placeholder = 'Message @' + d.user.username;
+  $('message-input').placeholder = 'Write a direct message to @' + d.user.username + '\u2026';
   $('composer-hint').textContent = '';
   $('message-input').focus();
 }
@@ -584,7 +584,7 @@ function renderFriendsView() {
       <h4>Add Friend</h4>
       <p>You can add friends with their username. It is case sensitive.</p>
       <div class="fr-add-row">
-        <input id="fr-add-input" placeholder="You can add friends with their username." autocomplete="off">
+        <input id="fr-add-input" placeholder="Search by username, then send a friend request\u2026" autocomplete="off">
         <button class="btn" id="fr-add-btn">Send Friend Request</button>
       </div>
       <div class="fr-add-hint" id="fr-add-hint"></div>
@@ -776,7 +776,7 @@ async function openChannel(cid) {
   state.messages = messages;
   renderMessages();
   $('composer').classList.remove('hidden');
-  $('message-input').placeholder = 'Message #' + c.name;
+  $('message-input').placeholder = 'Message #' + c.name + '\u2026';
   $('composer-hint').textContent = '';
   $('message-input').focus();
 }
@@ -815,7 +815,7 @@ function renderEmptyChat(text) {
   box.style.padding = ''; box.style.overflow = '';
   box.innerHTML = `<div class="empty-state"><div class="inner">
     <h2>Welcome to Crossroads</h2>
-    <p>${text || 'Select a server on the left or open a direct message to begin. You can also create your own server and invite others with a link.'}</p>
+    <p>${text || 'Select a server on the left or open a direct message to begin. You can also create your own server and invite others with a short gg/ link.'}</p>
     <button class="btn" id="empty-create2">Create a Server</button>
   </div></div>`;
   const b = $('empty-create2'); if (b) b.addEventListener('click', openCreateServer);
@@ -887,9 +887,13 @@ function messageNode(m, grouped, animate) {
   if (jump) jump.addEventListener('click', () => flashMessage(jump.dataset.jump));
 
   if (m.attachment_url) node.querySelector('.attachment-slot').appendChild(attachmentNode(m));
-  const urls = extractUrls(m.content);
+  const slot = node.querySelector('.embed-slot');
+  const inviteCodes = extractInviteCodes(m.content);
+  if (inviteCodes.length) {
+    inviteCodes.slice(0, 1).forEach(c => slot.appendChild(inviteEmbedNode(c)));
+  }
+  const urls = extractUrls(m.content).filter(u => !/[?&]invite=/i.test(u));
   if (urls.length) {
-    const slot = node.querySelector('.embed-slot');
     urls.slice(0, 2).forEach(u => slot.appendChild(embedNode(u)));
   }
   node.querySelectorAll('.reaction').forEach(r => r.addEventListener('click', () => toggleReaction(m.id, r.dataset.emoji)));
@@ -929,6 +933,7 @@ function formatContent(text) {
   let html = escapeHtml(text);
   const links = [];
   html = html.replace(/(https?:\/\/[^\s<]+)/g, (u) => { links.push(u); return `\u0000L${links.length - 1}\u0000`; });
+  html = html.replace(/(^|[\s(])(gg\/[A-Za-z0-9_-]{4,64})/g, '$1<span class="invite-code">$2</span>');
   html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
   html = html.replace(/@([a-zA-Z0-9._]+)/g, (mt, name) => {
     const u = userByName(name);
@@ -990,6 +995,76 @@ function embedNode(url) {
         <div class="embed-title"><a href="${escapeHtml(url)}" target="_blank" rel="noopener">${escapeHtml(data.title || url)}</a></div>
         ${desc ? `<div class="embed-desc">${escapeHtml(desc)}</div>` : ''}
       </div>${data.image ? `<img class="embed-thumb" src="${escapeHtml(data.image)}" alt="" onerror="this.remove()">` : ''}`;
+  }).catch(() => { wrap.remove(); });
+  return wrap;
+}
+
+/* Find short "gg/<code>" invite codes (and full ?invite= URLs) inside a message. */
+function extractInviteCodes(text) {
+  if (!text) return [];
+  const found = [];
+  const seen = new Set();
+  const gg = text.match(/(?:^|[\s(])(?:gg|invite)\/([A-Za-z0-9_-]{4,64})/gi) || [];
+  for (const raw of gg) {
+    const m = raw.match(/(?:gg|invite)\/([A-Za-z0-9_-]{4,64})/i);
+    if (m && !seen.has(m[1])) { seen.add(m[1]); found.push(m[1]); }
+  }
+  const urls = text.match(/https?:\/\/[^\s<]*[?&]invite=([A-Za-z0-9_-]{4,64})/gi) || [];
+  for (const raw of urls) {
+    const m = raw.match(/[?&]invite=([A-Za-z0-9_-]{4,64})/i);
+    if (m && !seen.has(m[1])) { seen.add(m[1]); found.push(m[1]); }
+  }
+  return found;
+}
+
+/* Rich embed card for a server invite (banner, name, member counts, Join). */
+function inviteEmbedNode(code) {
+  const wrap = document.createElement('div');
+  wrap.className = 'invite-embed';
+  wrap.innerHTML = `<div class="ie-loading"><span class="ie-spinner"></span>Loading invite\u2026</div>`;
+  api('/api/invites/' + encodeURIComponent(code)).then(data => {
+    if (!data || !data.server) { wrap.remove(); return; }
+    const s = data.server;
+    const bannerStyle = s.banner_url
+      ? `background-image:url('${escapeHtml(s.banner_url)}')`
+      : `background:linear-gradient(135deg, var(--brand), color-mix(in srgb, var(--brand) 45%, #000))`;
+    const icon = s.icon_url
+      ? `<img class="ie-icon" src="${escapeHtml(s.icon_url)}" alt="">`
+      : `<div class="ie-icon ie-icon-fallback">${escapeHtml((s.name || '?')[0].toUpperCase())}</div>`;
+    const status = !data.valid
+      ? `<span class="ie-badge bad">${data.expired ? 'Expired' : 'Max uses reached'}</span>`
+      : `<span class="ie-badge ok">Invite valid</span>`;
+    const joinLabel = data.already_member ? 'Open Server' : 'Join Server';
+    wrap.innerHTML = `
+      <div class="ie-banner" style="${bannerStyle}">
+        <div class="ie-banner-shade"></div>
+        <div class="ie-banner-title">You have been invited to join a server</div>
+      </div>
+      <div class="ie-main">
+        <div class="ie-head">
+          ${icon}
+          <div class="ie-headtext">
+            <div class="ie-name">${escapeHtml(s.name)}</div>
+            <div class="ie-stats">
+              <span class="ie-dot online"></span>${s.online_count} Online
+              <span class="ie-dot total"></span>${s.member_count} Member${s.member_count === 1 ? '' : 's'}
+            </div>
+          </div>
+          ${status}
+        </div>
+        ${s.description ? `<div class="ie-desc">${escapeHtml(s.description)}</div>` : ''}
+        <button class="ie-join" ${data.valid || data.already_member ? '' : 'disabled'}>${escapeHtml(joinLabel)}</button>
+      </div>`;
+    const btn = wrap.querySelector('.ie-join');
+    if (btn) btn.addEventListener('click', async () => {
+      if (!data.valid && !data.already_member) return;
+      try {
+        const res = await api('/api/servers/join', { method: 'POST', body: JSON.stringify({ invite: code }) });
+        await loadServers();
+        openServer(res.server.id);
+        toast('Joined ' + res.server.name, 'success');
+      } catch (e) { toast(e.message, 'error'); }
+    });
   }).catch(() => { wrap.remove(); });
   return wrap;
 }
@@ -1499,7 +1574,7 @@ function openCreateServer() {
     <h3>Create a Server</h3>
     <p class="msub">Your server is where you and your friends hang out. Make yours and start talking.</p>
     <div class="field"><label>Server Name <span class="req">*</span></label>
-      <input id="cs-name" placeholder="My Server" maxlength="40"></div>
+      <input id="cs-name" placeholder="e.g. Pixel Lounge, Study Group, Game Night\u2026" maxlength="40"></div>
     <div class="field"><label>Server Icon <span style="color:var(--text-muted);text-transform:none;font-weight:500">(optional)</span></label>
       ${dropzoneHTML('cs-icon-dz', 'Upload Image', 'PNG, JPG or GIF \u2014 up to 25 MB')}
       <input type="file" id="cs-icon-file" accept="image/*" class="hidden"></div>
@@ -1529,9 +1604,9 @@ function openCreateServer() {
 function openJoinServer(prefill) {
   openModal(`
     <h3>Join a Server</h3>
-    <p class="msub">Enter an invite code or link below to join an existing server.</p>
+    <p class="msub">Enter an invite code or link below to join an existing server. Invites look like <b>gg/AbC123xYz</b>.</p>
     <div class="field"><label>Invite Code or Link</label>
-      <input id="js-invite" placeholder="Paste invite code or link" value="${escapeHtml(prefill || '')}"></div>
+      <input id="js-invite" placeholder="Paste an invite code like gg/AbC123xYz\u2026 or a full link" value="${escapeHtml(prefill || '')}"></div>
     <div class="modal-actions">
       <button class="btn secondary" id="js-cancel">Cancel</button>
       <button class="btn" id="js-join">Join Server</button>
@@ -1554,9 +1629,9 @@ function openCreateChannel(type) {
     <h3>Create ${type === 'voice' ? 'Voice' : 'Text'} Channel</h3>
     <p class="msub">in ${escapeHtml(state.server ? state.server.name : '')}</p>
     <div class="field"><label>Channel Name <span class="req">*</span></label>
-      <input id="cc-name" placeholder="${type === 'voice' ? 'Lounge' : 'new-channel'}" maxlength="40"></div>
+      <input id="cc-name" placeholder="${type === 'voice' ? 'e.g. Lounge, Game Night\u2026' : 'e.g. general-chat, announcements\u2026'}" maxlength="40"></div>
     <div class="field"><label>Topic (optional)</label>
-      <input id="cc-topic" placeholder="What is this channel about?"></div>
+      <input id="cc-topic" placeholder="Give this channel a short purpose or topic\u2026"></div>
     <div class="modal-actions">
       <button class="btn secondary" id="cc-cancel">Cancel</button>
       <button class="btn" id="cc-create">Create Channel</button>
@@ -1584,7 +1659,7 @@ async function openNewDM() {
     <h3>Start a Conversation</h3>
     <p class="msub">Search for a user by username or tag (for example name#1234).</p>
     <div class="field"><label>Find a user</label>
-      <input id="dm-search" placeholder="Search users" autocomplete="off"></div>
+      <input id="dm-search" placeholder="Search for friends by name or tag\u2026" autocomplete="off"></div>
     <div id="dm-results" style="max-height:280px;overflow-y:auto;margin-top:8px"></div>
     <div class="modal-actions"><button class="btn secondary" id="dm-cancel">Close</button></div>`);
   $('dm-cancel').addEventListener('click', closeModal);
@@ -1689,7 +1764,6 @@ function renderOwnProfile(user) {
         </div>
         <div class="profile-actions-row">
           <button class="pa primary" id="pf-edit">Edit Profile</button>
-          <button class="pa" id="pf-share">Share Profile</button>
         </div>
         <div class="profile-section-block">
           <h5>About Me</h5>
@@ -1701,11 +1775,6 @@ function renderOwnProfile(user) {
   $('pf-x').addEventListener('click', closeModal);
   $('pf-edit').addEventListener('click', () => openSettings('account'));
   $('pf-banner').addEventListener('click', () => openSettings('account'));
-  $('pf-share').addEventListener('click', async () => {
-    const link = location.origin + '/app.html';
-    try { await navigator.clipboard.writeText(link); toast('Profile link copied', 'success'); }
-    catch (e) { promptDialog({ title: 'Share Profile', body: 'Copy your profile link below.', label: 'Profile link', value: link, confirmText: 'Done' }); }
-  });
   document.querySelectorAll('#pf-swatches .pnav-swatch').forEach(sw => {
     sw.addEventListener('click', async () => {
       const color = sw.dataset.color;
@@ -1841,7 +1910,7 @@ function openNoteEditor(user, current) {
   openModal(`
     <h3>Note</h3>
     <p class="msub">Notes are only visible to you. Use them to remember details about ${escapeHtml(user.display_name || user.username)}.</p>
-    <div class="field"><textarea id="note-text" maxlength="256" placeholder="Click to add a note">${escapeHtml(current || '')}</textarea></div>
+    <div class="field"><textarea id="note-text" maxlength="256" placeholder="Jot down something you want to remember about this person\u2026">${escapeHtml(current || '')}</textarea></div>
     <div class="modal-actions">
       <button class="btn secondary" id="note-cancel">Cancel</button>
       <button class="btn" id="note-save">Save Note</button>
@@ -1947,9 +2016,35 @@ function renderSettings(section) {
   hydrateIcons(panel);
   if (section === 'account') wireAccountPanel();
   if (section === 'profiles') wireProfilesPanel();
+  if (section === 'privacy') wirePrivacyPanel();
   if (section === 'privacy' || section === 'appearance' || section === 'notifications' || section === 'voice') wireToggles();
   if (section === 'appearance') wireAppearance();
   if (section === 'language') wireLanguage();
+}
+
+function wirePrivacyPanel() {
+  const btn = $('pw-save');
+  if (!btn) return;
+  const doSave = async () => {
+    const cur = $('pw-current').value;
+    const np = $('pw-new').value;
+    const cf = $('pw-confirm').value;
+    if (!cur || !np || !cf) { toast('Please fill in all password fields', 'error'); return; }
+    if (np.length < 6) { toast('New password must be at least 6 characters', 'error'); return; }
+    if (np !== cf) { toast('New passwords do not match', 'error'); return; }
+    btn.disabled = true;
+    try {
+      await api('/api/me/password', { method: 'POST', body: JSON.stringify({ current_password: cur, new_password: np }) });
+      $('pw-current').value = ''; $('pw-new').value = ''; $('pw-confirm').value = '';
+      toast('Password updated successfully', 'success');
+    } catch (e) { toast(e.message, 'error'); }
+    finally { btn.disabled = false; }
+  };
+  btn.addEventListener('click', doSave);
+  ['pw-current', 'pw-new', 'pw-confirm'].forEach(id => {
+    const el = $(id);
+    if (el) el.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); doSave(); } });
+  });
 }
 
 function toggleRow(key, title, desc) {
@@ -1976,9 +2071,9 @@ function settingsPanelHTML(section) {
           <div class="hint" id="username-hint">Your unique tag is #${escapeHtml(u.discriminator)}</div>
         </div>
         <div class="field"><label>Display Name</label><input id="set-display" maxlength="32" value="${escapeHtml(u.display_name || u.username)}"></div>
-        <div class="field"><label>Pronouns</label><input id="set-pronouns" maxlength="24" value="${escapeHtml(u.pronouns || '')}" placeholder="For example they/them"></div>
-        <div class="field"><label>Custom Status</label><input id="set-custom" maxlength="128" value="${escapeHtml(u.custom_status || '')}" placeholder="What are you up to?"></div>
-        <div class="field"><label>About Me</label><textarea id="set-bio" maxlength="190" placeholder="Tell people about yourself">${escapeHtml(u.bio || '')}</textarea></div>
+        <div class="field"><label>Pronouns</label><input id="set-pronouns" maxlength="24" value="${escapeHtml(u.pronouns || '')}" placeholder="e.g. she/her, he/him, they/them"></div>
+        <div class="field"><label>Custom Status</label><input id="set-custom" maxlength="128" value="${escapeHtml(u.custom_status || '')}" placeholder="What are you up to right now?"></div>
+        <div class="field"><label>About Me</label><textarea id="set-bio" maxlength="190" placeholder="Share a little about yourself \u2014 your hobbies, interests, or what you are working on\u2026">${escapeHtml(u.bio || '')}</textarea></div>
         <div class="field"><label>Profile Banner</label>
           <div class="banner-editor" id="banner-editor" style="${u.banner_url ? `background-image:url('${escapeHtml(u.banner_url)}')` : `background:${escapeHtml(u.banner_color || u.accent_color || '#5865F2')}`}">
             <button class="banner-edit-btn" id="set-banner-file-btn">${icon('image')} Upload Banner</button>
@@ -2017,7 +2112,23 @@ function settingsPanelHTML(section) {
         ${toggleRow('safeMode', 'Keep me safe', 'Scan and blur media from unverified sources.')}
         ${toggleRow('dmFromMembers', 'Allow direct messages from server members', 'Members of servers you share can start a conversation with you.')}
         ${toggleRow('dataPersonalisation', 'Allow data personalisation', 'Use my activity to improve recommendations.')}
-        ${toggleRow('readReceipts', 'Show my read receipts', 'Let others know when you have read their messages.')}`;
+        ${toggleRow('readReceipts', 'Show my read receipts', 'Let others know when you have read their messages.')}
+        <div class="pw-section">
+          <div class="pw-head">
+            <div class="pw-head-ico">${icon('key')}</div>
+            <div>
+              <h5>Change Password</h5>
+              <p class="pw-sub">Keep your account secure by updating your password regularly. You will stay signed in on this device.</p>
+            </div>
+          </div>
+          <div class="field"><label>Current Password</label>
+            <input type="password" id="pw-current" autocomplete="current-password" placeholder="Enter your current password"></div>
+          <div class="field"><label>New Password</label>
+            <input type="password" id="pw-new" autocomplete="new-password" placeholder="Create a new password (at least 6 characters)"></div>
+          <div class="field"><label>Confirm New Password</label>
+            <input type="password" id="pw-confirm" autocomplete="new-password" placeholder="Re-enter your new password to confirm"></div>
+          <div class="pw-actions"><button class="btn" id="pw-save">${icon('key')} Update Password</button></div>
+        </div>`;
     case 'apps':
       return `<h4>Authorized Apps</h4><div class="empty-panel"><div class="ep-ico">${icon('plug')}</div><h5>No authorized apps</h5><p>When you connect an application to your account, it will appear here.</p></div>`;
     case 'devices':
@@ -2268,11 +2379,7 @@ function serverMenu(e) {
   const rect = $('sidebar-header').getBoundingClientRect();
   const isOwner = state.server.owner_id === me.id;
   const items = [
-    { label: 'Invite People', icon: 'user-plus', onClick: async () => {
-      const link = `${location.origin}/app.html?invite=${state.server.id}`;
-      try { await navigator.clipboard.writeText(link); toast('Invite link copied', 'success'); }
-      catch (err) { promptDialog({ title: 'Invite People', body: 'Share this link to invite others.', label: 'Invite link', value: link, confirmText: 'Done' }); }
-    } },
+    { label: 'Invite People', icon: 'user-plus', onClick: () => openInviteModal() },
     { label: 'Create Channel', icon: 'plus', onClick: () => openCreateChannel('text') },
     { label: 'Server Settings', icon: 'settings', onClick: openServerSettings }
   ];
@@ -2301,40 +2408,293 @@ async function deleteServer() {
   } catch (e) { toast(e.message, 'error'); }
 }
 
+/* ============================================================
+   SERVER SETTINGS + INVITES
+   ============================================================ */
+const INVITE_EXPIRY_OPTIONS = [
+  { value: '30', label: '30 minutes' },
+  { value: '60', label: '1 hour' },
+  { value: '360', label: '6 hours' },
+  { value: '720', label: '12 hours' },
+  { value: '1440', label: '1 day' },
+  { value: '10080', label: '7 days' },
+  { value: '43200', label: '30 days' },
+  { value: 'never', label: 'Never' }
+];
+
+function inviteExpiryLabel(inv) {
+  if (inv.maxed) return 'Max uses reached';
+  if (!inv.expires_at) return inv.expired ? 'Expired' : 'Never expires';
+  const ms = inv.expires_at - Date.now();
+  if (ms <= 0) return 'Expired';
+  const mins = Math.round(ms / 60000);
+  if (mins < 60) return `Expires in ${mins} minute${mins === 1 ? '' : 's'}`;
+  const hrs = Math.round(mins / 60);
+  if (hrs < 24) return `Expires in ${hrs} hour${hrs === 1 ? '' : 's'}`;
+  const days = Math.round(hrs / 24);
+  return `Expires in ${days} day${days === 1 ? '' : 's'}`;
+}
+
+function invitePreviewCardHTML(s) {
+  const bannerStyle = s.banner_url
+    ? `background-image:url('${escapeHtml(s.banner_url)}')`
+    : `background:linear-gradient(135deg, var(--brand), color-mix(in srgb, var(--brand) 40%, #000))`;
+  const iconHtml = s.icon_url
+    ? `<img class="ipc-icon" src="${escapeHtml(s.icon_url)}" alt="">`
+    : `<div class="ipc-icon ipc-icon-fallback">${escapeHtml((s.name || '?')[0].toUpperCase())}</div>`;
+  const members = s.member_count || 0;
+  return `<div class="invite-preview-card" style="${bannerStyle}">
+      <div class="ipc-shade"></div>
+      <div class="ipc-body">
+        ${iconHtml}
+        <div class="ipc-text">
+          <div class="ipc-name">${escapeHtml(s.name)}</div>
+          <div class="ipc-stats"><span class="ipc-dot online"></span>${s.online_count || 0} Online <span class="ipc-dot total"></span>${members} Member${members === 1 ? '' : 's'}</div>
+        </div>
+      </div>
+    </div>`;
+}
+
+function invitePanelHTML(s) {
+  return `
+    ${invitePreviewCardHTML(s)}
+    <div class="invite-controls">
+      <div class="field"><label>Expire After</label>
+        <select id="inv-expiry">${INVITE_EXPIRY_OPTIONS.map(o => `<option value="${o.value}"${o.value === '10080' ? ' selected' : ''}>${o.label}</option>`).join('')}</select>
+      </div>
+      <div class="field"><label>Max Number of Uses</label>
+        <select id="inv-uses">
+          <option value="unlimited">No limit</option>
+          <option value="1">1 use</option>
+          <option value="5">5 uses</option>
+          <option value="10">10 uses</option>
+          <option value="25">25 uses</option>
+          <option value="50">50 uses</option>
+          <option value="100">100 uses</option>
+        </select>
+      </div>
+      <button class="btn inv-generate" id="inv-generate">${icon('link')} Generate New Link</button>
+    </div>
+    <div class="invite-result" id="inv-result"></div>
+    <div class="invite-list-head"><span>Active Invites</span><span class="inv-count" id="inv-count"></span></div>
+    <div class="invite-list" id="inv-list"><div class="inv-empty">Loading invites\u2026</div></div>`;
+}
+
+function wireInvitePanel(s) {
+  const gen = $('inv-generate');
+  if (gen) gen.addEventListener('click', async () => {
+    gen.disabled = true;
+    try {
+      const { invite } = await api('/api/servers/' + s.id + '/invites', { method: 'POST', body: JSON.stringify({ expires_in: $('inv-expiry').value, max_uses: $('inv-uses').value }) });
+      showInviteResult(invite);
+      loadInviteList(s);
+    } catch (e) { toast(e.message, 'error'); }
+    finally { gen.disabled = false; }
+  });
+  loadInviteList(s);
+}
+
+function showInviteResult(invite) {
+  const box = $('inv-result');
+  if (!box) return;
+  const link = 'gg/' + invite.code;
+  box.innerHTML = `
+    <div class="invite-result-card">
+      <div class="irc-label">${icon('check')} Your invite link is ready</div>
+      <div class="irc-link-row">
+        <div class="irc-link">${escapeHtml(link)}</div>
+        <button class="irc-copy" id="irc-copy">${icon('copy')} Copy</button>
+      </div>
+      <div class="irc-meta">${escapeHtml(inviteExpiryLabel(invite))}${invite.max_uses ? ` \u00b7 ${invite.max_uses} max uses` : ''}</div>
+    </div>`;
+  hydrateIcons(box);
+  $('irc-copy').addEventListener('click', async () => {
+    try { await navigator.clipboard.writeText(link); toast('Invite copied: ' + link, 'success'); }
+    catch (e) { promptDialog({ title: 'Invite Link', body: 'Copy your invite link below.', label: 'Invite link', value: link, confirmText: 'Done' }); }
+  });
+}
+
+async function loadInviteList(s) {
+  const list = $('inv-list');
+  if (!list) return;
+  try {
+    const { invites } = await api('/api/servers/' + s.id + '/invites');
+    const active = invites.filter(i => i.valid).length;
+    const countEl = $('inv-count');
+    if (countEl) countEl.textContent = active + ' active';
+    if (!invites.length) { list.innerHTML = `<div class="inv-empty">No invites yet \u2014 generate one above to get started.</div>`; return; }
+    list.innerHTML = invites.map(inv => `
+      <div class="invite-row${inv.valid ? '' : ' inactive'}">
+        <div class="ir-ico">${icon(inv.valid ? 'link' : (inv.expired ? 'clock' : 'xmark'))}</div>
+        <div class="ir-main">
+          <div class="ir-code">gg/${escapeHtml(inv.code)}</div>
+          <div class="ir-meta">${escapeHtml(inviteExpiryLabel(inv))} \u00b7 ${inv.max_uses ? `${inv.uses}/${inv.max_uses} uses` : `${inv.uses} use${inv.uses === 1 ? '' : 's'}`}</div>
+        </div>
+        <button class="ir-btn ir-copy" data-copy="${escapeHtml(inv.code)}" title="Copy link">${icon('copy')}</button>
+        <button class="ir-btn ir-revoke" data-revoke="${escapeHtml(inv.code)}" title="Revoke">${icon('trash')}</button>
+      </div>`).join('');
+    hydrateIcons(list);
+    list.querySelectorAll('[data-copy]').forEach(b => b.addEventListener('click', async () => {
+      const link = 'gg/' + b.dataset.copy;
+      try { await navigator.clipboard.writeText(link); toast('Invite copied', 'success'); } catch (e) { toast(link); }
+    }));
+    list.querySelectorAll('[data-revoke]').forEach(b => b.addEventListener('click', async () => {
+      const ok = await confirmDialog({ title: 'Revoke Invite', body: `Revoke <b>gg/${escapeHtml(b.dataset.revoke)}</b>? Anyone using it will no longer be able to join.`, confirmText: 'Revoke', danger: true });
+      if (!ok) return;
+      try { await api('/api/invites/' + b.dataset.revoke, { method: 'DELETE' }); toast('Invite revoked', 'success'); loadInviteList(s); }
+      catch (e) { toast(e.message, 'error'); }
+    }));
+  } catch (e) { list.innerHTML = `<div class="inv-empty">Could not load invites.</div>`; }
+}
+
+function openInviteModal() {
+  const s = state.server;
+  if (!s) return;
+  openModal(`
+    <div class="invite-modal-header">
+      <div>
+        <h3>Invite friends to ${escapeHtml(s.name)}</h3>
+        <p class="msub">Pick how long your invite stays valid, then share the short link.</p>
+      </div>
+      <button class="imh-close" id="inv-x">${icon('xmark')}</button>
+    </div>
+    <div class="invite-modal-body" id="invite-panel-root">${invitePanelHTML(s)}</div>`, { modalClass: 'invite-modal' });
+  $('inv-x').addEventListener('click', closeModal);
+  wireInvitePanel(s);
+}
+
 function openServerSettings() {
   const s = state.server;
+  if (!s) return;
   const isOwner = s.owner_id === me.id;
   openModal(`
-    <h3>Server Settings</h3>
-    <p class="msub">${escapeHtml(s.name)}</p>
-    <div class="field"><label>Server Name</label>
-      <input id="ss-name" value="${escapeHtml(s.name)}" maxlength="40" ${isOwner ? '' : 'disabled'}></div>
-    <div class="field"><label>Server Icon</label>
-      ${dropzoneHTML('ss-icon-dz', 'Upload Image', 'PNG, JPG or GIF \u2014 up to 25 MB')}
-      <input type="file" id="ss-icon-file" accept="image/*" class="hidden"></div>
-    <div class="field"><label>Invite Link</label><input value="${location.origin}/app.html?invite=${s.id}" readonly></div>
-    <div class="field"><label>Members</label><input value="${state.members.length} members" disabled></div>
-    <div class="modal-actions">
-      <button class="btn secondary" id="ss-close">Done</button>
-      ${isOwner ? '<button class="btn" id="ss-save">Save Changes</button>' : ''}
-    </div>`);
+    <div class="ss-modal-head">
+      <h3>Server Settings</h3>
+      <button class="ss-close" id="ss-close-x">${icon('xmark')}</button>
+    </div>
+    <div class="ss-tabs">
+      <button class="ss-tab active" data-tab="overview">${icon('server')} Overview</button>
+      <button class="ss-tab" data-tab="invites">${icon('link')} Invites</button>
+      <button class="ss-tab" data-tab="members">${icon('users')} Members</button>
+    </div>
+    <div class="ss-body" id="ss-body"></div>`, { modalClass: 'ss-modal' });
+  $('ss-close-x').addEventListener('click', closeModal);
+  const showTab = (tab) => {
+    document.querySelectorAll('.ss-tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tab));
+    renderServerTab(tab, state.server, isOwner);
+  };
+  document.querySelectorAll('.ss-tab').forEach(t => t.addEventListener('click', () => showTab(t.dataset.tab)));
+  showTab('overview');
+}
+
+function renderServerTab(tab, s, isOwner) {
+  const body = $('ss-body');
+  if (!body) return;
+  if (tab === 'invites') {
+    body.innerHTML = `<div class="invite-panel">${invitePanelHTML(s)}</div>`;
+    hydrateIcons(body);
+    wireInvitePanel(s);
+    return;
+  }
+  if (tab === 'members') {
+    const members = state.members || [];
+    body.innerHTML = `
+      <div class="ss-section-title">Members \u2014 ${members.length}</div>
+      <div class="ss-members">${members.map(m => `
+        <div class="ss-member-row">
+          ${avatarHTML(m, 36, m.status || 'offline')}
+          <div class="ss-member-info">
+            <div class="ss-member-name">${escapeHtml(m.display_name || m.username)}${m.id === s.owner_id ? ` <span class="ss-crown">${icon('crown')}</span>` : ''}</div>
+            <div class="ss-member-tag">${escapeHtml(fullTag(m))}</div>
+          </div>
+        </div>`).join('') || '<div class="inv-empty">No members.</div>'}</div>`;
+    hydrateIcons(body);
+    return;
+  }
+  // Overview
+  const bannerStyle = s.banner_url
+    ? `background-image:url('${escapeHtml(s.banner_url)}')`
+    : `background:linear-gradient(135deg, var(--brand), color-mix(in srgb, var(--brand) 40%, #000))`;
+  const created = new Date(s.created_at).toLocaleDateString([], { year: 'numeric', month: 'long', day: 'numeric' });
+  body.innerHTML = `
+    <div class="ss-banner" id="ss-banner" style="${bannerStyle}">
+      <div class="ss-banner-shade"></div>
+      <div class="ss-banner-actions">
+        <button class="ss-banner-btn" id="ss-banner-upload">${icon('image')} ${s.banner_url ? 'Change Banner' : 'Upload Banner'}</button>
+        ${s.banner_url ? `<button class="ss-banner-btn ghost" id="ss-banner-remove">${icon('trash')} Remove</button>` : ''}
+      </div>
+      <input type="file" id="ss-banner-file" accept="image/*" class="hidden">
+    </div>
+    <div class="ss-overview">
+      <div class="ss-icon-col">
+        <div class="ss-icon-drop" id="ss-icon-drop" title="Upload server icon">
+          ${s.icon_url ? `<img src="${escapeHtml(s.icon_url)}" alt="">` : `<span class="ss-icon-fallback">${escapeHtml((s.name || '?')[0].toUpperCase())}</span>`}
+          <div class="ss-icon-overlay">${icon('upload')}</div>
+        </div>
+        <div class="ss-icon-hint">${isOwner ? `Click to ${s.icon_url ? 'change' : 'upload'} icon` : 'Server icon'}</div>
+        <input type="file" id="ss-icon-file" accept="image/*" class="hidden">
+      </div>
+      <div class="ss-fields">
+        <div class="field"><label>Server Name</label><input id="ss-name" value="${escapeHtml(s.name)}" maxlength="40" ${isOwner ? '' : 'disabled'} placeholder="Give your server a memorable name"></div>
+        <div class="field"><label>Server Description</label><textarea id="ss-desc" maxlength="500" ${isOwner ? '' : 'disabled'} placeholder="Tell people what your server is about, who it is for, and what to expect when they join\u2026">${escapeHtml(s.description || '')}</textarea></div>
+        <div class="ss-stats">
+          <div class="ss-stat"><div class="ss-stat-num">${s.member_count || 0}</div><div class="ss-stat-lbl">Members</div></div>
+          <div class="ss-stat"><div class="ss-stat-num">${s.online_count || 0}</div><div class="ss-stat-lbl">Online</div></div>
+          <div class="ss-stat"><div class="ss-stat-num">${(state.channels || []).length}</div><div class="ss-stat-lbl">Channels</div></div>
+          <div class="ss-stat"><div class="ss-stat-num small">${escapeHtml(created)}</div><div class="ss-stat-lbl">Created</div></div>
+        </div>
+        ${isOwner ? `<div class="ss-actions"><button class="btn" id="ss-save">${icon('check')} Save Changes</button></div>` : `<div class="ss-note">Only the server owner can edit these settings.</div>`}
+      </div>
+    </div>`;
+  hydrateIcons(body);
+
   let iconUrl = s.icon_url || null;
-  const dz = $('ss-icon-dz');
-  if (iconUrl) dzSetPreview(dz, iconUrl, () => { iconUrl = null; });
-  wireDropzone(dz, $('ss-icon-file'), async (f) => {
-    try { const d = await uploadImage(f); iconUrl = d.url; dzSetPreview(dz, d.url, () => { iconUrl = null; }); toast('Icon ready \u2014 remember to save', 'success'); }
-    catch (err) { toast(err.message, 'error'); }
-  });
-  $('ss-close').addEventListener('click', closeModal);
-  if (isOwner) $('ss-save').addEventListener('click', async () => {
+  let bannerUrl = s.banner_url || null;
+  const iconDrop = $('ss-icon-drop');
+  if (isOwner && iconDrop) {
+    iconDrop.addEventListener('click', () => $('ss-icon-file').click());
+    $('ss-icon-file').addEventListener('change', async (e) => {
+      const f = e.target.files[0]; if (!f) return;
+      try {
+        const d = await uploadImage(f); iconUrl = d.url;
+        iconDrop.innerHTML = `<img src="${escapeHtml(d.url)}" alt=""><div class="ss-icon-overlay">${icon('upload')}</div>`;
+        hydrateIcons(iconDrop);
+        toast('Icon ready \u2014 remember to save', 'success');
+      } catch (err) { toast(err.message, 'error'); }
+      e.target.value = '';
+    });
+  }
+  const bannerEl = $('ss-banner');
+  if (isOwner && bannerEl) {
+    $('ss-banner-upload').addEventListener('click', () => $('ss-banner-file').click());
+    $('ss-banner-file').addEventListener('change', async (e) => {
+      const f = e.target.files[0]; if (!f) return;
+      try {
+        const d = await uploadImage(f); bannerUrl = d.url;
+        bannerEl.style.background = `url('${d.url}') center/cover`;
+        toast('Banner ready \u2014 remember to save', 'success');
+      } catch (err) { toast(err.message, 'error'); }
+      e.target.value = '';
+    });
+    const rm = $('ss-banner-remove');
+    if (rm) rm.addEventListener('click', () => {
+      bannerUrl = null;
+      bannerEl.style.background = 'linear-gradient(135deg, var(--brand), color-mix(in srgb, var(--brand) 40%, #000))';
+      rm.remove();
+      toast('Banner removed \u2014 remember to save', 'success');
+    });
+  }
+  const save = $('ss-save');
+  if (save) save.addEventListener('click', async () => {
+    save.disabled = true;
     try {
-      const { server } = await api('/api/servers/' + s.id, { method: 'PATCH', body: JSON.stringify({ name: $('ss-name').value.trim(), icon_url: iconUrl }) });
+      const { server } = await api('/api/servers/' + s.id, { method: 'PATCH', body: JSON.stringify({ name: $('ss-name').value.trim(), description: $('ss-desc').value.trim(), icon_url: iconUrl, banner_url: bannerUrl }) });
       state.server = server;
-      $('sidebar-name').textContent = server.name;
+      const sn = $('sidebar-name'); if (sn) sn.textContent = server.name;
       await loadServers();
-      closeModal();
       toast('Server updated', 'success');
-    } catch (e) { toast(e.message, 'error'); }
+      renderServerTab('overview', server, isOwner);
+    } catch (e) { toast(e.message, 'error'); save.disabled = false; }
   });
 }
 

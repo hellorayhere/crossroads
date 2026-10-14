@@ -9,7 +9,7 @@ const { Server } = require('socket.io');
 
 const db = require('./db');
 const persist = require('./persist');
-const { newId, randomColor, randomDiscriminator } = require('./util');
+const { newId, newInviteCode, randomColor, randomDiscriminator } = require('./util');
 
 const PORT = process.env.PORT || 3000;
 const JWT_SECRET = process.env.JWT_SECRET || 'crossroads-dev-secret-change-me';
@@ -109,6 +109,75 @@ function getServerForUser(serverId, userId) {
   const member = db.prepare('SELECT 1 FROM server_members WHERE server_id = ? AND user_id = ?').get(serverId, userId);
   if (!member) return null;
   return db.prepare('SELECT * FROM servers WHERE id = ?').get(serverId);
+}
+
+/* ---------------- Servers: serialisation + invites ---------------- */
+
+function serverStats(serverId) {
+  const memberCount = db.prepare('SELECT COUNT(*) AS c FROM server_members WHERE server_id = ?').get(serverId).c;
+  const onlineCount = db.prepare(`SELECT COUNT(*) AS c FROM server_members m JOIN users u ON u.id = m.user_id
+    WHERE m.server_id = ? AND u.status != 'offline'`).get(serverId).c;
+  return { member_count: memberCount, online_count: onlineCount };
+}
+
+function publicServer(s) {
+  if (!s) return null;
+  const stats = serverStats(s.id);
+  return Object.assign({}, s, {
+    banner_url: s.banner_url || null,
+    description: s.description || '',
+    member_count: stats.member_count,
+    online_count: stats.online_count
+  });
+}
+
+/* Accepts a raw code, a short "gg/<code>" link, or a full invite URL. Returns
+   just the code portion (or the input unchanged when nothing matches). */
+function normalizeInviteCode(raw) {
+  let v = String(raw || '').trim();
+  if (!v) return '';
+  // Full URL: grab the ?invite= query value or the final path segment.
+  if (/^https?:\/\//i.test(v)) {
+    try {
+      const u = new URL(v);
+      const q = u.searchParams.get('invite');
+      if (q) return q.trim();
+      v = u.pathname;
+    } catch (e) { /* fall through */ }
+  }
+  // Short "gg/<code>" form (optionally with a domain prefix).
+  const gg = v.match(/(?:^|\/)(?:gg|invite)\/([A-Za-z0-9_-]{4,64})\/?$/i);
+  if (gg) return gg[1];
+  if (v.includes('/')) v = v.split('/').filter(Boolean).pop();
+  return v.trim();
+}
+
+function getInvite(code) {
+  const row = db.prepare('SELECT * FROM invites WHERE code = ?').get(code);
+  if (!row) return null;
+  const expired = row.expires_at && Date.now() > row.expires_at;
+  const maxed = row.max_uses && row.uses >= row.max_uses;
+  return { invite: row, valid: !expired && !maxed, expired: !!expired, maxed: !!maxed };
+}
+
+/* Shape an invite row for the client, including a ready-to-share short link. */
+function invitePublic(row) {
+  if (!row) return null;
+  const expired = row.expires_at && Date.now() > row.expires_at;
+  const maxed = row.max_uses && row.uses >= row.max_uses;
+  return {
+    code: row.code,
+    server_id: row.server_id,
+    creator_id: row.creator_id,
+    created_at: row.created_at,
+    expires_at: row.expires_at || null,
+    max_uses: row.max_uses || null,
+    uses: row.uses || 0,
+    expired: !!expired,
+    maxed: !!maxed,
+    valid: !expired && !maxed,
+    link: `gg/${row.code}`
+  };
 }
 
 /* ---------------- Relationships (friends / blocks) ---------------- */
@@ -369,6 +438,30 @@ app.patch('/api/me', auth, (req, res) => {
   res.json({ user: publicUser(user) });
 });
 
+/* Change password (Privacy & Safety). Verifies the current password first. */
+app.post('/api/me/password', auth, (req, res) => {
+  const { current_password, new_password } = req.body || {};
+  if (!current_password || !new_password) {
+    return res.status(400).json({ error: 'Current and new password are required' });
+  }
+  const user = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
+  if (!user || !bcrypt.compareSync(current_password, user.password_hash)) {
+    return res.status(401).json({ error: 'Your current password is incorrect' });
+  }
+  if (String(new_password).length < 6) {
+    return res.status(400).json({ error: 'New password must be at least 6 characters' });
+  }
+  if (String(new_password).length > 128) {
+    return res.status(400).json({ error: 'New password is too long' });
+  }
+  if (current_password === new_password) {
+    return res.status(400).json({ error: 'New password must be different from your current one' });
+  }
+  const hash = bcrypt.hashSync(String(new_password), 10);
+  db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(hash, user.id);
+  res.json({ ok: true });
+});
+
 /* ---------------- Users ---------------- */
 app.get('/api/users/:id', auth, (req, res) => {
   const u = db.prepare('SELECT * FROM users WHERE id = ?').get(req.params.id);
@@ -546,37 +639,53 @@ app.get('/api/servers', auth, (req, res) => {
     SELECT s.* FROM servers s
     JOIN server_members m ON m.server_id = s.id
     WHERE m.user_id = ? ORDER BY m.joined_at ASC`).all(req.user.id);
-  res.json({ servers: rows });
+  res.json({ servers: rows.map(publicServer) });
 });
 
 app.post('/api/servers', auth, (req, res) => {
-  let { name, icon, icon_url } = req.body || {};
+  let { name, icon, icon_url, banner_url, description } = req.body || {};
   name = (name || '').trim();
   if (!name) return res.status(400).json({ error: 'Server name required' });
   const id = newId();
   const now = Date.now();
-  db.prepare('INSERT INTO servers (id, name, icon, icon_url, owner_id, created_at) VALUES (?,?,?,?,?,?)')
-    .run(id, name, icon || null, icon_url || null, req.user.id, now);
+  db.prepare('INSERT INTO servers (id, name, icon, icon_url, banner_url, description, owner_id, created_at) VALUES (?,?,?,?,?,?,?,?)')
+    .run(id, name.slice(0, 40), icon || null, icon_url || null, banner_url || null, (description || '').slice(0, 500), req.user.id, now);
   db.prepare('INSERT INTO server_members (server_id, user_id, joined_at) VALUES (?,?,?)').run(id, req.user.id, now);
   createDefaultChannels(id);
   const srv = db.prepare('SELECT * FROM servers WHERE id = ?').get(id);
-  res.json({ server: srv });
+  res.json({ server: publicServer(srv) });
 });
 
 app.post('/api/servers/join', auth, (req, res) => {
   let { invite } = req.body || {};
   invite = (invite || '').trim();
   if (!invite) return res.status(400).json({ error: 'Invite code required' });
-  // Accept full URL or raw id
-  let code = invite;
-  if (invite.includes('/')) code = invite.split('/').filter(Boolean).pop();
-  const srv = db.prepare('SELECT * FROM servers WHERE id = ?').get(code);
+  const code = normalizeInviteCode(invite);
+
+  // 1) New-style invite codes (16-char, may expire / be limited).
+  const found = getInvite(code);
+  let srv = null;
+  if (found) {
+    if (found.expired) return res.status(410).json({ error: 'This invite has expired' });
+    if (found.maxed) return res.status(410).json({ error: 'This invite has reached its maximum uses' });
+    srv = db.prepare('SELECT * FROM servers WHERE id = ?').get(found.invite.server_id);
+    if (!srv) return res.status(404).json({ error: 'Invalid invite code' });
+    const already = db.prepare('SELECT 1 FROM server_members WHERE server_id = ? AND user_id = ?').get(srv.id, req.user.id);
+    if (!already) {
+      db.prepare('INSERT INTO server_members (server_id, user_id, joined_at) VALUES (?,?,?)').run(srv.id, req.user.id, Date.now());
+      db.prepare('UPDATE invites SET uses = uses + 1 WHERE code = ?').run(found.invite.code);
+    }
+    return res.json({ server: publicServer(srv), invite: { code: found.invite.code, server_id: srv.id } });
+  }
+
+  // 2) Legacy: raw server id (or a link ending in the server id).
+  srv = db.prepare('SELECT * FROM servers WHERE id = ?').get(code);
   if (!srv) return res.status(404).json({ error: 'Invalid invite code' });
   const existing = db.prepare('SELECT 1 FROM server_members WHERE server_id = ? AND user_id = ?').get(srv.id, req.user.id);
   if (!existing) {
     db.prepare('INSERT INTO server_members (server_id, user_id, joined_at) VALUES (?,?,?)').run(srv.id, req.user.id, Date.now());
   }
-  res.json({ server: srv });
+  res.json({ server: publicServer(srv) });
 });
 
 app.get('/api/servers/:id', auth, (req, res) => {
@@ -586,7 +695,7 @@ app.get('/api/servers/:id', auth, (req, res) => {
   const members = db.prepare(`
     SELECT u.* FROM users u JOIN server_members m ON m.user_id = u.id
     WHERE m.server_id = ? ORDER BY m.joined_at ASC`).all(srv.id).map(publicUser);
-  res.json({ server: srv, channels, members });
+  res.json({ server: publicServer(srv), channels, members });
 });
 
 app.post('/api/servers/:id/channels', auth, (req, res) => {
@@ -603,7 +712,7 @@ app.post('/api/servers/:id/channels', auth, (req, res) => {
   res.json({ channel: ch });
 });
 
-/* Update server name / icon (owner only). */
+/* Update server name / icon / banner / description (owner only). */
 app.patch('/api/servers/:id', auth, (req, res) => {
   const srv = db.prepare('SELECT * FROM servers WHERE id = ?').get(req.params.id);
   if (!srv) return res.status(404).json({ error: 'Server not found' });
@@ -614,11 +723,90 @@ app.patch('/api/servers/:id', auth, (req, res) => {
     updates.push('name = ?'); values.push(String(req.body.name).trim().slice(0, 40));
   }
   if ('icon_url' in req.body) { updates.push('icon_url = ?'); values.push(req.body.icon_url || null); }
+  if ('banner_url' in req.body) { updates.push('banner_url = ?'); values.push(req.body.banner_url || null); }
+  if ('description' in req.body) { updates.push('description = ?'); values.push(String(req.body.description || '').slice(0, 500)); }
   if (updates.length) {
     values.push(srv.id);
     db.prepare(`UPDATE servers SET ${updates.join(', ')} WHERE id = ?`).run(...values);
   }
-  res.json({ server: db.prepare('SELECT * FROM servers WHERE id = ?').get(srv.id) });
+  res.json({ server: publicServer(db.prepare('SELECT * FROM servers WHERE id = ?').get(srv.id)) });
+});
+
+/* ---------------- Server invites ---------------- */
+
+/* Create an invite. Body: { expires_in: minutes|'never', max_uses: number|null } */
+app.post('/api/servers/:id/invites', auth, (req, res) => {
+  const srv = getServerForUser(req.params.id, req.user.id);
+  if (!srv) return res.status(404).json({ error: 'Server not found' });
+  let { expires_in, max_uses } = req.body || {};
+  let expiresAt = null;
+  if (expires_in === 'never' || expires_in === null || expires_in === undefined || expires_in === 0) {
+    expiresAt = null;
+  } else {
+    const mins = parseInt(expires_in, 10);
+    if (!isFinite(mins) || mins <= 0) return res.status(400).json({ error: 'Invalid expiry' });
+    expiresAt = Date.now() + mins * 60 * 1000;
+  }
+  let maxUses = null;
+  if (max_uses !== undefined && max_uses !== null && max_uses !== '' && max_uses !== 'unlimited') {
+    const mu = parseInt(max_uses, 10);
+    if (isFinite(mu) && mu > 0) maxUses = mu;
+  }
+  let code = newInviteCode();
+  // Extremely unlikely collision, but guard anyway.
+  while (db.prepare('SELECT 1 FROM invites WHERE code = ?').get(code)) code = newInviteCode();
+  const now = Date.now();
+  db.prepare('INSERT INTO invites (code, server_id, creator_id, created_at, expires_at, max_uses, uses) VALUES (?,?,?,?,?,?,0)')
+    .run(code, srv.id, req.user.id, now, expiresAt, maxUses);
+  const row = db.prepare('SELECT * FROM invites WHERE code = ?').get(code);
+  res.json({ invite: invitePublic(row) });
+});
+
+/* List a server's invites (members can view; owner/creator can revoke). */
+app.get('/api/servers/:id/invites', auth, (req, res) => {
+  const srv = getServerForUser(req.params.id, req.user.id);
+  if (!srv) return res.status(404).json({ error: 'Server not found' });
+  const rows = db.prepare('SELECT * FROM invites WHERE server_id = ? ORDER BY created_at DESC').all(srv.id);
+  res.json({ invites: rows.map(invitePublic) });
+});
+
+/* Revoke an invite (creator or server owner). */
+app.delete('/api/invites/:code', auth, (req, res) => {
+  const row = db.prepare('SELECT * FROM invites WHERE code = ?').get(req.params.code);
+  if (!row) return res.status(404).json({ error: 'Invite not found' });
+  const srv = db.prepare('SELECT * FROM servers WHERE id = ?').get(row.server_id);
+  if (row.creator_id !== req.user.id && (!srv || srv.owner_id !== req.user.id)) {
+    return res.status(403).json({ error: 'You cannot revoke this invite' });
+  }
+  db.prepare('DELETE FROM invites WHERE code = ?').run(row.code);
+  res.json({ ok: true });
+});
+
+/* Public invite preview (used to render rich embeds + the join screen). */
+app.get('/api/invites/:code', auth, (req, res) => {
+  const code = normalizeInviteCode(req.params.code);
+  const found = getInvite(code);
+  if (!found) return res.status(404).json({ error: 'Invalid invite code' });
+  const srv = db.prepare('SELECT * FROM servers WHERE id = ?').get(found.invite.server_id);
+  if (!srv) return res.status(404).json({ error: 'Invalid invite code' });
+  const stats = serverStats(srv.id);
+  const alreadyMember = !!db.prepare('SELECT 1 FROM server_members WHERE server_id = ? AND user_id = ?').get(srv.id, req.user.id);
+  res.json({
+    invite: invitePublic(found.invite),
+    valid: found.valid,
+    expired: found.expired,
+    maxed: found.maxed,
+    already_member: alreadyMember,
+    server: {
+      id: srv.id,
+      name: srv.name,
+      icon_url: srv.icon_url || null,
+      banner_url: srv.banner_url || null,
+      description: srv.description || '',
+      member_count: stats.member_count,
+      online_count: stats.online_count
+    }
+  });
 });
 
 /* Leave a server (non-owners only). */

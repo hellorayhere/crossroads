@@ -52,8 +52,20 @@ CREATE TABLE IF NOT EXISTS servers (
   name TEXT NOT NULL,
   icon TEXT,
   icon_url TEXT,
+  banner_url TEXT,
+  description TEXT DEFAULT '',
   owner_id TEXT NOT NULL,
   created_at INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS invites (
+  code TEXT PRIMARY KEY,
+  server_id TEXT NOT NULL,
+  creator_id TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  expires_at INTEGER,
+  max_uses INTEGER,
+  uses INTEGER DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS server_members (
@@ -146,6 +158,7 @@ CREATE INDEX IF NOT EXISTS idx_friendships_add ON friendships(addressee_id);
 CREATE INDEX IF NOT EXISTS idx_blocks_blocker ON blocks(blocker_id);
 CREATE INDEX IF NOT EXISTS idx_notes_owner ON notes(owner_id);
 CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_id);
+CREATE INDEX IF NOT EXISTS idx_invites_server ON invites(server_id);
 `);
 
 /* ---------------- Migrations ----------------
@@ -179,6 +192,15 @@ function migrate() {
   }
   if (!msgCols.includes('mentions')) {
     try { db.exec("ALTER TABLE messages ADD COLUMN mentions TEXT DEFAULT '[]'"); } catch (e) {}
+  }
+
+  // 1c. Additive migrations for servers (banner + description). Never destructive.
+  const srvCols = db.prepare('PRAGMA table_info(servers)').all().map(c => c.name);
+  if (!srvCols.includes('banner_url')) {
+    try { db.exec('ALTER TABLE servers ADD COLUMN banner_url TEXT'); } catch (e) {}
+  }
+  if (!srvCols.includes('description')) {
+    try { db.exec("ALTER TABLE servers ADD COLUMN description TEXT DEFAULT ''"); } catch (e) {}
   }
 
   // 2. If email is still NOT NULL, rebuild the table so it becomes optional.
