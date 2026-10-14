@@ -121,11 +121,30 @@ async function init() {
   bindGlobalEvents();
 }
 
-function renderMe() {
+function renderMe(u = me) {
   const slot = $('my-avatar');
-  if (slot) slot.outerHTML = avatarHTML(me, 32, 'online').replace('class="avatar"', 'class="avatar" id="my-avatar"');
-  $('my-username').textContent = me.display_name || me.username;
-  $('my-tag').textContent = '#' + me.discriminator;
+  if (slot) slot.outerHTML = avatarHTML(u, 32, u.status || 'online').replace('class="avatar"', 'class="avatar" id="my-avatar"');
+  $('my-username').textContent = u.display_name || u.username;
+  $('my-tag').textContent = '#' + u.discriminator;
+}
+
+/* Live preview of the signed-in user's profile across the whole UI.
+   `patch` is a partial user object; it is merged over the current `me`.
+   This never hits the server — it only reflects changes instantly. */
+function previewSelf(patch) {
+  const p = Object.assign({}, me, patch);
+  renderMe(p);
+  const nav = document.querySelector('#settings-nav .pnav-preview');
+  if (nav) {
+    const av = nav.querySelector('.pnav-avatar');
+    if (av) av.innerHTML = avatarHTML(p, 40, p.status || 'online');
+    const n1 = nav.querySelector('.n1');
+    if (n1) n1.textContent = p.display_name || p.username;
+    const n2 = nav.querySelector('.n2');
+    if (n2) n2.textContent = fullTag(p);
+  }
+  const sa = $('sa-avatar');
+  if (sa) sa.innerHTML = avatarHTML(p, 80, p.status || 'online');
 }
 
 /* ============================================================
@@ -931,7 +950,46 @@ function openModal(html, opts = {}) {
   modal.innerHTML = html;
   overlay.classList.remove('hidden');
 }
-function closeModal() { $('modal-overlay').classList.add('hidden'); $('modal').innerHTML = ''; $('modal').className = 'modal'; }
+function closeModal() { modalCloseGuard = null; $('modal-overlay').classList.add('hidden'); $('modal').innerHTML = ''; $('modal').className = 'modal'; }
+
+/* When set, this function runs instead of closing the modal. It lets a panel
+   (e.g. My Account) intercept the close and warn about unsaved changes. */
+let modalCloseGuard = null;
+function requestCloseModal() {
+  if (typeof modalCloseGuard === 'function') { modalCloseGuard(); return; }
+  closeModal();
+}
+
+/* Small "unsaved changes" confirmation shown above the settings modal. */
+function showUnsavedDialog({ onSave, onDiscard }) {
+  const existing = $('confirm-overlay');
+  if (existing) existing.remove();
+  const wrap = document.createElement('div');
+  wrap.className = 'confirm-overlay';
+  wrap.id = 'confirm-overlay';
+  wrap.innerHTML = `
+    <div class="confirm-box">
+      <h3>Careful — you have unsaved changes!</h3>
+      <p>Would you like to save your changes before leaving?</p>
+      <div class="confirm-actions">
+        <button class="btn" id="cu-save">Save Changes</button>
+        <button class="btn secondary" id="cu-discard">Discard</button>
+        <button class="btn ghost" id="cu-cancel">Cancel</button>
+      </div>
+    </div>`;
+  document.body.appendChild(wrap);
+  const close = () => wrap.remove();
+  $('cu-cancel').addEventListener('click', close);
+  $('cu-discard').addEventListener('click', () => { close(); if (onDiscard) onDiscard(); });
+  $('cu-save').addEventListener('click', async () => {
+    const btn = $('cu-save');
+    btn.disabled = true; btn.textContent = 'Saving…';
+    let ok = false;
+    try { ok = await (onSave ? onSave() : true); } catch (e) { ok = false; }
+    if (ok) close(); else { btn.disabled = false; btn.textContent = 'Save Changes'; }
+  });
+  wrap.addEventListener('click', (e) => { if (e.target === wrap) close(); });
+}
 
 function openCreateServer() {
   openModal(`
@@ -1319,9 +1377,13 @@ const SETTINGS_NAV = [
 ];
 
 let settingsUploads = { avatar_url: null, banner_url: null };
+let settingsDirty = false;
+let settingsSaveFn = null;
 
 function openSettings(section) {
   const u = me;
+  settingsDirty = false;
+  settingsSaveFn = null;
   const nav = SETTINGS_NAV.map(item => {
     if (item.cat) return `<div class="sn-cat">${item.cat}</div>`;
     return `<div class="sn-item" data-sec="${item.id}">${item.label} <span class="chev">${icon('fa-chevron-right')}</span></div>`;
@@ -1349,9 +1411,32 @@ function openSettings(section) {
       <button class="btn" id="set-done">Done</button>
     </div>`, { modalClass: 'settings-modal' });
 
-  $('set-done').addEventListener('click', closeModal);
-  $('set-logout').addEventListener('click', logout);
-  $('sn-logout').addEventListener('click', logout);
+  const discardThen = (after) => {
+    settingsDirty = false;
+    previewSelf();                 // revert any live preview back to saved values
+    if (after) after(); else closeModal();
+  };
+  const saveThen = async (after) => {
+    const ok = settingsSaveFn ? await settingsSaveFn() : true;
+    if (ok) { settingsDirty = false; if (after) after(); else closeModal(); }
+    return ok;
+  };
+  const guardLogout = () => {
+    if (settingsDirty) showUnsavedDialog({ onSave: () => saveThen(logout), onDiscard: () => discardThen(logout) });
+    else logout();
+  };
+
+  modalCloseGuard = () => {
+    if (!settingsDirty) { closeModal(); return; }
+    showUnsavedDialog({
+      onSave: () => saveThen(closeModal),
+      onDiscard: () => discardThen(closeModal)
+    });
+  };
+
+  $('set-done').addEventListener('click', requestCloseModal);
+  $('set-logout').addEventListener('click', guardLogout);
+  $('sn-logout').addEventListener('click', guardLogout);
   document.querySelectorAll('#settings-nav .sn-item[data-sec]').forEach(el => {
     el.addEventListener('click', () => renderSettings(el.dataset.sec));
   });
@@ -1478,6 +1563,9 @@ function wireAccountPanel() {
   settingsUploads = { avatar_url: u.avatar_url || null, banner_url: u.banner_url || null };
   $('set-status').value = u.status || 'online';
 
+  const markDirty = () => { settingsDirty = true; };
+
+  // ---- Avatar (real-time preview + saved on Save Changes) ----
   $('sa-upload').addEventListener('click', () => $('sa-file').click());
   $('sa-file').addEventListener('change', async (e) => {
     const f = e.target.files[0]; if (!f) return;
@@ -1485,21 +1573,31 @@ function wireAccountPanel() {
     try {
       const d = await api('/api/upload', { method: 'POST', body: fd });
       settingsUploads.avatar_url = d.url;
-      $('sa-avatar').innerHTML = avatarHTML({ ...u, avatar_url: d.url }, 80, u.status || 'online');
-      toast('Avatar uploaded', 'success');
+      previewSelf({ avatar_url: d.url });
+      markDirty();
+      toast('Avatar ready — remember to save', 'success');
     } catch (err) { toast(err.message, 'error'); }
   });
   $('sa-remove').addEventListener('click', () => {
     settingsUploads.avatar_url = null;
-    $('sa-avatar').innerHTML = avatarHTML({ ...u, avatar_url: null }, 80, u.status || 'online');
+    previewSelf({ avatar_url: null });
+    markDirty();
   });
 
   // ---- Profile banner (image + colour) ----
   let bannerColor = u.banner_color || '#5865F2';
   const editor = $('banner-editor');
   const paintBanner = () => {
-    if (settingsUploads.banner_url) { editor.style.backgroundImage = `url('${settingsUploads.banner_url}')`; editor.style.background = ''; }
-    else { editor.style.backgroundImage = 'none'; editor.style.background = bannerColor; }
+    // NOTE: set longhands (backgroundImage / backgroundColor) individually — assigning the
+    // `background` shorthand afterwards would reset and wipe the image we just set.
+    if (settingsUploads.banner_url) {
+      editor.style.backgroundImage = `url('${settingsUploads.banner_url}')`;
+      editor.style.backgroundColor = 'transparent';
+    } else {
+      editor.style.backgroundImage = 'none';
+      editor.style.backgroundColor = bannerColor;
+    }
+    previewSelf({ banner_url: settingsUploads.banner_url, banner_color: bannerColor });
   };
   $('set-banner-file-btn').addEventListener('click', () => $('set-banner-file').click());
   $('set-banner-file').addEventListener('change', async (e) => {
@@ -1507,15 +1605,16 @@ function wireAccountPanel() {
     const fd = new FormData(); fd.append('file', f);
     try {
       const d = await api('/api/upload', { method: 'POST', body: fd });
-      settingsUploads.banner_url = d.url; paintBanner(); toast('Banner uploaded', 'success');
+      settingsUploads.banner_url = d.url; paintBanner(); markDirty();
+      toast('Banner ready — remember to save', 'success');
     } catch (err) { toast(err.message, 'error'); }
   });
-  $('set-banner-remove').addEventListener('click', () => { settingsUploads.banner_url = null; paintBanner(); });
+  $('set-banner-remove').addEventListener('click', () => { settingsUploads.banner_url = null; paintBanner(); markDirty(); });
   document.querySelectorAll('#banner-color-row .swatch').forEach(sw => sw.addEventListener('click', () => {
     bannerColor = sw.dataset.color;
     settingsUploads.banner_url = null;
     document.querySelectorAll('#banner-color-row .swatch').forEach(x => x.classList.toggle('sel', x === sw));
-    paintBanner();
+    paintBanner(); markDirty();
   }));
 
   // ---- Accent colour ----
@@ -1523,6 +1622,7 @@ function wireAccountPanel() {
   document.querySelectorAll('#accent-row .swatch').forEach(sw => sw.addEventListener('click', () => {
     accent = sw.dataset.color;
     document.querySelectorAll('#accent-row .swatch').forEach(x => x.classList.toggle('sel', x === sw));
+    markDirty();
   }));
 
   // ---- Username availability ----
@@ -1531,6 +1631,7 @@ function wireAccountPanel() {
   let usernameOk = true;
   let t = null;
   unameInput.addEventListener('input', () => {
+    markDirty();
     clearTimeout(t);
     const val = unameInput.value.trim();
     if (!val || val.toLowerCase() === (u.username || '').toLowerCase()) {
@@ -1546,7 +1647,15 @@ function wireAccountPanel() {
     }, 350);
   });
 
-  $('set-save').addEventListener('click', async () => {
+  // ---- Live preview for text fields ----
+  $('set-display').addEventListener('input', () => { markDirty(); previewSelf({ display_name: $('set-display').value.trim() || null }); });
+  $('set-pronouns').addEventListener('input', markDirty);
+  $('set-custom').addEventListener('input', markDirty);
+  $('set-bio').addEventListener('input', markDirty);
+  $('set-status').addEventListener('change', () => { markDirty(); previewSelf({ status: $('set-status').value }); });
+
+  // ---- Save ----
+  const doSave = async () => {
     const body = {
       display_name: $('set-display').value.trim() || null,
       pronouns: $('set-pronouns').value.trim(),
@@ -1560,32 +1669,42 @@ function wireAccountPanel() {
     };
     const newUsername = unameInput.value.trim();
     if (newUsername && newUsername.toLowerCase() !== (u.username || '').toLowerCase()) {
-      if (!usernameOk) { toast('Please choose an available username', 'error'); return; }
+      if (!usernameOk) { toast('Please choose an available username', 'error'); return false; }
       body.username = newUsername;
     }
     try {
       const { user } = await api('/api/me', { method: 'PATCH', body: JSON.stringify(body) });
       me = user; localStorage.setItem('cr_user', JSON.stringify(me));
-      renderMe();
+      settingsDirty = false;
+      previewSelf();            // refresh bottom-left panel + settings preview with saved values
+      renderRail(); renderMembers();
       toast('Profile updated', 'success');
-    } catch (e) { toast(e.message, 'error'); }
-  });
+      return true;
+    } catch (e) { toast(e.message, 'error'); return false; }
+  };
+  settingsSaveFn = doSave;
+  $('set-save').addEventListener('click', doSave);
 }
 
 function wireProfilesPanel() {
   let color = me.banner_color || '#5865F2';
   document.querySelectorAll('#prof-banner-row .swatch').forEach(sw => sw.addEventListener('click', () => {
     color = sw.dataset.color;
+    settingsDirty = true;
     document.querySelectorAll('#prof-banner-row .swatch').forEach(x => x.classList.toggle('sel', x === sw));
     $('prof-namestyle').style.color = color;
   }));
-  $('prof-save').addEventListener('click', async () => {
+  const doSave = async () => {
     try {
       const { user } = await api('/api/me', { method: 'PATCH', body: JSON.stringify({ banner_color: color }) });
       me = user; localStorage.setItem('cr_user', JSON.stringify(me));
+      settingsDirty = false;
       toast('Profile style saved', 'success');
-    } catch (e) { toast(e.message, 'error'); }
-  });
+      return true;
+    } catch (e) { toast(e.message, 'error'); return false; }
+  };
+  settingsSaveFn = doSave;
+  $('prof-save').addEventListener('click', doSave);
 }
 
 function wireToggles() {
@@ -1685,12 +1804,18 @@ function bindGlobalEvents() {
     for (const it of items) if (it.type.startsWith('image/')) { handleFile(it.getAsFile()); }
   });
 
-  $('modal-overlay').addEventListener('click', (e) => { if (e.target.id === 'modal-overlay') closeModal(); });
+  $('modal-overlay').addEventListener('click', (e) => { if (e.target.id === 'modal-overlay') requestCloseModal(); });
   document.addEventListener('click', (e) => {
     if (!e.target.closest('.emoji-picker') && !e.target.closest('.context-menu') &&
         !e.target.closest('.msg-toolbar') && !e.target.closest('#emoji-btn')) closePopovers();
   });
-  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') { closePopovers(); closeModal(); } });
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape') return;
+    const cu = $('confirm-overlay');
+    if (cu) { cu.remove(); return; }
+    closePopovers();
+    if (!$('modal-overlay').classList.contains('hidden')) requestCloseModal();
+  });
 }
 
 /* ---------------- Invite handling ---------------- */

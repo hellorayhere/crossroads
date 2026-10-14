@@ -545,6 +545,16 @@ button:active, .rail-item:active, .channel:active, .dm-item:active, .member:acti
 .hint.ok { color: var(--green); }
 .hint.bad { color: var(--red); }
 
+/* ---- Unsaved-changes confirm dialog ---- */
+.confirm-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.6); z-index: 600; display: grid; place-items: center; animation: fade 0.15s ease; }
+.confirm-box { width: min(440px, 92vw); background: #313338; border-radius: 10px; padding: 24px; box-shadow: var(--elevation-lg); animation: toastIn 0.18s ease; }
+.confirm-box h3 { font-size: 19px; font-weight: 700; color: var(--text-header); margin-bottom: 10px; }
+.confirm-box p { font-size: 14px; color: var(--text-muted); line-height: 1.5; margin-bottom: 20px; }
+.confirm-actions { display: flex; justify-content: flex-end; gap: 10px; }
+.confirm-actions .btn { padding: 9px 16px; font-size: 14px; }
+.confirm-actions .btn.ghost { background: transparent; color: var(--text-muted); }
+.confirm-actions .btn.ghost:hover { background: var(--hover); color: var(--text-normal); text-decoration: underline; }
+
 /* ---- Responsive ---- */
 @media (max-width: 760px) {
   .oprofile-body { grid-template-columns: 1fr; }
