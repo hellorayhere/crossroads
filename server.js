@@ -50,7 +50,6 @@ function publicUser(u) {
     pronouns: u.pronouns || '',
     custom_status: u.custom_status || '',
     banner_color: u.banner_color || '#5865F2',
-    email: u.email,
     avatar: u.avatar,
     avatar_url: u.avatar_url,
     banner: u.banner,
@@ -111,6 +110,38 @@ function getServerForUser(serverId, userId) {
   return db.prepare('SELECT * FROM servers WHERE id = ?').get(serverId);
 }
 
+/* ---------------- Relationships (friends / blocks) ---------------- */
+function relationshipBetween(aId, bId) {
+  const block = db.prepare('SELECT 1 FROM blocks WHERE (blocker_id = ? AND blocked_id = ?) OR (blocker_id = ? AND blocked_id = ?)')
+    .get(aId, bId, bId, aId);
+  if (block) return 'blocked';
+  const f = db.prepare('SELECT * FROM friendships WHERE (requester_id = ? AND addressee_id = ?) OR (requester_id = ? AND addressee_id = ?)')
+    .get(aId, bId, bId, aId);
+  if (!f) return 'none';
+  if (f.status === 'accepted') return 'friends';
+  return f.requester_id === aId ? 'pending_outgoing' : 'pending_incoming';
+}
+
+function friendIdsOf(uid) {
+  return db.prepare(`SELECT CASE WHEN requester_id = ? THEN addressee_id ELSE requester_id END AS fid
+    FROM friendships WHERE status = 'accepted' AND (requester_id = ? OR addressee_id = ?)`)
+    .all(uid, uid, uid).map(r => r.fid);
+}
+
+function mutualServers(aId, bId) {
+  return db.prepare(`SELECT s.* FROM servers s
+    JOIN server_members m1 ON m1.server_id = s.id AND m1.user_id = ?
+    JOIN server_members m2 ON m2.server_id = s.id AND m2.user_id = ?`)
+    .all(aId, bId);
+}
+
+function mutualFriends(aId, bId) {
+  const a = new Set(friendIdsOf(aId));
+  return friendIdsOf(bId).filter(id => a.has(id) && id !== aId && id !== bId)
+    .map(id => publicUser(db.prepare('SELECT * FROM users WHERE id = ?').get(id)))
+    .filter(Boolean);
+}
+
 function messageWithMeta(m, currentUserId) {
   const author = db.prepare('SELECT * FROM users WHERE id = ?').get(m.user_id);
   const reactions = db.prepare('SELECT emoji, user_id FROM reactions WHERE message_id = ?').all(m.id);
@@ -142,7 +173,10 @@ app.get('/api/check-username', (req, res) => {
   if (!username) return res.json({ available: false, reason: 'Enter a username' });
   if (username.length < 2 || username.length > 32) return res.json({ available: false, reason: 'Username must be 2-32 characters' });
   if (!/^[a-zA-Z0-9._]+$/.test(username)) return res.json({ available: false, reason: 'Only letters, numbers, periods and underscores are allowed' });
-  const taken = db.prepare('SELECT 1 FROM users WHERE LOWER(username) = LOWER(?)').get(username);
+  const exclude = (req.query.exclude || '').trim();
+  const taken = exclude
+    ? db.prepare('SELECT 1 FROM users WHERE LOWER(username) = LOWER(?) AND id != ?').get(username, exclude)
+    : db.prepare('SELECT 1 FROM users WHERE LOWER(username) = LOWER(?)').get(username);
   res.json({ available: !taken, reason: taken ? 'That username is already taken' : 'Username is available' });
 });
 
@@ -193,17 +227,33 @@ app.get('/api/me', auth, (req, res) => {
 });
 
 app.patch('/api/me', auth, (req, res) => {
+  const uid = req.user.id;
   const allowed = ['bio', 'accent_color', 'avatar', 'avatar_url', 'banner', 'banner_url', 'status', 'display_name', 'pronouns', 'custom_status', 'banner_color'];
   const updates = [];
   const values = [];
   for (const key of allowed) {
     if (key in req.body) { updates.push(`${key} = ?`); values.push(req.body[key]); }
   }
+  // Username change (keeps discriminator when free, otherwise assigns a new one).
+  if ('username' in req.body) {
+    const uname = (req.body.username || '').trim();
+    if (uname && uname.toLowerCase() !== (req.user.username || '').toLowerCase()) {
+      if (uname.length < 2 || uname.length > 32) return res.status(400).json({ error: 'Username must be 2-32 characters' });
+      if (!/^[a-zA-Z0-9._]+$/.test(uname)) return res.status(400).json({ error: 'Username may only contain letters, numbers, periods and underscores' });
+      const taken = db.prepare('SELECT 1 FROM users WHERE LOWER(username) = LOWER(?) AND id != ?').get(uname, uid);
+      if (taken) return res.status(409).json({ error: 'That username is already taken' });
+      let disc = req.user.discriminator;
+      const clash = db.prepare('SELECT 1 FROM users WHERE LOWER(username) = LOWER(?) AND discriminator = ? AND id != ?').get(uname, disc, uid);
+      if (clash) disc = uniqueUsernameDiscriminator(uname);
+      updates.push('username = ?'); values.push(uname);
+      updates.push('discriminator = ?'); values.push(disc);
+    }
+  }
   if (updates.length) {
-    values.push(req.user.id);
+    values.push(uid);
     db.prepare(`UPDATE users SET ${updates.join(', ')} WHERE id = ?`).run(...values);
   }
-  const user = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
+  const user = db.prepare('SELECT * FROM users WHERE id = ?').get(uid);
   res.json({ user: publicUser(user) });
 });
 
@@ -211,7 +261,15 @@ app.patch('/api/me', auth, (req, res) => {
 app.get('/api/users/:id', auth, (req, res) => {
   const u = db.prepare('SELECT * FROM users WHERE id = ?').get(req.params.id);
   if (!u) return res.status(404).json({ error: 'User not found' });
-  res.json({ user: publicUser(u) });
+  const isMe = u.id === req.user.id;
+  const noteRow = db.prepare('SELECT content FROM notes WHERE owner_id = ? AND target_id = ?').get(req.user.id, u.id);
+  res.json({
+    user: publicUser(u),
+    relationship: isMe ? 'self' : relationshipBetween(req.user.id, u.id),
+    mutual_servers: isMe ? [] : mutualServers(req.user.id, u.id),
+    mutual_friends: isMe ? [] : mutualFriends(req.user.id, u.id),
+    note: noteRow ? noteRow.content : ''
+  });
 });
 
 app.get('/api/users', auth, (req, res) => {
@@ -226,6 +284,114 @@ app.get('/api/users', auth, (req, res) => {
   res.json({ users: rows.map(publicUser) });
 });
 
+/* ---------------- Friends & Relationships ---------------- */
+app.get('/api/relationships', auth, (req, res) => {
+  const uid = req.user.id;
+  const friends = db.prepare(`SELECT u.* FROM friendships f
+    JOIN users u ON u.id = CASE WHEN f.requester_id = ? THEN f.addressee_id ELSE f.requester_id END
+    WHERE f.status = 'accepted' AND (f.requester_id = ? OR f.addressee_id = ?)`)
+    .all(uid, uid, uid).map(publicUser);
+  const incoming = db.prepare(`SELECT u.* FROM friendships f JOIN users u ON u.id = f.requester_id
+    WHERE f.status = 'pending' AND f.addressee_id = ?`).all(uid).map(publicUser);
+  const outgoing = db.prepare(`SELECT u.* FROM friendships f JOIN users u ON u.id = f.addressee_id
+    WHERE f.status = 'pending' AND f.requester_id = ?`).all(uid).map(publicUser);
+  const blocked = db.prepare(`SELECT u.* FROM blocks b JOIN users u ON u.id = b.blocked_id
+    WHERE b.blocker_id = ? ORDER BY b.created_at DESC`).all(uid).map(publicUser);
+  res.json({ friends, incoming, outgoing, blocked });
+});
+
+app.post('/api/friends/request', auth, (req, res) => {
+  const uid = req.user.id;
+  let { userId, tag } = req.body || {};
+  let target = null;
+  if (userId) {
+    target = db.prepare('SELECT * FROM users WHERE id = ?').get(userId);
+  } else if (tag) {
+    const t = String(tag).trim();
+    if (t.includes('#')) {
+      const [uname, disc] = t.split('#');
+      target = db.prepare('SELECT * FROM users WHERE LOWER(username) = LOWER(?) AND discriminator = ?').get(uname, disc);
+    } else {
+      target = db.prepare('SELECT * FROM users WHERE LOWER(username) = LOWER(?) ORDER BY created_at ASC LIMIT 1').get(t);
+    }
+  }
+  if (!target) return res.status(404).json({ error: 'User not found. Check the spelling and try again.' });
+  if (target.id === uid) return res.status(400).json({ error: 'You cannot add yourself' });
+  if (relationshipBetween(uid, target.id) === 'blocked') return res.status(403).json({ error: 'Unable to send a friend request to this user' });
+  const existing = db.prepare('SELECT * FROM friendships WHERE (requester_id = ? AND addressee_id = ?) OR (requester_id = ? AND addressee_id = ?)')
+    .get(uid, target.id, target.id, uid);
+  if (existing) {
+    if (existing.status === 'accepted') return res.json({ status: 'friends' });
+    if (existing.requester_id === target.id) {
+      db.prepare('UPDATE friendships SET status = ? WHERE id = ?').run('accepted', existing.id);
+      io.to(`user:${target.id}`).emit('friend_update', { type: 'accepted', user: publicUser(req.user) });
+      return res.json({ status: 'friends' });
+    }
+    return res.json({ status: 'pending_outgoing' });
+  }
+  db.prepare('INSERT INTO friendships (id, requester_id, addressee_id, status, created_at) VALUES (?,?,?,?,?)')
+    .run(newId(), uid, target.id, 'pending', Date.now());
+  io.to(`user:${target.id}`).emit('friend_update', { type: 'request', user: publicUser(req.user) });
+  res.json({ status: 'pending_outgoing' });
+});
+
+app.post('/api/friends/accept', auth, (req, res) => {
+  const { userId } = req.body || {};
+  const f = db.prepare("SELECT * FROM friendships WHERE requester_id = ? AND addressee_id = ? AND status = 'pending'").get(userId, req.user.id);
+  if (!f) return res.status(404).json({ error: 'No pending request from this user' });
+  db.prepare('UPDATE friendships SET status = ? WHERE id = ?').run('accepted', f.id);
+  io.to(`user:${userId}`).emit('friend_update', { type: 'accepted', user: publicUser(req.user) });
+  res.json({ ok: true, status: 'friends' });
+});
+
+app.post('/api/friends/decline', auth, (req, res) => {
+  const { userId } = req.body || {};
+  db.prepare("DELETE FROM friendships WHERE requester_id = ? AND addressee_id = ? AND status = 'pending'").run(userId, req.user.id);
+  res.json({ ok: true });
+});
+
+app.post('/api/friends/cancel', auth, (req, res) => {
+  const { userId } = req.body || {};
+  db.prepare("DELETE FROM friendships WHERE requester_id = ? AND addressee_id = ? AND status = 'pending'").run(req.user.id, userId);
+  res.json({ ok: true });
+});
+
+app.delete('/api/friends/:userId', auth, (req, res) => {
+  db.prepare('DELETE FROM friendships WHERE (requester_id = ? AND addressee_id = ?) OR (requester_id = ? AND addressee_id = ?)')
+    .run(req.user.id, req.params.userId, req.params.userId, req.user.id);
+  io.to(`user:${req.params.userId}`).emit('friend_update', { type: 'removed', user: publicUser(req.user) });
+  res.json({ ok: true });
+});
+
+app.post('/api/blocks', auth, (req, res) => {
+  const { userId } = req.body || {};
+  if (!userId) return res.status(400).json({ error: 'userId required' });
+  if (userId === req.user.id) return res.status(400).json({ error: 'You cannot block yourself' });
+  db.prepare('DELETE FROM friendships WHERE (requester_id = ? AND addressee_id = ?) OR (requester_id = ? AND addressee_id = ?)')
+    .run(req.user.id, userId, userId, req.user.id);
+  const existing = db.prepare('SELECT 1 FROM blocks WHERE blocker_id = ? AND blocked_id = ?').get(req.user.id, userId);
+  if (!existing) db.prepare('INSERT INTO blocks (id, blocker_id, blocked_id, created_at) VALUES (?,?,?,?)').run(newId(), req.user.id, userId, Date.now());
+  res.json({ ok: true, status: 'blocked' });
+});
+
+app.delete('/api/blocks/:userId', auth, (req, res) => {
+  db.prepare('DELETE FROM blocks WHERE blocker_id = ? AND blocked_id = ?').run(req.user.id, req.params.userId);
+  res.json({ ok: true, status: 'none' });
+});
+
+/* ---------------- Private Notes ---------------- */
+app.get('/api/notes/:userId', auth, (req, res) => {
+  const n = db.prepare('SELECT content FROM notes WHERE owner_id = ? AND target_id = ?').get(req.user.id, req.params.userId);
+  res.json({ note: n ? n.content : '' });
+});
+
+app.put('/api/notes/:userId', auth, (req, res) => {
+  const content = String((req.body || {}).content || '').slice(0, 256);
+  const existing = db.prepare('SELECT * FROM notes WHERE owner_id = ? AND target_id = ?').get(req.user.id, req.params.userId);
+  if (existing) db.prepare('UPDATE notes SET content = ?, updated_at = ? WHERE id = ?').run(content, Date.now(), existing.id);
+  else db.prepare('INSERT INTO notes (id, owner_id, target_id, content, updated_at) VALUES (?,?,?,?,?)').run(newId(), req.user.id, req.params.userId, content, Date.now());
+  res.json({ note: content });
+});
 /* ---------------- Servers ---------------- */
 app.get('/api/servers', auth, (req, res) => {
   const rows = db.prepare(`

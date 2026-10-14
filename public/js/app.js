@@ -29,15 +29,14 @@ const EMOJIS = ['\u{1F600}','\u{1F602}','\u{1F972}','\u{1F60D}','\u{1F60E}','\u{
 /* Palette used for banner / accent selection. */
 const PALETTE = ['#5865F2','#3BA55D','#FAA81A','#ED4245','#EB459E','#9B59B6','#1ABC9C','#E67E22','#3498DB','#95A5A6','#2B2D31','#111214'];
 
-/* Widgets shown on the right column of the profile view. */
-const WIDGETS = [
-  { icon: 'fa-music',      title: 'Top Playlist',        desc: 'Share the tracks you have on repeat.' },
-  { icon: 'fa-star',       title: 'Highlighted Tracks',  desc: 'Pin your favourite songs to your profile.' },
-  { icon: 'fa-palette',    title: 'Artistry Essentials', desc: 'Show off the tools and gear you create with.' },
-  { icon: 'fa-users',      title: 'Newcomers Welcome',   desc: 'Let others know you are open to meeting new people.' },
-  { icon: 'fa-headphones', title: 'Favourite Genre',     desc: 'Display the genres that define your taste.' },
-  { icon: 'fa-gamepad',    title: 'Want to Play',        desc: 'List the games you are looking for a group for.' }
-];
+/* Relationship labels used across the friends system. */
+const REL_LABEL = {
+  none: 'Add Friend',
+  pending_outgoing: 'Cancel Request',
+  pending_incoming: 'Accept Request',
+  friends: 'Friends',
+  blocked: 'Blocked'
+};
 
 /* ---------------- DOM helpers ---------------- */
 const $ = (id) => document.getElementById(id);
@@ -46,10 +45,10 @@ function icon(name, style = 'solid') { return `<i class="fa-${style} ${name}"></
 function escapeHtml(s) {
   if (s == null) return '';
   return String(s)
-    .replace(/&/g, '&')
-    .replace(/</g, '<')
-    .replace(/>/g, '>')
-    .replace(/"/g, '"')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;');
 }
 
@@ -116,6 +115,7 @@ async function init() {
   renderMe();
   connectSocket();
   await loadServers();
+  await loadFriends();
   await loadDMs();
   showHome();
   bindGlobalEvents();
@@ -169,6 +169,13 @@ function connectSocket() {
     if (u) u.status = data.status;
     const dot = document.querySelector(`[data-uid="${data.user_id}"] .status-dot`);
     if (dot) dot.className = 'status-dot ' + data.status;
+    if (state.view === 'friends') renderFriendsView();
+  });
+  socket.on('friend_update', (data) => {
+    loadFriends();
+    if (data.type === 'request') toast((data.user.display_name || data.user.username) + ' sent you a friend request', 'success');
+    if (data.type === 'accepted') toast('You are now friends with ' + (data.user.display_name || data.user.username), 'success');
+    if (data.type === 'removed') toast((data.user.display_name || data.user.username) + ' removed you as a friend');
   });
 }
 
@@ -225,6 +232,14 @@ async function loadDMs() {
 function renderDMList() {
   const list = $('channel-list');
   list.innerHTML = '';
+  const friendsBtn = document.createElement('div');
+  friendsBtn.className = 'dm-item friends-entry' + (state.view === 'friends' ? ' active' : '');
+  friendsBtn.id = 'friends-entry';
+  const pendingCount = (state.friends && state.friends.incoming) ? state.friends.incoming.length : 0;
+  friendsBtn.innerHTML = `${icon('fa-user-group')}<span class="dm-name">Friends</span>${pendingCount ? `<span class="friend-badge">${pendingCount}</span>` : ''}`;
+  friendsBtn.addEventListener('click', openFriends);
+  list.appendChild(friendsBtn);
+
   const cat = document.createElement('div');
   cat.className = 'channel-category';
   cat.innerHTML = `${icon('fa-caret-down', 'solid')} Direct Messages`;
@@ -244,7 +259,7 @@ function renderDMList() {
 }
 
 async function openDM(d) {
-  state.server = null; state.channel = null;
+  state.server = null; state.channel = null; state.view = 'home';
   if (state.dm && state.dm.id !== d.id) socket.emit('leave_dm', state.dm.id);
   state.dm = d;
   state.usersCache[d.user.id] = d.user;
@@ -267,10 +282,191 @@ async function openDM(d) {
 }
 
 /* ============================================================
+   FRIENDS
+   ============================================================ */
+async function loadFriends() {
+  try {
+    const data = await api('/api/relationships');
+    state.friends = {
+      friends: data.friends || [],
+      incoming: data.incoming || [],
+      outgoing: data.outgoing || [],
+      blocked: data.blocked || []
+    };
+    for (const u of [...state.friends.friends, ...state.friends.incoming, ...state.friends.outgoing, ...state.friends.blocked]) {
+      state.usersCache[u.id] = u;
+    }
+  } catch (e) { /* ignore */ }
+}
+
+async function openFriends() {
+  state.server = null; state.channel = null; state.view = 'friends';
+  if (state.dm) { socket.emit('leave_dm', state.dm.id); state.dm = null; }
+  renderRail();
+  $('rail-home').classList.add('active');
+  $('sidebar-name').textContent = 'Direct Messages';
+  $('chat-hash').style.display = 'none';
+  $('chat-title').textContent = 'Friends';
+  $('chat-topic').textContent = '';
+  $('members').innerHTML = '';
+  $('composer').classList.add('hidden');
+  await loadFriends();
+  renderDMList();
+  renderFriendsView();
+}
+
+function emptyFriends(msg) { return `<div class="fr-empty">${msg}</div>`; }
+
+function friendRow(u, kind) {
+  const name = escapeHtml(u.display_name || u.username);
+  const status = u.status === 'offline' ? 'Offline' : statusLabel(u.status);
+  let actions = '';
+  if (kind === 'friend') {
+    actions = `<button class="fr-act" data-fr-msg="${u.id}" title="Message">${icon('fa-comment')}</button>
+               <button class="fr-act" data-fr-act="remove" data-uid="${u.id}" title="Remove Friend">${icon('fa-user-minus')}</button>`;
+  } else if (kind === 'incoming') {
+    actions = `<button class="fr-act ok" data-fr-act="accept" data-uid="${u.id}" title="Accept">${icon('fa-check')}</button>
+               <button class="fr-act no" data-fr-act="decline" data-uid="${u.id}" title="Decline">${icon('fa-xmark')}</button>`;
+  } else if (kind === 'outgoing') {
+    actions = `<button class="fr-act" data-fr-act="cancel" data-uid="${u.id}" title="Cancel Request">${icon('fa-xmark')}</button>`;
+  } else if (kind === 'blocked') {
+    actions = `<button class="fr-act ok" data-fr-act="unblock" data-uid="${u.id}" title="Unblock">${icon('fa-unlock')}</button>`;
+  }
+  return `<div class="fr-row" data-uid="${u.id}">
+    ${avatarHTML(u, 32, u.status || 'offline')}
+    <div class="fr-info"><div class="fr-name">${name}<span class="fr-tag">#${u.discriminator}</span></div><div class="fr-status">${status}</div></div>
+    <div class="fr-actions">${actions}</div>
+  </div>`;
+}
+
+function renderFriendsView() {
+  const box = $('messages');
+  const f = state.friends;
+  const tab = state.friendsTab;
+  const counts = {
+    online: f.friends.filter(x => x.status !== 'offline').length,
+    all: f.friends.length,
+    pending: f.incoming.length + f.outgoing.length,
+    blocked: f.blocked.length
+  };
+  const tabBtn = (id, label, count) =>
+    `<div class="fr-tab${tab === id ? ' active' : ''}" data-tab="${id}">${label}${count != null ? `<span class="fr-count">${count}</span>` : ''}</div>`;
+
+  let body = '';
+  if (tab === 'add') {
+    body = `<div class="fr-add-wrap">
+      <h4>Add Friend</h4>
+      <p>You can add friends with their username. It is case sensitive.</p>
+      <div class="fr-add-row">
+        <input id="fr-add-input" placeholder="You can add friends with their username." autocomplete="off">
+        <button class="btn" id="fr-add-btn">Send Friend Request</button>
+      </div>
+      <div class="fr-add-hint" id="fr-add-hint"></div>
+    </div>`;
+  } else if (tab === 'pending') {
+    const inc = f.incoming.map(u => friendRow(u, 'incoming')).join('');
+    const out = f.outgoing.map(u => friendRow(u, 'outgoing')).join('');
+    body = `<div class="fr-cat">Incoming Requests — ${f.incoming.length}</div>${inc || emptyFriends('No incoming requests.')}
+            <div class="fr-cat">Outgoing Requests — ${f.outgoing.length}</div>${out || emptyFriends('No outgoing requests.')}`;
+  } else if (tab === 'blocked') {
+    body = f.blocked.length ? f.blocked.map(u => friendRow(u, 'blocked')).join('') : emptyFriends('No blocked users.');
+  } else {
+    let list = f.friends;
+    if (tab === 'online') list = list.filter(x => x.status !== 'offline');
+    body = list.length ? list.map(u => friendRow(u, 'friend')).join('')
+      : emptyFriends(tab === 'online' ? 'No one is online right now.' : 'No friends yet. Add some!');
+  }
+
+  box.innerHTML = `<div class="friends-view">
+    <div class="fr-head">
+      <div class="fr-tabs">
+        ${tabBtn('online', 'Online', counts.online)}
+        ${tabBtn('all', 'All', counts.all)}
+        ${tabBtn('pending', 'Pending', counts.pending)}
+        ${tabBtn('blocked', 'Blocked', counts.blocked)}
+      </div>
+      <button class="fr-add-friend${tab === 'add' ? ' active' : ''}" data-tab="add">${icon('fa-user-plus')} Add Friend</button>
+    </div>
+    <div class="fr-body">${body}</div>
+  </div>`;
+
+  box.querySelectorAll('.fr-tab, .fr-add-friend').forEach(el =>
+    el.addEventListener('click', () => { state.friendsTab = el.dataset.tab; renderFriendsView(); }));
+  box.querySelectorAll('.fr-info').forEach(el =>
+    el.addEventListener('click', () => { const u = state.usersCache[el.closest('.fr-row').dataset.uid]; if (u) openProfile(u); }));
+  box.querySelectorAll('[data-fr-act]').forEach(btn =>
+    btn.addEventListener('click', (e) => { e.stopPropagation(); friendAction(btn.dataset.frAct, btn.dataset.uid); }));
+  box.querySelectorAll('[data-fr-msg]').forEach(btn =>
+    btn.addEventListener('click', (e) => { e.stopPropagation(); startDM(btn.dataset.frMsg); }));
+
+  const ai = $('fr-add-input');
+  if (ai) {
+    ai.focus();
+    const send = () => addFriendByTag(ai.value.trim());
+    $('fr-add-btn').addEventListener('click', send);
+    ai.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); send(); } });
+  }
+}
+
+function refreshFriendCounts() {
+  const f = state.friends; if (!f) return;
+  const counts = {
+    online: f.friends.filter(x => x.status !== 'offline').length,
+    all: f.friends.length,
+    pending: f.incoming.length + f.outgoing.length,
+    blocked: f.blocked.length
+  };
+  document.querySelectorAll('.fr-tab').forEach(el => {
+    const c = el.querySelector('.fr-count');
+    if (c && counts[el.dataset.tab] != null) c.textContent = counts[el.dataset.tab];
+  });
+}
+
+async function addFriendByTag(tag) {
+  const hint = $('fr-add-hint');
+  if (!tag) { if (hint) hint.textContent = 'Enter a username to add a friend.'; return; }
+  try {
+    const res = await api('/api/friends/request', { method: 'POST', body: JSON.stringify({ tag }) });
+    const msg = res.status === 'friends' ? 'You are now friends!' : 'Friend request sent!';
+    if (hint) hint.textContent = msg;
+    toast(msg, 'success');
+    await loadFriends(); renderDMList(); refreshFriendCounts();
+    const ai = $('fr-add-input'); if (ai) ai.value = '';
+  } catch (e) {
+    if (hint) hint.textContent = e.message;
+    toast(e.message, 'error');
+  }
+}
+
+const FRIEND_ACTION_MSG = {
+  accept: 'Friend request accepted',
+  decline: 'Friend request ignored',
+  cancel: 'Friend request cancelled',
+  remove: 'Friend removed',
+  block: 'User blocked',
+  unblock: 'User unblocked'
+};
+
+async function friendAction(act, uid) {
+  try {
+    if (act === 'accept') await api('/api/friends/accept', { method: 'POST', body: JSON.stringify({ userId: uid }) });
+    else if (act === 'decline') await api('/api/friends/decline', { method: 'POST', body: JSON.stringify({ userId: uid }) });
+    else if (act === 'cancel') await api('/api/friends/cancel', { method: 'POST', body: JSON.stringify({ userId: uid }) });
+    else if (act === 'remove') { if (!confirm('Remove this friend?')) return; await api('/api/friends/' + uid, { method: 'DELETE' }); }
+    else if (act === 'block') { if (!confirm('Block this user? They will be removed from your friends.')) return; await api('/api/blocks', { method: 'POST', body: JSON.stringify({ userId: uid }) }); }
+    else if (act === 'unblock') await api('/api/blocks/' + uid, { method: 'DELETE' });
+    await loadFriends(); renderDMList();
+    if (state.view === 'friends') renderFriendsView();
+    if (FRIEND_ACTION_MSG[act]) toast(FRIEND_ACTION_MSG[act], 'success');
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+/* ============================================================
    SERVERS
    ============================================================ */
 async function openServer(id) {
   const data = await api('/api/servers/' + id);
+  state.view = 'home';
   state.server = data.server;
   state.channels = data.channels;
   state.members = data.members;
@@ -368,7 +564,6 @@ function renderMembers() {
       const crown = (state.server.owner_id === m.id) ? `<span class="owner-crown">${icon('fa-crown')}</span>` : '';
       row.innerHTML = `${avatarHTML(m, 32, m.status || 'offline')}<span class="mname">${escapeHtml(m.display_name || m.username)}${crown}</span>`;
       row.addEventListener('click', () => openProfile(m));
-      row.addEventListener('contextmenu', (e) => { e.preventDefault(); memberContext(e, m); });
       wrap.appendChild(row);
     }
   };
@@ -380,7 +575,9 @@ function renderMembers() {
    MESSAGES RENDERING
    ============================================================ */
 function renderEmptyChat(text) {
-  $('messages').innerHTML = `<div class="empty-state"><div class="inner">
+  const box = $('messages');
+  box.style.padding = ''; box.style.overflow = '';
+  box.innerHTML = `<div class="empty-state"><div class="inner">
     <h2>Welcome to Crossroads</h2>
     <p>${text || 'Select a server on the left or open a direct message to begin. You can also create your own server and invite others with a link.'}</p>
     <button class="btn" id="empty-create2">Create a Server</button>
@@ -390,6 +587,7 @@ function renderEmptyChat(text) {
 
 function renderMessages() {
   const box = $('messages');
+  box.style.padding = ''; box.style.overflow = '';
   box.innerHTML = '';
   const inner = document.createElement('div');
   inner.className = 'messages-inner';
@@ -417,9 +615,9 @@ function renderMessages() {
   scrollToBottom();
 }
 
-function messageNode(m, grouped) {
+function messageNode(m, grouped, animate) {
   const node = document.createElement('div');
-  node.className = 'msg-group' + (grouped ? ' compact' : '');
+  node.className = 'msg-group' + (grouped ? ' compact' : '') + (animate ? ' fade-in' : '');
   node.dataset.mid = m.id;
   node.dataset.uid = m.author.id;
   const a = m.author;
@@ -470,7 +668,7 @@ function appendMessage(m) {
   if (!inner) { renderMessages(); return; }
   const prev = state.messages[state.messages.length - 2];
   const grouped = prev && prev.author && m.author && prev.author.id === m.author.id && (m.created_at - prev.created_at) < 5 * 60 * 1000;
-  inner.appendChild(messageNode(m, grouped));
+  inner.appendChild(messageNode(m, grouped, true));
   scrollToBottom();
 }
 
@@ -687,7 +885,7 @@ function openEmojiPickerForInput() {
 }
 
 function closePopovers() {
-  document.querySelectorAll('.emoji-picker, .context-menu').forEach(el => el.remove());
+  document.querySelectorAll('.emoji-picker, .context-menu, .dropdown-menu').forEach(el => el.remove());
 }
 
 async function deleteMessage(mid) {
@@ -700,20 +898,27 @@ async function deleteMessage(mid) {
   } catch (e) { toast(e.message, 'error'); }
 }
 
-function memberContext(e, m) {
+/* Small anchored dropdown used by the profile "more" button and the server header. */
+function dropdownMenu(anchor, items) {
   closePopovers();
   const menu = document.createElement('div');
-  menu.className = 'context-menu';
-  menu.style.left = e.clientX + 'px';
-  menu.style.top = e.clientY + 'px';
-  menu.innerHTML = `<button data-a="profile">View Profile</button><button data-a="dm">Send Message</button><button data-a="mention">Mention</button>`;
-  menu.querySelectorAll('button').forEach(b => b.addEventListener('click', async () => {
-    menu.remove();
-    if (b.dataset.a === 'profile') openProfile(m);
-    if (b.dataset.a === 'dm') startDM(m.id);
-    if (b.dataset.a === 'mention') { const ta = $('message-input'); ta.value += '@' + m.username + ' '; ta.focus(); }
-  }));
+  menu.className = 'dropdown-menu';
+  const rect = anchor.getBoundingClientRect();
+  menu.innerHTML = items.map(it => `<button data-a="${it.action}"${it.danger ? ' class="danger"' : ''}>${it.icon ? icon(it.icon) + ' ' : ''}${escapeHtml(it.label)}</button>`).join('');
   document.body.appendChild(menu);
+  const mw = menu.offsetWidth, mh = menu.offsetHeight;
+  let left = rect.left;
+  let top = rect.bottom + 6;
+  if (left + mw > window.innerWidth - 8) left = window.innerWidth - mw - 8;
+  if (top + mh > window.innerHeight - 8) top = rect.top - mh - 6;
+  menu.style.left = Math.max(8, left) + 'px';
+  menu.style.top = Math.max(8, top) + 'px';
+  menu.querySelectorAll('button').forEach(b => b.addEventListener('click', () => {
+    menu.remove();
+    const item = items.find(x => x.action === b.dataset.a);
+    if (item && item.onClick) item.onClick();
+  }));
+  return menu;
 }
 
 /* ============================================================
@@ -853,38 +1058,44 @@ async function startDM(userId) {
 /* ============================================================
    PROFILE MODAL (three-panel, mirrors the reference layout)
    ============================================================ */
-function openProfile(user, opts = {}) {
+async function openProfile(user, opts = {}) {
   const isMe = user.id === me.id;
+  let relationship = isMe ? 'self' : 'none';
+  let mutualServers = [];
+  let mutualFriends = [];
+  let note = '';
+  try {
+    const data = await api('/api/users/' + user.id);
+    user = Object.assign({}, user, data.user);
+    relationship = data.relationship || relationship;
+    mutualServers = data.mutual_servers || [];
+    mutualFriends = data.mutual_friends || [];
+    note = data.note || '';
+  } catch (e) { /* fall back to the object we were given */ }
+
+  if (isMe) return renderOwnProfile(user);
+  return renderOtherProfile(user, { relationship, mutualServers, mutualFriends, note });
+}
+
+/* ---------- Your own profile (unchanged three-panel feel, cleaned up) ---------- */
+function renderOwnProfile(user) {
   const displayName = user.display_name || user.username;
   const bannerColor = user.banner_color || user.accent_color || '#5865F2';
   const bannerStyle = user.banner_url
     ? `background-image:url('${escapeHtml(user.banner_url)}')`
     : `background:${bannerColor}`;
   const memberSince = new Date(user.created_at).toLocaleDateString([], { year: 'numeric', month: 'long', day: 'numeric' });
-
   const swatches = PALETTE.map(c => `<span class="pnav-swatch${bannerColor.toLowerCase() === c.toLowerCase() ? ' sel' : ''}" data-color="${c}" style="background:${c}"></span>`).join('');
-  const frames = ['fa-circle', 'fa-star', 'fa-crown', 'fa-bolt'].map((f, i) => `<span class="pnav-frame${i === 0 ? ' sel' : ''}"><i class="fa-solid ${f}"></i></span>`).join('');
-  const widgets = WIDGETS.map(w => `<div class="widget-card"><div class="w-ico">${icon(w.icon)}</div><div class="w-title">${w.title}</div><div class="w-desc">${w.desc}</div></div>`).join('');
-
-  const badges = `
-    <span class="pb" style="background:#5865f2" title="Verified">${icon('fa-check')}</span>
-    <span class="pb" style="background:#f0b232" title="Early Supporter">${icon('fa-star')}</span>`;
-
-  const actions = isMe
-    ? `<button class="pa primary" id="pf-edit">Edit Profile</button>
-       <button class="pa" id="pf-share">Share Profile</button>`
-    : `<button class="pa primary" id="pf-dm">Send Message</button>
-       <button class="pa" id="pf-mention">Mention</button>`;
 
   openModal(`
     <div class="profile-topbar">
-      <div class="pt-title">${icon('fa-id-badge')} ${isMe ? 'Your Profile' : escapeHtml(displayName)}</div>
+      <div class="pt-title">${icon('fa-id-badge')} Your Profile</div>
       <button class="pt-close" id="pf-x">${icon('fa-xmark')}</button>
     </div>
     <div class="profile-body-grid">
       <div class="profile-nav">
         <div class="pnav-item">
-          <div class="pnav-label">Avatar & Description</div>
+          <div class="pnav-label">Avatar &amp; Description</div>
           <div class="pnav-preview">
             <div class="pnav-avatar">${avatarHTML(user, 40)}</div>
             <div class="pnav-text">
@@ -898,12 +1109,6 @@ function openProfile(user, opts = {}) {
           <div class="pnav-swatches" id="pf-swatches">${swatches}</div>
         </div>
         <div class="pnav-item">
-          <div class="pnav-label">Profile Effect & Frame</div>
-          <div class="pnav-frames">${frames}</div>
-          <button class="pnav-btn" id="pf-premium">Go Premium Now</button>
-          <div class="pnav-note">Unlock animated effects, custom frames and more.</div>
-        </div>
-        <div class="pnav-item">
           <div class="pnav-label">Display Name Style</div>
           <div class="pnav-namestyle" style="color:${escapeHtml(bannerColor)}">${escapeHtml(displayName)}</div>
         </div>
@@ -912,44 +1117,43 @@ function openProfile(user, opts = {}) {
       <div class="profile-content">
         <div class="profile-tabs">
           <div class="profile-tab active">Board</div>
-          <div class="profile-tab">Activity</div>
-          <div class="profile-tab">Wishlist</div>
         </div>
         <div class="profile-hero" style="${bannerStyle}">
-          ${isMe ? '<button class="hero-edit" id="pf-banner">Change Banner</button>' : ''}
+          <button class="hero-edit" id="pf-banner">${icon('fa-image')} Change Banner</button>
         </div>
         <div class="profile-idcard">
-          <div class="pic-avatar">${avatarHTML(user, 92, user.status || 'offline')}</div>
-          <div class="pic-name">${escapeHtml(displayName)} <span class="pic-badges">${badges}</span></div>
+          <div class="pic-avatar">${avatarHTML(user, 96, user.status || 'offline')}</div>
+          <div class="pic-name">${escapeHtml(displayName)}</div>
           <div class="pic-tag">${escapeHtml(fullTag(user))}</div>
           <div class="pic-status"><span class="dot" style="background:${user.status === 'offline' ? '#80848e' : '#23a55a'}"></span>${escapeHtml(user.custom_status || statusLabel(user.status))}</div>
           ${user.pronouns ? `<div class="pic-date">${escapeHtml(user.pronouns)}</div>` : ''}
           <div class="pic-date">Member since ${memberSince}</div>
         </div>
-        <div class="profile-actions-row">${actions}</div>
+        <div class="profile-actions-row">
+          <button class="pa primary" id="pf-edit">Edit Profile</button>
+          <button class="pa" id="pf-share">Share Profile</button>
+        </div>
         <div class="profile-section-block">
           <h5>About Me</h5>
-          <p>${escapeHtml(user.bio || 'This user has not written a description yet.')}</p>
+          <p>${escapeHtml(user.bio || 'You have not written a description yet.')}</p>
         </div>
         <div class="profile-section-block">
-          <h5>Comments</h5>
-          <div class="profile-note" id="pf-comment"><span>Add a comment</span><span class="pn-right">Private to only</span></div>
+          <h5>Note</h5>
+          <div class="profile-note"><span>${icon('fa-note-sticky')} Add a note</span><span class="pn-right">Private to only</span></div>
         </div>
-      </div>
-
-      <div class="profile-widgets">
-        <div class="widgets-head">
-          <h4>Customize your profile with Widgets</h4>
-          <p>Choose the widgets you want to share about yourself and your channels</p>
-        </div>
-        <div class="widget-grid">${widgets}</div>
       </div>
     </div>`, { modalClass: 'profile-modal' });
 
   $('pf-x').addEventListener('click', closeModal);
+  $('pf-edit').addEventListener('click', () => openSettings('account'));
+  $('pf-banner').addEventListener('click', () => openSettings('account'));
+  $('pf-share').addEventListener('click', async () => {
+    const link = location.origin + '/app.html';
+    try { await navigator.clipboard.writeText(link); toast('Profile link copied', 'success'); }
+    catch (e) { prompt('Copy your profile link:', link); }
+  });
   document.querySelectorAll('#pf-swatches .pnav-swatch').forEach(sw => {
     sw.addEventListener('click', async () => {
-      if (!isMe) return;
       const color = sw.dataset.color;
       document.querySelectorAll('#pf-swatches .pnav-swatch').forEach(x => x.classList.toggle('sel', x === sw));
       const hero = document.querySelector('.profile-hero');
@@ -963,24 +1167,136 @@ function openProfile(user, opts = {}) {
       } catch (e) { toast(e.message, 'error'); }
     });
   });
-  document.querySelectorAll('.pnav-frame').forEach(f => f.addEventListener('click', () => {
-    document.querySelectorAll('.pnav-frame').forEach(x => x.classList.toggle('sel', x === f));
-  }));
-  $('pf-premium').addEventListener('click', () => toast('Premium is not available yet'));
-  $('pf-comment').addEventListener('click', () => toast('Comments are not available yet'));
+}
 
-  if (isMe) {
-    $('pf-edit').addEventListener('click', () => openSettings('account'));
-    $('pf-share').addEventListener('click', async () => {
-      const link = location.origin + '/app.html';
-      try { await navigator.clipboard.writeText(link); toast('Profile link copied', 'success'); }
-      catch (e) { prompt('Copy your profile link:', link); }
-    });
-    const be = $('pf-banner'); if (be) be.addEventListener('click', () => openSettings('account'));
-  } else {
-    $('pf-dm').addEventListener('click', () => { closeModal(); startDM(user.id); });
-    $('pf-mention').addEventListener('click', () => { closeModal(); const ta = $('message-input'); if (ta) { ta.value += '@' + user.username + ' '; ta.focus(); } });
-  }
+/* ---------- Someone else's profile (matches the reference layout) ---------- */
+function renderOtherProfile(user, ctx) {
+  const displayName = user.display_name || user.username;
+  const accountCreated = new Date(user.created_at).toLocaleDateString([], { year: 'numeric', month: 'short', day: 'numeric' });
+  const rel = ctx.relationship;
+  const mutualServers = ctx.mutualServers || [];
+  const mutualFriends = ctx.mutualFriends || [];
+  const note = ctx.note || '';
+
+  let addBtn;
+  if (rel === 'friends') addBtn = `<button class="op-add friends" id="pf-add">${icon('fa-check')} <span>Friends</span></button>`;
+  else if (rel === 'pending_outgoing') addBtn = `<button class="op-add pending" id="pf-add">${icon('fa-clock')} <span>Request Sent</span></button>`;
+  else if (rel === 'pending_incoming') addBtn = `<button class="op-add accept" id="pf-add">${icon('fa-user-check')} <span>Accept Request</span></button>`;
+  else if (rel === 'blocked') addBtn = `<button class="op-add blocked" id="pf-add" disabled>${icon('fa-ban')} <span>Blocked</span></button>`;
+  else addBtn = `<button class="op-add" id="pf-add">${icon('fa-user-plus')} <span>Add Friend</span></button>`;
+
+  const moreItems = [];
+  if (rel === 'friends') moreItems.push({ action: 'remove', label: 'Remove Friend', icon: 'fa-user-minus', danger: true });
+  if (rel === 'pending_outgoing') moreItems.push({ action: 'cancel', label: 'Cancel Request', icon: 'fa-xmark' });
+  if (rel === 'pending_incoming') moreItems.push({ action: 'accept', label: 'Accept Request', icon: 'fa-check' });
+  if (rel === 'blocked') moreItems.push({ action: 'unblock', label: 'Unblock', icon: 'fa-unlock' });
+  else moreItems.push({ action: 'block', label: 'Block', icon: 'fa-ban', danger: true });
+  moreItems.push({ action: 'dm', label: 'Message', icon: 'fa-comment' });
+
+  openModal(`
+    <div class="profile-topbar">
+      <div class="pt-title">${icon('fa-id-badge')} ${escapeHtml(displayName)}</div>
+      <button class="pt-close" id="pf-x">${icon('fa-xmark')}</button>
+    </div>
+    <div class="oprofile-body">
+      <div class="oprofile-left">
+        <div class="op-avatar">${avatarHTML(user, 120, user.status || 'offline')}</div>
+        <div class="op-name">${escapeHtml(displayName)}</div>
+        <div class="op-sub">${escapeHtml(user.custom_status || fullTag(user))}</div>
+        <div class="op-actions">
+          ${addBtn}
+          <button class="op-more" id="pf-more" title="More Options">${icon('fa-ellipsis-vertical')}</button>
+        </div>
+        <div class="op-section">
+          <div class="op-label">${icon('fa-calendar-days')} Member Since</div>
+          <div class="op-dates"><div class="op-date">${accountCreated}</div></div>
+        </div>
+        <div class="op-section">
+          <div class="op-label">${icon('fa-note-sticky')} Note</div>
+          <div class="op-note" id="pf-note">
+            ${note ? `<div class="op-note-text">${escapeHtml(note)}</div>` : `<div class="op-note-empty">${icon('fa-plus')} Click to add a note</div>`}
+            <div class="op-note-hint">Note only visible to you</div>
+          </div>
+        </div>
+      </div>
+      <div class="oprofile-right">
+        <div class="op-tabs">
+          <div class="op-tab active" data-tab="activity">Activity</div>
+          <div class="op-tab" data-tab="friends">${mutualFriends.length ? `${mutualFriends.length} Mutual Friend${mutualFriends.length > 1 ? 's' : ''}` : 'No Mutual Friends'}</div>
+          <div class="op-tab" data-tab="servers">${mutualServers.length} Mutual Server${mutualServers.length === 1 ? '' : 's'}</div>
+        </div>
+        <div class="op-content" id="op-content"></div>
+        <div class="op-footer">
+          <button class="op-message" id="pf-dm">${icon('fa-comment')} Message</button>
+        </div>
+      </div>
+    </div>`, { modalClass: 'oprofile-modal' });
+
+  const renderTab = (tab) => {
+    const content = $('op-content');
+    if (tab === 'friends') {
+      content.innerHTML = mutualFriends.length
+        ? mutualFriends.map(u => `<div class="op-list-row">${avatarHTML(u, 32, u.status || 'offline')}<div><div class="olr-name">${escapeHtml(u.display_name || u.username)}</div><div class="olr-tag">${escapeHtml(fullTag(u))}</div></div></div>`).join('')
+        : `<div class="op-empty"><div class="op-empty-ico">${icon('fa-user-group')}</div><h4>No Mutual Friends</h4><p>You and ${escapeHtml(displayName)} do not have any friends in common.</p></div>`;
+    } else if (tab === 'servers') {
+      content.innerHTML = mutualServers.length
+        ? mutualServers.map(s => `<div class="op-list-row"><div class="op-server-ico">${s.icon_url ? `<img src="${escapeHtml(s.icon_url)}" alt="">` : escapeHtml((s.name || '?')[0].toUpperCase())}</div><div><div class="olr-name">${escapeHtml(s.name)}</div><div class="olr-tag">Mutual Server</div></div></div>`).join('')
+        : `<div class="op-empty"><div class="op-empty-ico">${icon('fa-server')}</div><h4>No Mutual Servers</h4><p>You and ${escapeHtml(displayName)} are not in any servers together.</p></div>`;
+    } else {
+      content.innerHTML = `<div class="op-empty"><div class="op-empty-ico">${icon('fa-ghost')}</div><h4>${escapeHtml(displayName)} doesn't have any activity to share here</h4><p>When they start playing a game or listening to music, it will show up here.</p></div>`;
+    }
+  };
+  renderTab('activity');
+
+  $('pf-x').addEventListener('click', closeModal);
+  document.querySelectorAll('.op-tab').forEach(t => t.addEventListener('click', () => {
+    document.querySelectorAll('.op-tab').forEach(x => x.classList.toggle('active', x === t));
+    renderTab(t.dataset.tab);
+  }));
+  $('pf-dm').addEventListener('click', () => { closeModal(); startDM(user.id); });
+  $('pf-add').addEventListener('click', async () => {
+    if (rel === 'friends') { closeModal(); startDM(user.id); return; }
+    if (rel === 'pending_incoming') { await friendAction('accept', user.id); closeModal(); openProfile(user); return; }
+    if (rel === 'pending_outgoing') { await friendAction('cancel', user.id); closeModal(); openProfile(user); return; }
+    if (rel === 'blocked') return;
+    try {
+      const res = await api('/api/friends/request', { method: 'POST', body: JSON.stringify({ userId: user.id }) });
+      toast(res.status === 'friends' ? 'You are now friends' : 'Friend request sent', 'success');
+      await loadFriends(); renderDMList();
+      closeModal(); openProfile(user);
+    } catch (e) { toast(e.message, 'error'); }
+  });
+  $('pf-more').addEventListener('click', (e) => {
+    e.stopPropagation();
+    dropdownMenu($('pf-more'), moreItems.map(it => Object.assign({}, it, {
+      onClick: async () => {
+        if (it.action === 'dm') { closeModal(); startDM(user.id); return; }
+        await friendAction(it.action, user.id);
+        closeModal(); openProfile(user);
+      }
+    })));
+  });
+  $('pf-note').addEventListener('click', () => openNoteEditor(user, note));
+}
+
+function openNoteEditor(user, current) {
+  openModal(`
+    <h3>Note</h3>
+    <p class="msub">Notes are only visible to you. Use them to remember details about ${escapeHtml(user.display_name || user.username)}.</p>
+    <div class="field"><textarea id="note-text" maxlength="256" placeholder="Click to add a note">${escapeHtml(current || '')}</textarea></div>
+    <div class="modal-actions">
+      <button class="btn secondary" id="note-cancel">Cancel</button>
+      <button class="btn" id="note-save">Save Note</button>
+    </div>`);
+  $('note-cancel').addEventListener('click', () => { closeModal(); openProfile(user); });
+  $('note-save').addEventListener('click', async () => {
+    try {
+      await api('/api/notes/' + user.id, { method: 'PUT', body: JSON.stringify({ content: $('note-text').value.trim() }) });
+      toast('Note saved', 'success');
+      closeModal(); openProfile(user);
+    } catch (e) { toast(e.message, 'error'); }
+  });
+  $('note-text').focus();
 }
 
 /* ============================================================
@@ -1065,18 +1381,26 @@ function settingsPanelHTML(section) {
             <input type="file" id="sa-file" accept="image/*" class="hidden">
           </div>
         </div>
-        <div class="field"><label>Username</label><input value="${escapeHtml(u.username)}" disabled></div>
-        <div class="field"><label>Discriminator</label><input value="#${escapeHtml(u.discriminator)}" disabled></div>
+        <div class="field"><label>Username</label>
+          <input id="set-username" maxlength="32" value="${escapeHtml(u.username)}" autocomplete="off">
+          <div class="hint" id="username-hint">Your unique tag is #${escapeHtml(u.discriminator)}</div>
+        </div>
         <div class="field"><label>Display Name</label><input id="set-display" maxlength="32" value="${escapeHtml(u.display_name || u.username)}"></div>
         <div class="field"><label>Pronouns</label><input id="set-pronouns" maxlength="24" value="${escapeHtml(u.pronouns || '')}" placeholder="For example they/them"></div>
         <div class="field"><label>Custom Status</label><input id="set-custom" maxlength="128" value="${escapeHtml(u.custom_status || '')}" placeholder="What are you up to?"></div>
         <div class="field"><label>About Me</label><textarea id="set-bio" maxlength="190" placeholder="Tell people about yourself">${escapeHtml(u.bio || '')}</textarea></div>
+        <div class="field"><label>Profile Banner</label>
+          <div class="banner-editor" id="banner-editor" style="${u.banner_url ? `background-image:url('${escapeHtml(u.banner_url)}')` : `background:${escapeHtml(u.banner_color || u.accent_color || '#5865F2')}`}">
+            <button class="banner-edit-btn" id="set-banner-file-btn">${icon('fa-image')} Upload Banner</button>
+          </div>
+          <input type="file" id="set-banner-file" accept="image/*" class="hidden">
+          <div class="color-row" id="banner-color-row" style="margin-top:10px">${PALETTE.map(c => `<span class="swatch${(u.banner_color || '#5865F2').toLowerCase() === c.toLowerCase() ? ' sel' : ''}" data-color="${c}" style="background:${c}"></span>`).join('')}</div>
+          <div class="hint">Recommended size 600x240. Pick a color or upload an image.</div>
+          <button class="btn secondary" id="set-banner-remove" style="margin-top:8px;padding:6px 12px;font-size:13px">Remove Banner</button>
+        </div>
         <div class="field"><label>Accent Color</label>
           <div class="color-row" id="accent-row">${PALETTE.map(c => `<span class="swatch${(u.accent_color || '#5865F2').toLowerCase() === c.toLowerCase() ? ' sel' : ''}" data-color="${c}" style="background:${c}"></span>`).join('')}</div>
         </div>
-        <div class="field"><label>Profile Banner</label>
-          <input type="file" id="set-banner-file" accept="image/*">
-          <div class="hint">Recommended size 600x240. Leave empty to use your accent color.</div></div>
         <div class="field"><label>Status</label>
           <select id="set-status">
             <option value="online">Online</option>
@@ -1169,17 +1493,59 @@ function wireAccountPanel() {
     settingsUploads.avatar_url = null;
     $('sa-avatar').innerHTML = avatarHTML({ ...u, avatar_url: null }, 80, u.status || 'online');
   });
+
+  // ---- Profile banner (image + colour) ----
+  let bannerColor = u.banner_color || '#5865F2';
+  const editor = $('banner-editor');
+  const paintBanner = () => {
+    if (settingsUploads.banner_url) { editor.style.backgroundImage = `url('${settingsUploads.banner_url}')`; editor.style.background = ''; }
+    else { editor.style.backgroundImage = 'none'; editor.style.background = bannerColor; }
+  };
+  $('set-banner-file-btn').addEventListener('click', () => $('set-banner-file').click());
   $('set-banner-file').addEventListener('change', async (e) => {
     const f = e.target.files[0]; if (!f) return;
     const fd = new FormData(); fd.append('file', f);
-    try { const d = await api('/api/upload', { method: 'POST', body: fd }); settingsUploads.banner_url = d.url; toast('Banner uploaded', 'success'); }
-    catch (err) { toast(err.message, 'error'); }
+    try {
+      const d = await api('/api/upload', { method: 'POST', body: fd });
+      settingsUploads.banner_url = d.url; paintBanner(); toast('Banner uploaded', 'success');
+    } catch (err) { toast(err.message, 'error'); }
   });
+  $('set-banner-remove').addEventListener('click', () => { settingsUploads.banner_url = null; paintBanner(); });
+  document.querySelectorAll('#banner-color-row .swatch').forEach(sw => sw.addEventListener('click', () => {
+    bannerColor = sw.dataset.color;
+    settingsUploads.banner_url = null;
+    document.querySelectorAll('#banner-color-row .swatch').forEach(x => x.classList.toggle('sel', x === sw));
+    paintBanner();
+  }));
+
+  // ---- Accent colour ----
   let accent = u.accent_color || '#5865F2';
   document.querySelectorAll('#accent-row .swatch').forEach(sw => sw.addEventListener('click', () => {
     accent = sw.dataset.color;
     document.querySelectorAll('#accent-row .swatch').forEach(x => x.classList.toggle('sel', x === sw));
   }));
+
+  // ---- Username availability ----
+  const unameInput = $('set-username');
+  const hint = $('username-hint');
+  let usernameOk = true;
+  let t = null;
+  unameInput.addEventListener('input', () => {
+    clearTimeout(t);
+    const val = unameInput.value.trim();
+    if (!val || val.toLowerCase() === (u.username || '').toLowerCase()) {
+      usernameOk = true; hint.textContent = `Your unique tag is #${u.discriminator}`; hint.className = 'hint'; return;
+    }
+    t = setTimeout(async () => {
+      try {
+        const res = await api('/api/check-username?username=' + encodeURIComponent(val) + '&exclude=' + me.id);
+        usernameOk = res.available;
+        hint.textContent = res.reason;
+        hint.className = 'hint ' + (res.available ? 'ok' : 'bad');
+      } catch (e) { /* ignore */ }
+    }, 350);
+  });
+
   $('set-save').addEventListener('click', async () => {
     const body = {
       display_name: $('set-display').value.trim() || null,
@@ -1187,10 +1553,16 @@ function wireAccountPanel() {
       custom_status: $('set-custom').value.trim(),
       bio: $('set-bio').value.trim(),
       accent_color: accent,
+      banner_color: bannerColor,
       avatar_url: settingsUploads.avatar_url,
       banner_url: settingsUploads.banner_url,
       status: $('set-status').value
     };
+    const newUsername = unameInput.value.trim();
+    if (newUsername && newUsername.toLowerCase() !== (u.username || '').toLowerCase()) {
+      if (!usernameOk) { toast('Please choose an available username', 'error'); return; }
+      body.username = newUsername;
+    }
     try {
       const { user } = await api('/api/me', { method: 'PATCH', body: JSON.stringify(body) });
       me = user; localStorage.setItem('cr_user', JSON.stringify(me));

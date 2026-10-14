@@ -95,9 +95,30 @@ CREATE TABLE IF NOT EXISTS friendships (
   UNIQUE(requester_id, addressee_id)
 );
 
+CREATE TABLE IF NOT EXISTS blocks (
+  id TEXT PRIMARY KEY,
+  blocker_id TEXT NOT NULL,
+  blocked_id TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  UNIQUE(blocker_id, blocked_id)
+);
+
+CREATE TABLE IF NOT EXISTS notes (
+  id TEXT PRIMARY KEY,
+  owner_id TEXT NOT NULL,
+  target_id TEXT NOT NULL,
+  content TEXT DEFAULT '',
+  updated_at INTEGER NOT NULL,
+  UNIQUE(owner_id, target_id)
+);
+
 CREATE INDEX IF NOT EXISTS idx_messages_channel ON messages(channel_id);
 CREATE INDEX IF NOT EXISTS idx_messages_dm ON messages(dm_id);
 CREATE INDEX IF NOT EXISTS idx_reactions_message ON reactions(message_id);
+CREATE INDEX IF NOT EXISTS idx_friendships_req ON friendships(requester_id);
+CREATE INDEX IF NOT EXISTS idx_friendships_add ON friendships(addressee_id);
+CREATE INDEX IF NOT EXISTS idx_blocks_blocker ON blocks(blocker_id);
+CREATE INDEX IF NOT EXISTS idx_notes_owner ON notes(owner_id);
 `);
 
 /* ---------------- Migrations ----------------
