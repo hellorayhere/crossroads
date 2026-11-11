@@ -11,5 +11,5 @@
 
 ## 3. Test & deploy
 - [x] Test locally (shift-delete works; banner measures 275px)
-- [ ] Commit + push
-- [ ] Render deploy + verify live, data preserved
+- [x] Commit + push
+- [x] Render deploy + verify live, data preserved
