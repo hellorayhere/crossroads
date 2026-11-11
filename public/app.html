@@ -114,6 +114,9 @@
 
       <div class="typing-bar" id="typing-bar"></div>
 
+      <!-- Inline notices: feedback is part of the layout, never a floating popup -->
+      <div class="inline-notices" id="inline-notices" role="status" aria-live="polite"></div>
+
       <div class="composer hidden" id="composer">
         <div class="reply-bar hidden" id="reply-bar"></div>
         <div class="attach-preview hidden" id="attach-preview"></div>
@@ -136,8 +139,6 @@
   <div class="overlay hidden" id="modal-overlay">
     <div class="modal" id="modal"></div>
   </div>
-
-  <div class="toast-wrap" id="toast-wrap"></div>
 
   <script src="/socket.io/socket.io.js"></script>
   <script src="/js/app.js"></script>

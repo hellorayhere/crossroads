@@ -742,29 +742,69 @@ button:active, .rail-item:active, .channel:active, .dm-item:active, .member:acti
 .dm-item .dm-name { font-size: 15px; font-weight: 500; color: var(--text-muted); flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .dm-item.active .dm-name, .dm-item:hover .dm-name { color: var(--text-normal); }
 
-/* Toasts are embedded in the app shell: anchored to the bottom-right of the
-   content area, flat surface, hairline border, no floating drop shadow. */
-.toast-wrap { position: fixed; right: 18px; bottom: 78px; left: auto; transform: none; z-index: 400; display: flex; flex-direction: column; align-items: flex-end; gap: 6px; pointer-events: none; }
-.toast {
-  background: color-mix(in srgb, var(--bg-base) 88%, var(--text-header));
-  color: var(--text-header);
-  padding: 9px 13px;
-  border-radius: var(--radius-sm);
-  font-size: 13.5px;
-  line-height: 1.35;
-  border: 1px solid var(--divider);
-  border-left: 2px solid var(--brand);
-  box-shadow: none;
-  animation: toastIn .16s ease;
-  pointer-events: auto;
-  max-width: 360px;
+/* Discord-style unread counter. Sits at the right edge of a DM or channel row
+   and disappears the moment that conversation is opened. */
+.unread-badge {
+  flex: 0 0 auto;
+  margin-left: auto;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 9px;
+  background: var(--red);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 18px;
+  text-align: center;
+  letter-spacing: .01em;
+  box-shadow: 0 0 0 2px var(--sidebar-bg);
 }
-.toast.error, .toast.alert { border-left-color: var(--red); }
-.toast.alert { background: color-mix(in srgb, var(--bg-base) 88%, var(--text-header)); }
-.toast.success { border-left-color: var(--green); }
+
+/* Inline notices: embedded in the chat column above the composer. No floating
+   popups, no drop shadow — the strip is part of the layout. */
+.inline-notices {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 0;
+  background: transparent;
+  border-top: 1px solid transparent;
+}
+.inline-notices:not(:empty) { border-top-color: var(--divider); }
+.notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  padding: 9px 14px;
+  font-size: 13.5px;
+  line-height: 1.4;
+  color: var(--text-normal);
+  background: color-mix(in srgb, var(--chat-bg) 82%, var(--text-header));
+  border-left: 2px solid var(--brand);
+  animation: noticeIn .14s ease;
+}
+.notice.out { opacity: 0; transition: opacity .15s ease; }
+.notice-ico { flex: 0 0 auto; color: var(--brand); display: flex; margin-top: 1px; }
+.notice-ico .ic { width: 15px; height: 15px; }
+.notice-text { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.notice-x {
+  flex: 0 0 auto;
+  color: var(--text-muted);
+  display: flex;
+  padding: 1px;
+  border-radius: 3px;
+}
+.notice-x:hover { color: var(--text-header); background: var(--hover); }
+.notice-x .ic { width: 13px; height: 13px; }
+.notice.success { border-left-color: var(--green); }
+.notice.success .notice-ico { color: var(--green); }
+.notice.error, .notice.alert { border-left-color: var(--red); }
+.notice.error .notice-ico, .notice.alert .notice-ico { color: var(--red); }
+@keyframes noticeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
 @media (max-width: 640px) {
-  .toast-wrap { left: 12px; right: 12px; bottom: 84px; align-items: stretch; }
-  .toast { max-width: none; }
+  .notice { font-size: 13px; padding: 8px 12px; }
 }
 
 .empty-state { flex: 1; display: grid; place-items: center; text-align: center; padding: 40px; }
@@ -1797,12 +1837,25 @@ body[data-theme="light"] .oprofile-modal .bio-link { color: #0066cc; }
   color: var(--text-normal); font: inherit; line-height: 1.4; outline: none; }
 .cs-fields textarea:focus { border-color: var(--brand); }
 .cs-types { display: flex; flex-wrap: wrap; gap: 8px; }
-.cs-type { padding: 7px 14px; border-radius: var(--radius-sm); border: 1px solid var(--divider);
+.cs-type { display: inline-flex; align-items: center; gap: 6px; padding: 7px 14px; border-radius: var(--radius-sm); border: 1px solid var(--divider);
   background: transparent; color: var(--text-muted); font-size: 12.5px; font-weight: 600; cursor: pointer;
   transition: background .12s, color .12s, border-color .12s; }
+.cs-type-ico { display: inline-flex; color: currentColor; }
+.cs-type-ico .ic { width: 14px; height: 14px; }
 .cs-type:hover { background: var(--hover); color: var(--text-normal); }
 .cs-type.sel { background: color-mix(in srgb, var(--brand) 16%, transparent); border-color: var(--brand); color: var(--text-header); }
-@media (max-width: 640px) { .cs-grid { grid-template-columns: 1fr; } .cs-preview { position: static; } }
+.cs-preview-label { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em;
+  color: var(--text-faint); margin-bottom: 8px; }
+.cs-preview-desc { margin-top: 10px; font-size: 12.5px; line-height: 1.5; color: var(--text-muted);
+  border-left: 2px solid var(--divider); padding-left: 10px; overflow-wrap: anywhere; }
+.cs-preview-desc.empty { color: var(--text-faint); font-style: italic; }
+.cs-section-title { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em;
+  color: var(--text-faint); margin: 4px 0 10px; }
+.cs-section-title:not(:first-child) { margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--divider); }
+.cs-actions { align-items: center; }
+.cs-foot-hint { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-faint); }
+.cs-foot-hint .ic { width: 13px; height: 13px; }
+@media (max-width: 640px) { .cs-grid { grid-template-columns: 1fr; } .cs-preview { position: static; } .cs-foot-hint { display: none; } }
 
 /* ---------------- Inline upload progress (replaces the old upload toast) ---------------- */
 .attach-preview .ap-uploading { display: flex; align-items: center; gap: 10px; width: 100%; }

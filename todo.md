@@ -1,31 +1,45 @@
-# Crossroads — Round 8 Task List
+# Crossroads — Round 9 Task List
 
-## 1. Presence status not updating (reported bug)
-- [x] REST responses now return the *effective* status (offline/idle override) instead of the stored status
-- [x] `/api/me` still returns the status the user actually chose
-- [x] Users with no live socket now report `offline` everywhere
-- [x] Replace the single long `setTimeout` (throttled/frozen in hidden tabs) with a 10s timestamp tick
-- [x] Idle clears itself when activity resumes, even if an event was missed
-- [x] Re-assert presence after reconnect and once a minute
+## 1. Pings / mentions / DMs: no toast, red Discord-style badges
+- [x] Remove the toast when a DM arrives
+- [x] Remove the toast when a mention or reply arrives
+- [x] Add red unread counter on DM rows (`.unread-badge`)
+- [x] Add red unread counter on channel rows for @mentions / replies
+- [x] Add red aggregate badge on the server rail icon
+- [x] Opening the DM / channel / notification clears its badge immediately
 
-## 2. Remove toast UIs from uploads / edits / media
-- [x] Composer upload now shows inline progress in the attachment bar (no toast)
-- [x] Remove "Message edited" toast
-- [x] Remove avatar / banner / server icon / server banner "ready — remember to save" toasts
+## 2. Settings: Save Changes no longer stuck disabled
+- [x] Toggles (privacy / appearance / notifications / voice) now stage changes instead of silently PATCHing
+- [x] Theme + background cards stage changes and preview live
+- [x] Language + input volume stage changes
+- [x] Footer Discard / Save Changes enable as soon as any option is clicked
+- [x] "Unsaved changes" note appears with the buttons
+- [x] Removed the duplicate inline Save buttons in Account and Profiles panels
+- [x] Per-panel save routine is reset when switching sections (no stale saver)
+- [x] Save writes profile + all staged preferences in one pass
+- [x] Discard rolls preferences back to the snapshot taken when settings opened
 
-## 3. Settings Discard / Save system
-- [x] Footer gets Discard + Save Changes buttons, disabled until something changes
-- [x] "Unsaved changes" indicator
-- [x] Discard reverts fields and pending uploads to the saved profile
+## 3. Save / Discard popup when changing options
+- [x] Switching sections while dirty shows the Save / Discard / Cancel dialog
+- [x] Closing the modal or logging out while dirty shows the same dialog
+- [x] Dialog Save persists then continues, Discard reverts then continues
 
-## 4. Embed all toast UIs
-- [x] Toasts anchored bottom-right inside the app shell, flat surface, hairline border, no drop shadow
-- [x] Mobile full-width variant
+## 4. Create a Server UI: more detail, less cartoony
+- [x] Live preview card shows name, type, description and icon
+- [x] Section headers (Basics / Style) for structure
+- [x] Type buttons now carry icons and a description hint
+- [x] Footer privacy hint ("Only people you invite can join")
 
-## 5. Test & deploy
-- [x] Verified presence via socket + REST (online / idle / offline / disconnect)
-- [x] Verified presence timers in a real browser (idle, away >3 min, return)
-- [x] Verified settings footer + discard behaviour
-- [x] Verified inline upload progress and toast styling
+## 5. Remove all toast UIs
+- [x] `toast()` now renders an embedded `.notice` strip inside the chat column
+- [x] Removed `#toast-wrap` markup and all toast CSS
+- [x] Notices are flat, shadowless, dismissible and auto-expire
+
+## 6. Test & deploy
+- [x] Badges appear on DM + channel + rail, and clear when opened
+- [x] Settings footer enables on option click; Save persists; Discard reverts
+- [x] Unsaved dialog appears on section switch
+- [x] Create a Server modal renders with icons, hints and live preview
+- [x] Inline notice is `position: static`, no shadow, inside `#inline-notices`
 - [x] Commit + push to main
 - [x] Render deploy + verify live, data preserved

@@ -26,6 +26,11 @@ const state = {
   friendsTab: 'online',
   notifications: [],
   unread: 0,
+  /* Discord-style unread counters. dmUnread maps a DM id to a count of unread
+     messages, mentionUnread maps a channel id to a count of unread @mentions
+     and replies. Both are cleared the moment the user opens that conversation. */
+  dmUnread: {},
+  mentionUnread: {},
   settings: {},
   serverSettings: null,
   roles: [],
@@ -162,6 +167,8 @@ const ICONS = {
   'trash': '<polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>',
   'check': '<polyline points="20 6 9 17 4 12"/>',
   'xmark': '<line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>',
+  'circle-info': '<circle cx="12" cy="12" r="9"/><line x1="12" y1="11" x2="12" y2="16"/><circle cx="12" cy="8" r=".6" fill="currentColor" stroke="none"/>',
+  'circle-exclamation': '<circle cx="12" cy="12" r="9"/><line x1="12" y1="7" x2="12" y2="13"/><circle cx="12" cy="16.4" r=".6" fill="currentColor" stroke="none"/>',
   'user-plus': '<path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="8.5" cy="7" r="4"/><line x1="20" y1="8" x2="20" y2="14"/><line x1="23" y1="11" x2="17" y2="11"/>',
   'user-minus': '<path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="8.5" cy="7" r="4"/><line x1="23" y1="11" x2="17" y2="11"/>',
   'user-check': '<path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="8.5" cy="7" r="4"/><polyline points="17 11 19 13 23 9"/>',
@@ -486,13 +493,33 @@ function logout() {
   window.location.href = '/';
 }
 
-/* ---------------- Toast ---------------- */
+/* ---------------- Inline notices ----------------
+   Feedback used to be a floating toast popup. It is now an embedded strip that
+   sits inside the chat column above the composer, so it reads as part of the
+   interface instead of floating over it. Errors stay a little longer than
+   confirmations and every notice can be dismissed. */
+const noticeTimers = new WeakMap();
 function toast(msg, type = '') {
-  const t = document.createElement('div');
-  t.className = 'toast ' + type;
-  t.textContent = msg;
-  $('toast-wrap').appendChild(t);
-  setTimeout(() => { t.style.opacity = '0'; t.style.transition = 'opacity .3s'; setTimeout(() => t.remove(), 300); }, type === 'alert' ? 4200 : 3000);
+  const wrap = $('inline-notices');
+  if (!wrap) return;
+  /* Keep at most three notices so the strip never grows out of hand. */
+  while (wrap.children.length >= 3) wrap.firstElementChild.remove();
+
+  const n = document.createElement('div');
+  n.className = 'notice' + (type ? ' ' + type : '');
+  const ico = type === 'error' || type === 'alert' ? 'circle-exclamation'
+    : type === 'success' ? 'check' : 'circle-info';
+  n.innerHTML = `<span class="notice-ico">${icon(ico)}</span><span class="notice-text"></span><button class="notice-x" aria-label="Dismiss">${icon('xmark')}</button>`;
+  n.querySelector('.notice-text').textContent = msg;
+  hydrateIcons(n);
+  const kill = () => {
+    clearTimeout(noticeTimers.get(n));
+    n.classList.add('out');
+    setTimeout(() => n.remove(), 160);
+  };
+  n.querySelector('.notice-x').addEventListener('click', kill);
+  wrap.appendChild(n);
+  noticeTimers.set(n, setTimeout(kill, type === 'error' || type === 'alert' ? 5200 : 3200));
 }
 
 /* ---------------- Custom confirm / prompt ---------------- */
@@ -773,7 +800,7 @@ function connectSocket() {
     loadDMs();
     if (!state.dm || state.dm.id !== data.dm_id) {
       const who = fullTag(data.message.author);
-      toast('New message from ' + who, '');
+      bumpDmUnread(data.dm_id);
       maybeDesktopNotify('New message from ' + who, data.message.content || '');
       if (setting('notifSounds') !== false) beep();
     }
@@ -898,7 +925,10 @@ function connectSocket() {
     state.unread++;
     renderNotifBadge();
     const info = notifInfo(n);
-    toast(info.plain, 'alert');
+    /* @mentions and replies also light up a red badge on the channel and the
+       server icon, exactly like Discord. */
+    const d = n.data || {};
+    if ((n.type === 'mention' || n.type === 'reply') && d.channel_id) bumpMentionUnread(d.channel_id);
     maybeDesktopNotify('Crossroads', info.plain);
     if (setting('notifSounds') !== false) beep();
     if ($('notif-panel')) renderNotifList();
@@ -977,6 +1007,8 @@ function renderRail() {
     else if (s.icon) d.textContent = s.icon;
     else d.textContent = s.name.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase();
     d.innerHTML += '<span class="pill"></span>';
+    const mentions = serverMentionCount(s.id);
+    if (mentions) d.innerHTML += `<span class="badge">${mentions > 99 ? '99+' : mentions}</span>`;
     d.addEventListener('click', () => openServer(s.id));
     wrap.appendChild(d);
   }
@@ -1009,6 +1041,50 @@ async function loadDMs() {
   if (!state.server && state.view !== 'friends') renderDMList();
 }
 
+/* ---------------- Discord-style unread badges ---------------- */
+function dmUnreadCount(dmId) { return state.dmUnread[dmId] || 0; }
+function channelMentionCount(chId) { return state.mentionUnread[chId] || 0; }
+function serverMentionCount(serverId) {
+  let n = 0;
+  for (const [cid, c] of Object.entries(state.mentionUnread)) {
+    const ch = (state.channels || []).find(x => x.id === cid);
+    if (ch && ch.server_id === serverId) n += c;
+  }
+  return n;
+}
+function badgeHTML(count) {
+  if (!count) return '';
+  return `<span class="unread-badge">${count > 99 ? '99+' : count}</span>`;
+}
+function bumpDmUnread(dmId) {
+  if (!dmId) return;
+  state.dmUnread[dmId] = (state.dmUnread[dmId] || 0) + 1;
+  if (!state.server && state.view !== 'friends') renderDMList();
+  renderRail();
+}
+function bumpMentionUnread(channelId) {
+  if (!channelId) return;
+  /* Never badge the channel the user is looking at right now. */
+  if (state.channel && state.channel.id === channelId) return;
+  state.mentionUnread[channelId] = (state.mentionUnread[channelId] || 0) + 1;
+  if (state.server) renderChannelList();
+  renderRail();
+}
+function clearDmUnread(dmId) {
+  if (state.dmUnread[dmId]) {
+    delete state.dmUnread[dmId];
+    if (!state.server && state.view !== 'friends') renderDMList();
+    renderRail();
+  }
+}
+function clearChannelUnread(channelId) {
+  if (state.mentionUnread[channelId]) {
+    delete state.mentionUnread[channelId];
+    if (state.server) renderChannelList();
+    renderRail();
+  }
+}
+
 function renderDMList() {
   const list = $('channel-list');
   list.innerHTML = '';
@@ -1029,7 +1105,7 @@ function renderDMList() {
     item.className = 'dm-item' + (state.dm && state.dm.id === d.id ? ' active' : '');
     item.dataset.dmid = d.id;
     if (d.user) item.dataset.uid = d.user.id;
-    item.innerHTML = `${avatarHTML(d.user, 32, d.user.status || 'offline')}<span class="dm-name">${escapeHtml(d.user ? (d.user.display_name || d.user.username) : 'Unknown')}</span>`;
+    item.innerHTML = `${avatarHTML(d.user, 32, d.user.status || 'offline')}<span class="dm-name">${escapeHtml(d.user ? (d.user.display_name || d.user.username) : 'Unknown')}</span>${badgeHTML(dmUnreadCount(d.id))}`;
     item.addEventListener('click', () => openDM(d));
     list.appendChild(item);
   }
@@ -1046,6 +1122,7 @@ async function openDM(d) {
   if (state.dm && state.dm.id !== d.id) socket.emit('leave_dm', state.dm.id);
   state.dm = d;
   state.usersCache[d.user.id] = d.user;
+  clearDmUnread(d.id);
   renderRail();
   $('rail-home').classList.add('active');
   $('sidebar-name').textContent = 'Direct Messages';
@@ -1498,7 +1575,7 @@ function channelRow(c) {
   const admin = amIAdmin();
   const ic = c.type === 'voice' ? icon('volume-high') : icon('hash');
   const grip = admin ? `<span class="ch-grip" title="Drag to reorder">${icon('grip')}</span>` : '';
-  row.innerHTML = `${grip}<span class="hash">${ic}</span><span class="ch-name">${escapeHtml(c.name)}</span>`;
+  row.innerHTML = `${grip}<span class="hash">${ic}</span><span class="ch-name">${escapeHtml(c.name)}</span>${badgeHTML(channelMentionCount(c.id))}`;
   if (admin) row.classList.add('draggable');
   row.addEventListener('click', () => {
     if (c.type === 'voice') { joinVoiceChannel(c.id); return; }
@@ -1579,6 +1656,7 @@ async function openChannel(cid) {
   if (state.channel && state.channel.id !== cid) socket.emit('leave_channel', state.channel.id);
   state.channel = c;
   state.dm = null;
+  clearChannelUnread(cid);
   setReplyTo(null);
   document.querySelectorAll('.channel').forEach(el => el.classList.toggle('active', el.dataset.cid === cid));
   socket.emit('join_channel', cid);
@@ -2909,6 +2987,10 @@ function openNotifPanel() {
 async function goToNotification(n) {
   const d = n.data || {};
   const panel = $('notif-panel'); if (panel) panel.remove();
+  /* Viewing a notification clears its red badge immediately. */
+  if (d.channel_id) clearChannelUnread(d.channel_id);
+  if (d.dm_id) clearDmUnread(d.dm_id);
+  n.read = true;
   const u = d.user || (d.message && d.message.author);
   if (n.type === 'friend_request' || n.type === 'friend_accepted') {
     if (u) openProfile(u);
@@ -3358,10 +3440,10 @@ function openImageEditor(file, opts = {}) {
 /* ---------------- Create / join server ---------------- */
 function openCreateServer() {
   const templates = [
-    { id: 'friends', label: 'Friends', desc: 'A place for me and my friends to hang out.' },
-    { id: 'community', label: 'Community', desc: 'A community space to share ideas and chat.' },
-    { id: 'study', label: 'Study Group', desc: 'A focused space for studying and sharing resources.' },
-    { id: 'gaming', label: 'Gaming', desc: 'Game nights, clips and squad talk.' }
+    { id: 'friends', label: 'Friends', icon: 'users', desc: 'A place for me and my friends to hang out.' },
+    { id: 'community', label: 'Community', icon: 'globe', desc: 'A community space to share ideas and chat.' },
+    { id: 'study', label: 'Study Group', icon: 'note', desc: 'A focused space for studying and sharing resources.' },
+    { id: 'gaming', label: 'Gaming', icon: 'play', desc: 'Game nights, clips and squad talk.' }
   ];
   openModal(`
     <div class="cs-head">
@@ -3373,28 +3455,36 @@ function openCreateServer() {
     </div>
     <div class="cs-grid">
       <div class="cs-preview">
+        <div class="cs-preview-label">Live Preview</div>
         <div class="cs-preview-card">
           <div class="cs-preview-ico" id="cs-preview-ico">${icon('hash')}</div>
           <div class="cs-preview-meta">
             <div class="cs-preview-name" id="cs-preview-name">Your Server</div>
-            <div class="cs-preview-sub">Private · Invite only</div>
+            <div class="cs-preview-sub" id="cs-preview-sub">Private · Invite only</div>
           </div>
         </div>
+        <div class="cs-preview-desc empty" id="cs-preview-desc">Add a short description so people know what this space is for.</div>
         <div class="cs-preview-note">${icon('lock')} New servers are private. Share an invite link to let people in.</div>
       </div>
       <div class="cs-fields">
+        <div class="cs-section-title">Basics</div>
         <div class="field"><label>Server Name <span class="req">*</span></label>
-          <input id="cs-name" placeholder="e.g. Pixel Lounge, Study Group, Game Night…" maxlength="40"></div>
+          <input id="cs-name" placeholder="e.g. Pixel Lounge, Study Group, Game Night…" maxlength="40">
+          <div class="hint">This is how the server appears in the sidebar.</div></div>
         <div class="field"><label>Description <span class="opt">(optional)</span></label>
-          <textarea id="cs-desc" rows="2" maxlength="500" placeholder="What is this server about?"></textarea></div>
+          <textarea id="cs-desc" rows="3" maxlength="500" placeholder="What is this server about? Who is it for?"></textarea></div>
+        <div class="cs-section-title">Style</div>
         <div class="field"><label>Server Type</label>
-          <div class="cs-types" id="cs-types">${templates.map((t, i) => `<button type="button" class="cs-type${i === 0 ? ' sel' : ''}" data-id="${t.id}">${t.label}</button>`).join('')}</div></div>
+          <div class="cs-types" id="cs-types">${templates.map((t, i) => `<button type="button" class="cs-type${i === 0 ? ' sel' : ''}" data-id="${t.id}"><span class="cs-type-ico">${icon(t.icon)}</span>${t.label}</button>`).join('')}</div>
+          <div class="hint" id="cs-type-hint">${escapeHtml(templates[0].desc)}</div></div>
         <div class="field"><label>Server Icon <span class="opt">(optional)</span></label>
           ${dropzoneHTML('cs-icon-dz', 'Upload Image', 'PNG, JPG or GIF — up to 25 MB')}
           <input type="file" id="cs-icon-file" accept="image/*" class="hidden"></div>
       </div>
     </div>
-    <div class="modal-actions">
+    <div class="modal-actions cs-actions">
+      <span class="cs-foot-hint">${icon('lock')} Only people you invite can join.</span>
+      <div style="flex:1"></div>
       <button class="btn secondary" id="cs-cancel">Cancel</button>
       <button class="btn" id="cs-create">Create Server</button>
     </div>`, { modalClass: 'modal create-server-modal' });
@@ -3403,17 +3493,32 @@ function openCreateServer() {
   const descInput = $('cs-desc');
   const previewName = $('cs-preview-name');
   const previewIco = $('cs-preview-ico');
+  const previewSub = $('cs-preview-sub');
+  const previewDesc = $('cs-preview-desc');
+  const typeHint = $('cs-type-hint');
+  let selectedType = templates[0].label;
   const syncPreview = () => {
     previewName.textContent = nameInput.value.trim() || 'Your Server';
     previewIco.innerHTML = iconUrl ? `<img src="${escapeHtml(iconUrl)}" alt="">` : icon('hash');
+    if (previewSub) previewSub.textContent = selectedType + ' · Private';
+    const d = descInput.value.trim();
+    if (previewDesc) {
+      previewDesc.textContent = d || 'Add a short description so people know what this space is for.';
+      previewDesc.classList.toggle('empty', !d);
+    }
   };
   nameInput.addEventListener('input', syncPreview);
   $('cs-types').querySelectorAll('.cs-type').forEach(btn => btn.addEventListener('click', () => {
     $('cs-types').querySelectorAll('.cs-type').forEach(b => b.classList.toggle('sel', b === btn));
     const t = templates.find(x => x.id === btn.dataset.id);
-    if (t && (!descInput.value.trim() || descInput.dataset.auto === '1')) { descInput.value = t.desc; descInput.dataset.auto = '1'; }
+    if (t) {
+      selectedType = t.label;
+      if (typeHint) typeHint.textContent = t.desc;
+      if (!descInput.value.trim() || descInput.dataset.auto === '1') { descInput.value = t.desc; descInput.dataset.auto = '1'; }
+    }
+    syncPreview();
   }));
-  descInput.addEventListener('input', () => { descInput.dataset.auto = '0'; });
+  descInput.addEventListener('input', () => { descInput.dataset.auto = '0'; syncPreview(); });
   const dz = $('cs-icon-dz');
   wireDropzone(dz, $('cs-icon-file'), async (f) => {
     try { const d = await uploadImage(f); iconUrl = d.url; dzSetPreview(dz, d.url, () => { iconUrl = null; syncPreview(); }); syncPreview(); }
@@ -3817,6 +3922,11 @@ let settingsUploads = { avatar_url: null, banner_url: null };
 let settingsDirty = false;
 let settingsSaveFn = null;
 let settingsSection = 'account';
+/* Settings chosen in this session that have not been written to the server yet.
+   Toggles, theme cards and selects stage their value here instead of PATCHing
+   immediately, so the Discard / Save Changes controls actually mean something. */
+let settingsPending = {};
+let settingsSnapshot = {};
 
 /* Central place that flips the dirty flag and keeps the footer buttons in sync. */
 function setSettingsDirty(v) {
@@ -3829,11 +3939,43 @@ function setSettingsDirty(v) {
   if (note) note.hidden = !settingsDirty;
 }
 
+/* Stage a preference change. The value is applied to the live UI right away so
+   the user sees the effect, but it is only written to the server when they hit
+   Save Changes. Discard restores the snapshot taken when settings opened. */
+function stageSetting(key, value) {
+  settingsPending[key] = value;
+  state.settings[key] = value;
+  mirrorSettingsLocal();
+  applyTheme();
+  setSettingsDirty(true);
+}
+
+/* Write every staged preference to the server in one request. */
+async function flushSettings() {
+  const keys = Object.keys(settingsPending);
+  if (!keys.length) return true;
+  const patch = {};
+  for (const k of keys) patch[k] = settingsPending[k];
+  try {
+    await api('/api/settings', { method: 'PATCH', body: JSON.stringify(patch) });
+  } catch (e) {
+    toast(e.message, 'error');
+    return false;
+  }
+  if (patch.notifDesktop && typeof Notification !== 'undefined' && Notification.permission === 'default') {
+    try { Notification.requestPermission(); } catch (e) { /* ignore */ }
+  }
+  settingsPending = {};
+  return true;
+}
+
 function openSettings(section) {
   const u = me;
   settingsDirty = false;
   settingsSaveFn = null;
   settingsSection = section || 'account';
+  settingsPending = {};
+  settingsSnapshot = JSON.parse(JSON.stringify(state.settings || {}));
   const nav = SETTINGS_NAV.map(item => {
     if (item.cat) return `<div class="sn-cat">${t(item.cat)}</div>`;
     return `<div class="sn-item" data-sec="${item.id}">${t(item.label)} <span class="chev">${icon('chevron-right')}</span></div>`;
@@ -3864,13 +4006,17 @@ function openSettings(section) {
     </div>`, { modalClass: 'settings-modal' });
 
   /* Discard throws away every unsaved edit: uploads are reset to what is
-     stored on the server and the panel is rebuilt from the saved profile. */
+     stored on the server, staged preferences roll back to the snapshot taken
+     when settings opened, and the panel is rebuilt from the saved profile. */
   const discardChanges = () => {
     settingsUploads = { avatar_url: me.avatar_url || null, banner_url: me.banner_url || null };
+    settingsPending = {};
+    state.settings = JSON.parse(JSON.stringify(settingsSnapshot || {}));
+    mirrorSettingsLocal();
+    applyTheme();
     setSettingsDirty(false);
     previewSelf();
     renderSettings(settingsSection);
-    toast('Changes discarded');
   };
   const discardThen = (after) => {
     discardChanges();
@@ -3878,7 +4024,12 @@ function openSettings(section) {
   };
   const saveThen = async (after) => {
     const ok = settingsSaveFn ? await settingsSaveFn() : true;
-    if (ok) { setSettingsDirty(false); if (after) after(); else closeModal(); }
+    if (ok) {
+      const ok2 = await flushSettings();
+      if (!ok2) return false;
+      setSettingsDirty(false);
+      if (after) after(); else closeModal();
+    }
     return ok;
   };
   const guardLogout = () => {
@@ -3896,26 +4047,44 @@ function openSettings(section) {
   };
 
   $('set-done').addEventListener('click', async () => {
-    if (settingsDirty && settingsSaveFn) {
-      const ok = await settingsSaveFn();
-      if (!ok) return;
-      setSettingsDirty(false);
-    }
+    if (!settingsDirty) { closeModal(); return; }
+    const ok = settingsSaveFn ? await settingsSaveFn() : true;
+    if (!ok) return;
+    const ok2 = await flushSettings();
+    if (!ok2) return;
+    setSettingsDirty(false);
+    toast('Settings saved', 'success');
     closeModal();
   });
   $('set-discard').addEventListener('click', () => {
     if (!settingsDirty) return;
     discardChanges();
+    toast('Changes discarded');
   });
   $('set-logout').addEventListener('click', guardLogout);
   document.querySelectorAll('#settings-nav .sn-item[data-sec]').forEach(el => {
-    el.addEventListener('click', () => renderSettings(el.dataset.sec));
+    el.addEventListener('click', () => {
+      const sec = el.dataset.sec;
+      if (sec === settingsSection) return;
+      if (settingsDirty) {
+        showUnsavedDialog({
+          onSave: () => saveThen(() => renderSettings(sec)),
+          onDiscard: () => discardThen(() => renderSettings(sec))
+        });
+      } else {
+        renderSettings(sec);
+      }
+    });
   });
   renderSettings(section || 'account');
 }
 
 function renderSettings(section) {
   settingsSection = section;
+  /* Each panel owns its own save routine (or none, when it only stages
+     preferences). Reset it so a previous panel's saver can never fire against
+     DOM that is no longer on screen. */
+  settingsSaveFn = null;
   document.querySelectorAll('#settings-nav .sn-item[data-sec]').forEach(el => el.classList.toggle('active', el.dataset.sec === section));
   const panel = $('settings-panel');
   panel.innerHTML = settingsPanelHTML(section);
@@ -4063,7 +4232,6 @@ function settingsPanelHTML(section) {
               </select></div>
           </section>
 
-          <div class="acct-save"><button class="btn" id="set-save">${icon('check')} Save Changes</button></div>
         </div>`;
     }
     case 'profiles':
@@ -4073,8 +4241,7 @@ function settingsPanelHTML(section) {
         <div class="field"><label>Banner Color</label>
           <div class="color-row" id="prof-banner-row">${PALETTE.map(c => `<span class="swatch${(u.banner_color || '#5865F2').toLowerCase() === c.toLowerCase() ? ' sel' : ''}" data-color="${c}" style="background:${c}"></span>`).join('')}</div>
           <div class="hint">Used for your banner whenever you have not uploaded a banner image.</div>
-        </div>
-        <div class="modal-actions" style="justify-content:flex-start"><button class="btn" id="prof-save">Save Changes</button></div>`;
+        </div>`;
     case 'privacy':
       return `
         <h4>Privacy &amp; Safety</h4>
@@ -4305,7 +4472,6 @@ function wireAccountPanel() {
       const { user } = await api('/api/me', { method: 'PATCH', body: JSON.stringify(body) });
       me = user; localStorage.setItem('cr_user', JSON.stringify(me));
       myChosenStatus = me.status || myChosenStatus; userIsIdle = false; tabAwayOffline = false; resetIdleTimer();
-      setSettingsDirty(false);
       previewSelf();
       renderRail(); renderMembers();
       toast('Profile updated', 'success');
@@ -4313,7 +4479,6 @@ function wireAccountPanel() {
     } catch (e) { toast(e.message, 'error'); return false; }
   };
   settingsSaveFn = doSave;
-  $('set-save').addEventListener('click', doSave);
 }
 
 function wireProfilesPanel() {
@@ -4327,13 +4492,11 @@ function wireProfilesPanel() {
     try {
       const { user } = await api('/api/me', { method: 'PATCH', body: JSON.stringify({ banner_color: color }) });
       me = user; localStorage.setItem('cr_user', JSON.stringify(me));
-      setSettingsDirty(false);
       toast('Profile style saved', 'success');
       return true;
     } catch (e) { toast(e.message, 'error'); return false; }
   };
   settingsSaveFn = doSave;
-  $('prof-save').addEventListener('click', doSave);
 }
 
 function wireToggles() {
@@ -4342,18 +4505,20 @@ function wireToggles() {
       const key = t.dataset.toggle;
       const val = !t.classList.contains('on');
       t.classList.toggle('on', val);
-      saveSetting(key, val);
+      /* Stage the change instead of writing it straight away. The footer
+         Discard / Save Changes controls now reflect that something changed. */
+      stageSetting(key, val);
     });
   });
 }
 
 function wireAppearance() {
   document.querySelectorAll('#theme-grid .theme-card').forEach(card => card.addEventListener('click', () => {
-    saveSetting('theme', card.dataset.theme);
+    stageSetting('theme', card.dataset.theme);
     document.querySelectorAll('#theme-grid .theme-card').forEach(c => c.classList.toggle('sel', c === card));
   }));
   document.querySelectorAll('#bg-grid .theme-card').forEach(card => card.addEventListener('click', () => {
-    saveSetting('bg', card.dataset.bg);
+    stageSetting('bg', card.dataset.bg);
     document.querySelectorAll('#bg-grid .theme-card').forEach(c => c.classList.toggle('sel', c === card));
   }));
 }
@@ -4363,12 +4528,11 @@ function wireLanguage() {
   if (!sel) return;
   sel.value = setting('language') || 'English, US';
   sel.addEventListener('change', () => {
-    saveSetting('language', sel.value);
+    stageSetting('language', sel.value);
     applyLanguage();
-    toast('Language updated', 'success');
   });
   const vol = $('voice-volume');
-  if (vol) vol.addEventListener('change', () => saveSetting('inputVolume', Number(vol.value)));
+  if (vol) vol.addEventListener('change', () => stageSetting('inputVolume', Number(vol.value)));
 }
 
 /* ============================================================
