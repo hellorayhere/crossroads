@@ -1846,7 +1846,11 @@ function messageNode(m, grouped, animate) {
       const act = btn.dataset.act;
       if (act === 'react') openReactionPickerAt(btn.getBoundingClientRect().left - 140, btn.getBoundingClientRect().bottom + 8, m.id);
       else if (act === 'reply') setReplyTo(m);
-      else if (act === 'more') { const r = btn.getBoundingClientRect(); openMessageContextMenu(r.right - 200, r.bottom + 4, m); }
+      else if (act === 'more') {
+        /* Shift + click the ⋯ button on your own message = instant delete. */
+        if (e.shiftKey && me && m.author && m.author.id === me.id) { deleteMessage(m.id, true); return; }
+        const r = btn.getBoundingClientRect(); openMessageContextMenu(r.right - 200, r.bottom + 4, m);
+      }
     });
   });
   return node;
@@ -2503,14 +2507,17 @@ function closePopovers() {
   closeMentionPop();
 }
 
-async function deleteMessage(mid) {
-  const ok = await confirmDialog({ title: 'Delete Message', body: 'Are you sure you want to delete this message? This cannot be undone.', confirmText: 'Delete', danger: true });
-  if (!ok) return;
+async function deleteMessage(mid, instant) {
+  if (!instant) {
+    const ok = await confirmDialog({ title: 'Delete Message', body: 'Are you sure you want to delete this message? This cannot be undone.', confirmText: 'Delete', danger: true });
+    if (!ok) return;
+  }
   try {
     await api('/api/messages/' + mid, { method: 'DELETE' });
     const node = document.querySelector(`[data-mid="${mid}"]`);
     if (node) node.remove();
     state.messages = state.messages.filter(x => x.id !== mid);
+    if (instant) toast('Message deleted', 'success');
   } catch (e) { toast(e.message, 'error'); }
 }
 
