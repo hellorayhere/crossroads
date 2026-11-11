@@ -9,6 +9,31 @@
   <link rel="icon" type="image/png" href="/favicon.png" />
   <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
   <link rel="stylesheet" href="/css/app.css" />
+  <script>
+    /* Runs before the body paints. Visitors without a session are sent to the
+       landing page immediately, so they never see a half-rendered app before
+       being bounced back. Signed-in users get a boot gate until data loads. */
+    (function () {
+      try {
+        if (!localStorage.getItem('cr_token')) { location.replace('/'); return; }
+        document.documentElement.classList.add('booting');
+      } catch (e) { location.replace('/'); }
+    })();
+  </script>
+  <style>
+    html.booting body { overflow: hidden; }
+    .boot-gate { position: fixed; inset: 0; z-index: 9999; display: grid; place-items: center;
+      background: var(--bg-base, #1e1f22); color: var(--text-normal, #dbdee1);
+      transition: opacity .24s ease; }
+    .boot-gate.done { opacity: 0; pointer-events: none; }
+    .boot-gate .bg-inner { display: flex; flex-direction: column; align-items: center; gap: 15px; }
+    .boot-gate .bg-spinner { width: 34px; height: 34px; border-radius: 50%;
+      border: 3px solid color-mix(in srgb, var(--text-normal, #dbdee1) 18%, transparent);
+      border-top-color: var(--brand, #5865f2); animation: bgspin .8s linear infinite; }
+    @keyframes bgspin { to { transform: rotate(360deg); } }
+    .boot-gate .bg-brand { font-weight: 800; letter-spacing: .02em; font-size: 15px; }
+    .boot-gate .bg-sub { font-size: 12.5px; color: var(--text-muted, #949ba4); }
+  </style>
 </head>
 <body data-theme="dark" data-bg="graphite">
   <script>
@@ -22,6 +47,13 @@
       } catch (e) { /* ignore */ }
     })();
   </script>
+  <div class="boot-gate" id="boot-gate" aria-hidden="true">
+    <div class="bg-inner">
+      <div class="bg-spinner"></div>
+      <div class="bg-brand">Crossroads</div>
+      <div class="bg-sub">Loading your workspace…</div>
+    </div>
+  </div>
   <div id="app">
     <!-- Server rail -->
     <nav class="server-rail" id="server-rail">

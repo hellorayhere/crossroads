@@ -548,13 +548,108 @@ function promptDialog(opts = {}) {
 /* ============================================================
    INIT
    ============================================================ */
+/* ============================================================
+   PRESENCE CONTROLLER
+   ------------------------------------------------------------
+   The status a user picks in settings is the "chosen" status and is stored in
+   the database. Two things can temporarily override what other people see:
+     • tab hidden for 3 minutes  -> offline
+     • no activity for 5 minutes -> idle
+   Both are sent to the server as transient overrides (never persisted), and
+   are cleared the moment the user comes back / becomes active, restoring the
+   chosen status exactly as it was.
+   ============================================================ */
+const TAB_OFFLINE_MS = 3 * 60 * 1000;
+const IDLE_MS = 5 * 60 * 1000;
+let myChosenStatus = (me && me.status) || 'online';
+let tabAwayOffline = false;
+let userIsIdle = false;
+let tabTimer = null;
+let idleTimer = null;
+let presenceReady = false;
+
+function computeEffectiveStatus() {
+  if (tabAwayOffline) return 'offline';
+  if (userIsIdle && (myChosenStatus === 'online' || myChosenStatus === 'idle')) return 'idle';
+  return myChosenStatus;
+}
+
+function pushPresence() {
+  if (!socket || !socket.connected) return;
+  socket.emit('set_presence', { status: computeEffectiveStatus() });
+}
+
+function resetIdleTimer() {
+  clearTimeout(idleTimer);
+  if (document.hidden) return;
+  idleTimer = setTimeout(() => {
+    if (document.hidden) return;
+    if (myChosenStatus === 'online' || myChosenStatus === 'idle') {
+      userIsIdle = true;
+      pushPresence();
+    }
+  }, IDLE_MS);
+}
+
+function markActivity() {
+  if (userIsIdle) { userIsIdle = false; pushPresence(); }
+  resetIdleTimer();
+}
+
+function initPresence() {
+  if (presenceReady) return;
+  presenceReady = true;
+
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) {
+      /* Do not change anything yet — only after the tab has stayed hidden for
+         the full three minutes. */
+      clearTimeout(tabTimer);
+      tabTimer = setTimeout(() => {
+        if (document.hidden) { tabAwayOffline = true; pushPresence(); }
+      }, TAB_OFFLINE_MS);
+    } else {
+      clearTimeout(tabTimer);
+      const wasAway = tabAwayOffline;
+      tabAwayOffline = false;
+      userIsIdle = false;
+      if (wasAway) pushPresence();
+      resetIdleTimer();
+    }
+  });
+
+  ['mousemove', 'mousedown', 'keydown', 'touchstart', 'scroll', 'wheel', 'pointerdown']
+    .forEach(evt => window.addEventListener(evt, markActivity, { passive: true }));
+
+  window.addEventListener('focus', () => { if (tabAwayOffline) { tabAwayOffline = false; pushPresence(); } });
+
+  resetIdleTimer();
+}
+
+/* Called whenever the user deliberately changes their status. */
+function setChosenStatus(status) {
+  if (!['online', 'idle', 'dnd', 'offline'].includes(status)) return;
+  myChosenStatus = status;
+  userIsIdle = false;
+  tabAwayOffline = false;
+  pushPresence();
+  resetIdleTimer();
+}
+
 async function init() {
   if (!token) { window.location.href = '/'; return; }
   try {
     const { user } = await api('/api/me');
     me = user;
+    myChosenStatus = me.status || 'online';
     localStorage.setItem('cr_user', JSON.stringify(me));
-  } catch (e) { return; }
+  } catch (e) {
+    /* Invalid / expired session: clear it and send the visitor to the landing
+       page instead of leaving them on a half-loaded app. */
+    try { localStorage.removeItem('cr_token'); localStorage.removeItem('cr_user'); } catch (err) {}
+    window.location.replace('/');
+    return;
+  }
   try {
     const { settings } = await api('/api/settings');
     state.settings = settings || {};
@@ -563,12 +658,24 @@ async function init() {
   hydrateIcons(document);
   renderMe();
   connectSocket();
+  initPresence();
   /* Load everything in parallel so the first paint is not blocked by a chain
      of sequential round-trips. */
   await Promise.all([loadServers(), loadFriends(), loadDMs(), loadNotifications()]);
   showHome();
   bindGlobalEvents();
   applyLanguage();
+  revealApp();
+}
+
+/* Remove the boot gate once the app has real data to show. */
+function revealApp() {
+  document.documentElement.classList.remove('booting');
+  const gate = document.getElementById('boot-gate');
+  if (gate) {
+    gate.classList.add('done');
+    setTimeout(() => gate.remove(), 260);
+  }
 }
 
 function renderMe(u = me) {
@@ -610,6 +717,9 @@ function connectSocket() {
   socket.on('connect', () => {
     if (state.channel) socket.emit('join_channel', state.channel.id);
     if (state.dm) socket.emit('join_dm', state.dm.id);
+    /* Re-assert our effective presence after a reconnect (the server keeps
+       overrides in memory only). */
+    pushPresence();
   });
   socket.on('message', (m) => {
     if (state.channel && m.channel_id === state.channel.id) {
@@ -633,6 +743,11 @@ function connectSocket() {
     const node = document.querySelector(`[data-mid="${data.id}"]`);
     if (node) node.remove();
     state.messages = state.messages.filter(x => x.id !== data.id);
+  });
+  socket.on('message_updated', (m) => {
+    const idx = state.messages.findIndex(x => x.id === m.id);
+    if (idx >= 0) state.messages[idx] = m;
+    updateMessageNode(m);
   });
   socket.on('reaction', (data) => {
     const m = state.messages.find(x => x.id === data.message_id);
@@ -1815,7 +1930,7 @@ function messageNode(m, grouped, animate) {
       <button data-act="more" title="More">${icon('ellipsis-vertical')}</button>
     </div>`;
   node.innerHTML = `${toolbar}${gutter}<div class="body">${m.reply_to ? replyRefHTML(m.reply_to) : ''}${head}
-    <div class="text" data-content>${m.pinned ? `<span class="msg-pin" title="Pinned message">${icon('pin')}</span>` : ''}<span class="text-body">${formatContent(m.content)}</span></div>
+    <div class="text" data-content>${m.pinned ? `<span class="msg-pin" title="Pinned message">${icon('pin')}</span>` : ''}<span class="text-body">${formatContent(m.content)}</span>${m.edited_at ? `<span class="msg-edited" title="Edited ${escapeHtml(formatTime(m.edited_at))}">(edited)</span>` : ''}</div>
     <div class="attachment-slot"></div>
     <div class="embed-slot"></div>
     <div class="reactions">${reactionsHTML(m.reactions)}</div>
@@ -2517,7 +2632,6 @@ async function deleteMessage(mid, instant) {
     const node = document.querySelector(`[data-mid="${mid}"]`);
     if (node) node.remove();
     state.messages = state.messages.filter(x => x.id !== mid);
-    if (instant) toast('Message deleted', 'success');
   } catch (e) { toast(e.message, 'error'); }
 }
 
@@ -2572,9 +2686,74 @@ function openMessageContextMenu(x, y, m) {
   ];
   if (m.author.id === me.id) {
     items.push({ sep: true });
+    items.push({ label: 'Edit Message', icon: 'pencil', onClick: () => editMessage(m) });
     items.push({ label: 'Delete Message', icon: 'trash', danger: true, onClick: () => deleteMessage(m.id) });
   }
   showContextMenu(x, y, items);
+}
+
+/* Refresh an existing message node in place after it is edited. */
+function updateMessageNode(m) {
+  const node = document.querySelector(`[data-mid="${m.id}"]`);
+  if (!node) return;
+  const body = node.querySelector('.text-body');
+  if (body) body.innerHTML = formatContent(m.content);
+  const text = node.querySelector('.text');
+  if (!text) return;
+  let ed = text.querySelector('.msg-edited');
+  if (m.edited_at) {
+    if (!ed) { ed = document.createElement('span'); ed.className = 'msg-edited'; text.appendChild(ed); }
+    ed.textContent = '(edited)';
+    ed.title = 'Edited ' + formatTime(m.edited_at);
+  } else if (ed) {
+    ed.remove();
+  }
+}
+
+/* Inline editor for your own messages. */
+function editMessage(m) {
+  const node = document.querySelector(`[data-mid="${m.id}"]`);
+  if (!node) return;
+  const textEl = node.querySelector('.text');
+  if (!textEl || node.querySelector('.msg-edit-box')) return;
+  textEl.style.display = 'none';
+  const box = document.createElement('div');
+  box.className = 'msg-edit-box';
+  box.innerHTML = `<textarea class="msg-edit-input" rows="1"></textarea>
+    <div class="msg-edit-actions">
+      <span class="msg-edit-hint">Esc to cancel · Enter to save</span>
+      <button class="btn secondary msg-edit-cancel">Cancel</button>
+      <button class="btn msg-edit-save">Save</button>
+    </div>`;
+  textEl.after(box);
+  const ta = box.querySelector('.msg-edit-input');
+  ta.value = m.content || '';
+  const autoGrow = () => { ta.style.height = 'auto'; ta.style.height = Math.min(220, ta.scrollHeight) + 'px'; };
+  autoGrow();
+  ta.focus();
+  try { ta.setSelectionRange(ta.value.length, ta.value.length); } catch (e) {}
+  ta.addEventListener('input', autoGrow);
+  const cancel = () => { box.remove(); textEl.style.display = ''; };
+  const save = async () => {
+    const val = ta.value.trim();
+    if (!val) { toast('Message cannot be empty', 'error'); return; }
+    if (val === (m.content || '').trim()) { cancel(); return; }
+    try {
+      const { message } = await api('/api/messages/' + m.id, { method: 'PATCH', body: JSON.stringify({ content: val }) });
+      const idx = state.messages.findIndex(x => x.id === m.id);
+      if (idx >= 0) state.messages[idx] = message;
+      m.content = message.content; m.edited_at = message.edited_at;
+      box.remove(); textEl.style.display = '';
+      updateMessageNode(message);
+      toast('Message edited', 'success');
+    } catch (e) { toast(e.message, 'error'); }
+  };
+  box.querySelector('.msg-edit-cancel').addEventListener('click', cancel);
+  box.querySelector('.msg-edit-save').addEventListener('click', save);
+  ta.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') { e.preventDefault(); cancel(); }
+    else if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); save(); }
+  });
 }
 
 async function togglePin(m) {
@@ -3132,35 +3311,81 @@ function openImageEditor(file, opts = {}) {
 
 /* ---------------- Create / join server ---------------- */
 function openCreateServer() {
+  const templates = [
+    { id: 'friends', label: 'Friends', desc: 'A place for me and my friends to hang out.' },
+    { id: 'community', label: 'Community', desc: 'A community space to share ideas and chat.' },
+    { id: 'study', label: 'Study Group', desc: 'A focused space for studying and sharing resources.' },
+    { id: 'gaming', label: 'Gaming', desc: 'Game nights, clips and squad talk.' }
+  ];
   openModal(`
-    <h3>Create a Server</h3>
-    <p class="msub">Your server is where you and your friends hang out. Make yours and start talking.</p>
-    <div class="field"><label>Server Name <span class="req">*</span></label>
-      <input id="cs-name" placeholder="e.g. Pixel Lounge, Study Group, Game Night\u2026" maxlength="40"></div>
-    <div class="field"><label>Server Icon <span style="color:var(--text-muted);text-transform:none;font-weight:500">(optional)</span></label>
-      ${dropzoneHTML('cs-icon-dz', 'Upload Image', 'PNG, JPG or GIF \u2014 up to 25 MB')}
-      <input type="file" id="cs-icon-file" accept="image/*" class="hidden"></div>
+    <div class="cs-head">
+      <div class="cs-head-ico">${icon('plus')}</div>
+      <div>
+        <h3>Create a Server</h3>
+        <p class="msub">Your server is a private space for you and your people. Set it up now — you can change everything later.</p>
+      </div>
+    </div>
+    <div class="cs-grid">
+      <div class="cs-preview">
+        <div class="cs-preview-card">
+          <div class="cs-preview-ico" id="cs-preview-ico">${icon('hash')}</div>
+          <div class="cs-preview-meta">
+            <div class="cs-preview-name" id="cs-preview-name">Your Server</div>
+            <div class="cs-preview-sub">Private · Invite only</div>
+          </div>
+        </div>
+        <div class="cs-preview-note">${icon('lock')} New servers are private. Share an invite link to let people in.</div>
+      </div>
+      <div class="cs-fields">
+        <div class="field"><label>Server Name <span class="req">*</span></label>
+          <input id="cs-name" placeholder="e.g. Pixel Lounge, Study Group, Game Night…" maxlength="40"></div>
+        <div class="field"><label>Description <span class="opt">(optional)</span></label>
+          <textarea id="cs-desc" rows="2" maxlength="500" placeholder="What is this server about?"></textarea></div>
+        <div class="field"><label>Server Type</label>
+          <div class="cs-types" id="cs-types">${templates.map((t, i) => `<button type="button" class="cs-type${i === 0 ? ' sel' : ''}" data-id="${t.id}">${t.label}</button>`).join('')}</div></div>
+        <div class="field"><label>Server Icon <span class="opt">(optional)</span></label>
+          ${dropzoneHTML('cs-icon-dz', 'Upload Image', 'PNG, JPG or GIF — up to 25 MB')}
+          <input type="file" id="cs-icon-file" accept="image/*" class="hidden"></div>
+      </div>
+    </div>
     <div class="modal-actions">
       <button class="btn secondary" id="cs-cancel">Cancel</button>
       <button class="btn" id="cs-create">Create Server</button>
-    </div>`);
+    </div>`, { modalClass: 'modal create-server-modal' });
   let iconUrl = null;
+  const nameInput = $('cs-name');
+  const descInput = $('cs-desc');
+  const previewName = $('cs-preview-name');
+  const previewIco = $('cs-preview-ico');
+  const syncPreview = () => {
+    previewName.textContent = nameInput.value.trim() || 'Your Server';
+    previewIco.innerHTML = iconUrl ? `<img src="${escapeHtml(iconUrl)}" alt="">` : icon('hash');
+  };
+  nameInput.addEventListener('input', syncPreview);
+  $('cs-types').querySelectorAll('.cs-type').forEach(btn => btn.addEventListener('click', () => {
+    $('cs-types').querySelectorAll('.cs-type').forEach(b => b.classList.toggle('sel', b === btn));
+    const t = templates.find(x => x.id === btn.dataset.id);
+    if (t && (!descInput.value.trim() || descInput.dataset.auto === '1')) { descInput.value = t.desc; descInput.dataset.auto = '1'; }
+  }));
+  descInput.addEventListener('input', () => { descInput.dataset.auto = '0'; });
   const dz = $('cs-icon-dz');
   wireDropzone(dz, $('cs-icon-file'), async (f) => {
-    try { const d = await uploadImage(f); iconUrl = d.url; dzSetPreview(dz, d.url, () => { iconUrl = null; }); toast('Icon ready', 'success'); }
+    try { const d = await uploadImage(f); iconUrl = d.url; dzSetPreview(dz, d.url, () => { iconUrl = null; syncPreview(); }); syncPreview(); toast('Icon ready', 'success'); }
     catch (err) { toast(err.message, 'error'); }
   });
   $('cs-cancel').addEventListener('click', closeModal);
   $('cs-create').addEventListener('click', async () => {
-    const name = $('cs-name').value.trim();
-    if (!name) { toast('Server name required', 'error'); return; }
+    const name = nameInput.value.trim();
+    if (!name) { toast('Server name required', 'error'); nameInput.focus(); return; }
+    const description = descInput.value.trim();
     try {
-      const { server } = await api('/api/servers', { method: 'POST', body: JSON.stringify({ name, icon_url: iconUrl }) });
+      const { server } = await api('/api/servers', { method: 'POST', body: JSON.stringify({ name, icon_url: iconUrl, description }) });
       closeModal(); await loadServers(); openServer(server.id);
       toast('Server created', 'success');
     } catch (e) { toast(e.message, 'error'); }
   });
-  $('cs-name').focus();
+  syncPreview();
+  nameInput.focus();
 }
 
 function openJoinServer(prefill) {
@@ -4007,6 +4232,7 @@ function wireAccountPanel() {
     try {
       const { user } = await api('/api/me', { method: 'PATCH', body: JSON.stringify(body) });
       me = user; localStorage.setItem('cr_user', JSON.stringify(me));
+      myChosenStatus = me.status || myChosenStatus; userIsIdle = false; tabAwayOffline = false; resetIdleTimer();
       settingsDirty = false;
       previewSelf();
       renderRail(); renderMembers();
@@ -4101,13 +4327,35 @@ async function leaveServer() {
 }
 
 async function deleteServer() {
-  const ok = await confirmDialog({ title: 'Delete Server', body: `This will permanently delete <b>${escapeHtml(state.server.name)}</b> and all of its channels and messages. This cannot be undone.`, confirmText: 'Delete Server', danger: true });
-  if (!ok) return;
-  try {
-    await api('/api/servers/' + state.server.id, { method: 'DELETE' });
-    toast('Server deleted', 'success');
-    await loadServers(); showHome();
-  } catch (e) { toast(e.message, 'error'); }
+  const srv = state.server;
+  if (!srv) return;
+  if (srv.owner_id !== me.id) { toast('Only the server owner can delete this server', 'error'); return; }
+  openModal(`
+    <h3>Delete Server</h3>
+    <p class="msub">This will permanently delete <b>${escapeHtml(srv.name)}</b> and all of its channels and messages. This action cannot be undone.</p>
+    <div class="field"><label>Type the server name to confirm</label>
+      <input id="ds-confirm" autocomplete="off" spellcheck="false" placeholder="${escapeHtml(srv.name)}">
+      <div class="hint">Enter <b>${escapeHtml(srv.name)}</b> exactly to enable deletion.</div></div>
+    <div class="modal-actions">
+      <button class="btn secondary" id="ds-cancel">Cancel</button>
+      <button class="btn danger" id="ds-delete" disabled>Delete Server</button>
+    </div>`);
+  const input = $('ds-confirm');
+  const btn = $('ds-delete');
+  const sync = () => { btn.disabled = input.value.trim() !== srv.name; };
+  input.addEventListener('input', sync);
+  $('ds-cancel').addEventListener('click', closeModal);
+  btn.addEventListener('click', async () => {
+    if (input.value.trim() !== srv.name) return;
+    btn.disabled = true;
+    try {
+      await api('/api/servers/' + srv.id, { method: 'DELETE' });
+      closeModal();
+      toast('Server deleted', 'success');
+      await loadServers(); showHome();
+    } catch (e) { toast(e.message, 'error'); btn.disabled = false; }
+  });
+  input.focus();
 }
 
 /* ============================================================
@@ -4901,6 +5149,7 @@ async function setMyStatus(status) {
     const { user } = await api('/api/me', { method: 'PATCH', body: JSON.stringify({ status }) });
     me = user; localStorage.setItem('cr_user', JSON.stringify(me));
     state.usersCache[me.id] = Object.assign({}, state.usersCache[me.id] || {}, me);
+    myChosenStatus = status; userIsIdle = false; tabAwayOffline = false; resetIdleTimer();
     renderMe();
     updateMiniProfileDom(me);
   } catch (e) { toast(e.message, 'error'); }

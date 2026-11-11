@@ -24,6 +24,19 @@ const io = new Server(server, { maxHttpBufferSize: 1e8 });
    Used to compute accurate "online" counts and to broadcast presence. */
 const onlineUids = new Set();
 
+/* Transient (in-memory) presence overrides. The database stores the status a
+   user *chose*; this map stores a temporary effective status such as "offline"
+   after a tab has been hidden for a while, or "idle" after inactivity. It is
+   never persisted, so a refresh, reconnect or restart restores the chosen
+   status automatically. */
+const presenceOverrides = new Map();
+
+/* Resolve the status other people should see for a user. */
+function effectiveStatus(uid, dbStatus) {
+  if (presenceOverrides.has(uid)) return presenceOverrides.get(uid);
+  return dbStatus || 'online';
+}
+
 app.use(express.json({ limit: '25mb' }));
 app.use(express.urlencoded({ extended: true }));
 app.use('/uploads', express.static(UPLOAD_DIR));
@@ -235,7 +248,7 @@ function serverStats(serverId) {
     WHERE m.server_id = ?`).all(serverId);
   // A member counts as online only when they are actually connected AND have
   // not chosen the invisible/offline status.
-  const onlineCount = rows.filter(r => r.status !== 'offline' && onlineUids.has(r.id)).length;
+  const onlineCount = rows.filter(r => effectiveStatus(r.id, r.status) !== 'offline' && onlineUids.has(r.id)).length;
   return { member_count: memberCount, online_count: onlineCount };
 }
 
@@ -589,6 +602,8 @@ app.patch('/api/me', auth, (req, res) => {
     values.push(uid);
     db.prepare(`UPDATE users SET ${updates.join(', ')} WHERE id = ?`).run(...values);
   }
+  /* A deliberate status change replaces any transient (idle/away) override. */
+  if (statusChanged) presenceOverrides.delete(uid);
   const user = db.prepare('SELECT * FROM users WHERE id = ?').get(uid);
   // Push the change to every client so avatars, banners, names and statuses
   // update live across member lists, DM lists, message authors and profiles.
@@ -1335,6 +1350,25 @@ app.delete('/api/messages/:id', auth, (req, res) => {
   res.json({ ok: true });
 });
 
+/* Edit a message. Only the author may edit, and the content is re-parsed for
+   mentions. edited_at is stamped so clients can show an "(edited)" marker. */
+app.patch('/api/messages/:id', auth, (req, res) => {
+  const m = db.prepare('SELECT * FROM messages WHERE id = ?').get(req.params.id);
+  if (!m) return res.status(404).json({ error: 'Message not found' });
+  if (m.user_id !== req.user.id) return res.status(403).json({ error: 'You can only edit your own messages' });
+  const content = (req.body && req.body.content != null) ? String(req.body.content).trim() : '';
+  if (!content && !m.attachment_url) return res.status(400).json({ error: 'Message cannot be empty' });
+  const now = Date.now();
+  const mentionIds = parseMentionIds(content).filter(uid => uid !== req.user.id);
+  db.prepare('UPDATE messages SET content = ?, edited_at = ?, mentions = ? WHERE id = ?')
+    .run(content, now, JSON.stringify(mentionIds), m.id);
+  const updated = db.prepare('SELECT * FROM messages WHERE id = ?').get(m.id);
+  const full = messageWithMeta(updated, req.user.id);
+  if (m.channel_id) io.to(`channel:${m.channel_id}`).emit('message_updated', full);
+  if (m.dm_id) io.to(`dm:${m.dm_id}`).emit('message_updated', full);
+  res.json({ message: full });
+});
+
 /* ---------------- Reactions ---------------- */
 app.post('/api/messages/:id/reactions', auth, (req, res) => {
   const m = db.prepare('SELECT * FROM messages WHERE id = ?').get(req.params.id);
@@ -1643,8 +1677,17 @@ io.on('connection', (socket) => {
   // Announce the user's chosen status (online / idle / dnd / invisible). We do
   // NOT overwrite it here so a chosen status survives refreshes and reconnects.
   const row = db.prepare('SELECT status FROM users WHERE id = ?').get(uid);
-  const currentStatus = (row && row.status) ? row.status : 'online';
+  const currentStatus = effectiveStatus(uid, row && row.status);
   io.emit('presence', { user_id: uid, status: currentStatus });
+
+  /* Transient presence: lets a client show "offline" after its tab has been
+     hidden for a while, or "idle" after inactivity, without overwriting the
+     status the user actually chose in their settings. */
+  socket.on('set_presence', ({ status } = {}) => {
+    if (!['online', 'idle', 'dnd', 'offline'].includes(status)) return;
+    presenceOverrides.set(uid, status);
+    io.emit('presence', { user_id: uid, status });
+  });
 
   socket.on('join_channel', (channelId) => {
     if (channelId) socket.join(`channel:${channelId}`);
@@ -1711,6 +1754,7 @@ io.on('connection', (socket) => {
     const remaining = io.sockets.adapter.rooms.get(`user:${uid}`);
     if (!remaining || remaining.size === 0) {
       onlineUids.delete(uid);
+      presenceOverrides.delete(uid);
       io.emit('presence', { user_id: uid, status: 'offline' });
     }
   });
