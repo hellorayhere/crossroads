@@ -36,5 +36,5 @@
 
 ## 10. Test & deploy
 - [x] Test locally on isolated data (port 3210)
-- [ ] Commit + push to main
-- [ ] Render deploy + verify live, data preserved
+- [x] Commit + push to main
+- [x] Render deploy + verify live, data preserved
