@@ -269,6 +269,27 @@ function migrate() {
     try { db.exec("ALTER TABLE servers ADD COLUMN description TEXT DEFAULT ''"); } catch (e) {}
   }
 
+  // 1c-2. Additive migration: channel categories. A category groups channels
+  // under a collapsible header, exactly like Discord. Channels keep working
+  // without one (category_id NULL means "no category"). Never destructive.
+  try {
+    db.exec(`CREATE TABLE IF NOT EXISTS channel_categories (
+      id TEXT PRIMARY KEY,
+      server_id TEXT NOT NULL,
+      name TEXT NOT NULL,
+      position INTEGER DEFAULT 0,
+      created_at INTEGER NOT NULL
+    )`);
+  } catch (e) {}
+  try { db.exec('CREATE INDEX IF NOT EXISTS idx_chan_cat_server ON channel_categories(server_id)'); } catch (e) {}
+  const chCols = db.prepare('PRAGMA table_info(channels)').all().map(c => c.name);
+  if (!chCols.includes('category_id')) {
+    try { db.exec('ALTER TABLE channels ADD COLUMN category_id TEXT'); } catch (e) {}
+  }
+  if (!chCols.includes('slow_mode')) {
+    try { db.exec('ALTER TABLE channels ADD COLUMN slow_mode INTEGER DEFAULT 0'); } catch (e) {}
+  }
+
   // 1d. Additive migration for server member roles (owner / admin / member).
   const memCols = db.prepare('PRAGMA table_info(server_members)').all().map(c => c.name);
   if (!memCols.includes('role')) {

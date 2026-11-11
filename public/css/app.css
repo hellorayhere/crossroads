@@ -217,6 +217,16 @@ button:active, .rail-item:active, .channel:active, .dm-item:active, .member:acti
 .channel-add { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: var(--radius-sm); color: var(--text-muted); font-size: 14px; cursor: pointer; }
 .channel-add:hover { background: var(--hover); color: var(--text-normal); }
 .channel-add .plus { font-size: 13px; width: 18px; text-align: center; display: inline-flex; justify-content: center; }
+/* Collapsible category headers (visible to every member) */
+.channel-category .cat-caret { display: inline-flex; align-items: center; justify-content: center; width: 14px; height: 14px; flex: 0 0 auto; color: var(--text-faint); }
+.channel-category .cat-caret .ic { width: 12px; height: 12px; }
+.channel-category .cat-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.channel-category .cat-actions { display: inline-flex; align-items: center; opacity: 0; transition: opacity .12s ease; }
+.channel-category:hover .cat-actions { opacity: 1; }
+.channel-category .cat-add { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; border-radius: 4px; color: var(--text-muted); }
+.channel-category .cat-add:hover { background: var(--hover); color: var(--text-header); }
+.channel-category .cat-add .ic { width: 13px; height: 13px; }
+.channel-category.drop-into { background: color-mix(in srgb, var(--brand) 20%, transparent); border-radius: var(--radius-sm); color: var(--text-header); }
 
 .user-panel { height: 52px; flex: 0 0 52px; background: color-mix(in srgb, var(--sidebar-bg) 88%, #000); display: flex; align-items: center; padding: 0 8px; gap: 8px; }
 .user-panel .me { display: flex; align-items: center; gap: 8px; flex: 1; padding: 4px; border-radius: var(--radius-sm); cursor: pointer; min-width: 0; }

@@ -1,45 +1,46 @@
-# Crossroads — Round 9 Task List
+# Crossroads — Round 10 Task List
 
-## 1. Pings / mentions / DMs: no toast, red Discord-style badges
-- [x] Remove the toast when a DM arrives
-- [x] Remove the toast when a mention or reply arrives
-- [x] Add red unread counter on DM rows (`.unread-badge`)
-- [x] Add red unread counter on channel rows for @mentions / replies
-- [x] Add red aggregate badge on the server rail icon
-- [x] Opening the DM / channel / notification clears its badge immediately
+## 1. Direct messages: most recent conversations on top
+- [x] `/api/dms` orders by last message activity (falls back to DM creation time)
+- [x] `last_activity` returned with each DM
+- [x] DM list renders in that order automatically
 
-## 2. Settings: Save Changes no longer stuck disabled
-- [x] Toggles (privacy / appearance / notifications / voice) now stage changes instead of silently PATCHing
-- [x] Theme + background cards stage changes and preview live
-- [x] Language + input volume stage changes
-- [x] Footer Discard / Save Changes enable as soon as any option is clicked
-- [x] "Unsaved changes" note appears with the buttons
-- [x] Removed the duplicate inline Save buttons in Account and Profiles panels
-- [x] Per-panel save routine is reset when switching sections (no stale saver)
-- [x] Save writes profile + all staged preferences in one pass
-- [x] Discard rolls preferences back to the snapshot taken when settings opened
+## 2. @everyone / @here pings for owners + admins
+- [x] Parse `@everyone` and `@here` in channel messages
+- [x] Only the server owner and admins can broadcast (members are ignored)
+- [x] Gated by the server's "Allow @everyone / @here" setting
+- [x] `@here` only notifies members who are currently online
+- [x] Notifications use the same red badge system (channel + rail) and the bell panel
+- [x] Notification text/icon for `everyone` / `here` types
 
-## 3. Save / Discard popup when changing options
-- [x] Switching sections while dirty shows the Save / Discard / Cancel dialog
-- [x] Closing the modal or logging out while dirty shows the same dialog
-- [x] Dialog Save persists then continues, Discard reverts then continues
+## 3. Server Settings: toggles now match real behaviour
+- [x] Explicit Content Filter actually blocks explicit messages / attachment names
+- [x] "Allow @everyone / @here" actually gates broadcasts
+- [x] Descriptions rewritten to describe the real behaviour
 
-## 4. Create a Server UI: more detail, less cartoony
-- [x] Live preview card shows name, type, description and icon
-- [x] Section headers (Basics / Style) for structure
-- [x] Type buttons now carry icons and a description hint
-- [x] Footer privacy hint ("Only people you invite can join")
+## 4. Channel right-click editing (owner + admins)
+- [x] Edit Channel modal: name, topic, category, slow mode
+- [x] Rename / edit topic / move up / move down / delete retained
+- [x] New Text / New Voice / New Category shortcuts in the channel menu
+- [x] Category header right-click: create channel here, rename, delete
 
-## 5. Remove all toast UIs
-- [x] `toast()` now renders an embedded `.notice` strip inside the chat column
-- [x] Removed `#toast-wrap` markup and all toast CSS
-- [x] Notices are flat, shadowless, dismissible and auto-expire
+## 5. Channel categories + drag between them (visible to everyone)
+- [x] `channel_categories` table + `channels.category_id` + `channels.slow_mode` (additive migration)
+- [x] Category CRUD endpoints (owner/admin gated)
+- [x] Channel create / edit / order accept `category_id`
+- [x] Collapsible category headers rendered for ALL members
+- [x] Uncategorised channels float above the first category
+- [x] Drag channels onto other channels or category headers to move between categories
+- [x] Order persists as `{ id, category_id }` entries
+- [x] Deleting a category keeps its channels (they move to the top)
 
-## 6. Test & deploy
-- [x] Badges appear on DM + channel + rail, and clear when opened
-- [x] Settings footer enables on option click; Save persists; Discard reverts
-- [x] Unsaved dialog appears on section switch
-- [x] Create a Server modal renders with icons, hints and live preview
-- [x] Inline notice is `position: static`, no shadow, inside `#inline-notices`
+## 6. Reduce website delays
+- [x] `openServer` no longer blocks the channel list on a second voice round-trip
+- [x] Voice occupancy loads in the background after the server paints
+- [x] Boot still loads servers / friends / DMs / notifications in parallel
+
+## 7. Test & deploy
+- [x] Server API tests: categories, order, edit, explicit filter, @everyone/@here gating, DM sort, category delete
+- [x] Browser test: categories visible to non-admin, admin menus, edit modal, drag persistence
 - [x] Commit + push to main
 - [x] Render deploy + verify live, data preserved

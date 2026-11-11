@@ -208,7 +208,8 @@ function broadcastMembers(serverId) {
    channel changes appear instantly everywhere (clients filter by server id). */
 function broadcastChannels(serverId) {
   const channels = db.prepare('SELECT * FROM channels WHERE server_id = ? ORDER BY position ASC, created_at ASC').all(serverId);
-  io.emit('channels_update', { server_id: serverId, channels });
+  const categories = db.prepare('SELECT * FROM channel_categories WHERE server_id = ? ORDER BY position ASC, created_at ASC').all(serverId);
+  io.emit('channels_update', { server_id: serverId, channels, categories });
 }
 
 /* Broadcast a profile change to every client so avatars / banners / names /
@@ -493,6 +494,43 @@ function createNotification(userId, type, data) {
   const notif = { id, type, data, read: false, created_at: now };
   io.to(`user:${userId}`).emit('notification', notif);
   return notif;
+}
+
+/* Detect an @everyone or @here broadcast in a message. Returns 'everyone',
+   'here' or null. Word-boundary aware so "@everyoneelse" does not count. */
+function parseBroadcastPing(content) {
+  if (!content) return null;
+  if (/(^|[^\w@])@everyone\b/i.test(content)) return 'everyone';
+  if (/(^|[^\w@])@here\b/i.test(content)) return 'here';
+  return null;
+}
+
+/* Very small explicit-content screen used by the server's Explicit Content
+   Filter setting. It is intentionally conservative: it looks for a short list
+   of unambiguous adult terms plus explicit-looking attachment filenames. It
+   never deletes anything — it only refuses to accept the new message. */
+const EXPLICIT_TERMS = [
+  'porn', 'porno', 'pornography', 'nsfw', 'xxx', 'hentai', 'nudes', 'nude pic',
+  'onlyfans', 'cumshot', 'blowjob', 'handjob', 'dildo', 'vibrator', 'orgasm',
+  'masturbat', 'penetrat', 'creampie', 'anal sex', 'vagina', 'penis', 'boobs pic'
+];
+function explicitContentReason(content, attachmentType, attachmentName) {
+  const text = String(content || '').toLowerCase();
+  for (const term of EXPLICIT_TERMS) {
+    if (text.includes(term)) return 'this message contains explicit language';
+  }
+  const fname = String(attachmentName || '').toLowerCase();
+  if (fname) {
+    for (const term of EXPLICIT_TERMS) {
+      if (fname.includes(term)) return 'this attachment name looks explicit';
+    }
+  }
+  /* Images and videos cannot be inspected server-side, so when the filter is on
+     we ask the sender to confirm by keeping media out of the channel. */
+  if (attachmentType && /^(image|video)\//i.test(attachmentType) && /nsfw|explicit|adult/i.test(fname)) {
+    return 'this attachment is marked explicit';
+  }
+  return null;
 }
 
 /* ---------------- Auth routes ---------------- */
@@ -880,6 +918,7 @@ app.get('/api/servers/:id', auth, (req, res) => {
   const srv = getServerForUser(req.params.id, req.user.id);
   if (!srv) return res.status(404).json({ error: 'Server not found' });
   const channels = db.prepare('SELECT * FROM channels WHERE server_id = ? ORDER BY position ASC, created_at ASC').all(srv.id);
+  const categories = db.prepare('SELECT * FROM channel_categories WHERE server_id = ? ORDER BY position ASC, created_at ASC').all(srv.id);
   const members = db.prepare(`
     SELECT u.*, m.role AS member_role, m.custom_role_id AS member_custom_role, m.timeout_until AS member_timeout
     FROM users u JOIN server_members m ON m.user_id = u.id
@@ -889,7 +928,7 @@ app.get('/api/servers/:id', auth, (req, res) => {
       custom_role_id: u.member_custom_role || null,
       timeout_until: u.member_timeout || null
     }));
-  res.json({ server: publicServer(srv), channels, members, settings: getServerSettings(srv.id), roles: listServerRoles(srv.id) });
+  res.json({ server: publicServer(srv), channels, categories, members, settings: getServerSettings(srv.id), roles: listServerRoles(srv.id) });
 });
 
 /* Current voice occupancy for a server (used to seed the UI on load). */
@@ -906,13 +945,19 @@ app.post('/api/servers/:id/channels', auth, (req, res) => {
   const srv = getServerForUser(req.params.id, req.user.id);
   if (!srv) return res.status(404).json({ error: 'Server not found' });
   if (!isServerAdmin(srv, req.user.id)) return res.status(403).json({ error: 'Only the owner and admins can manage channels' });
-  let { name, type, topic } = req.body || {};
+  let { name, type, topic, category_id } = req.body || {};
   name = (name || '').trim();
   if (!name) return res.status(400).json({ error: 'Channel name required' });
   const maxPos = db.prepare('SELECT MAX(position) as p FROM channels WHERE server_id = ?').get(srv.id).p || 0;
   const id = newId();
-  db.prepare('INSERT INTO channels (id, server_id, name, type, topic, position, created_at) VALUES (?,?,?,?,?,?,?)')
-    .run(id, srv.id, name, type || 'text', topic || '', maxPos + 1, Date.now());
+  /* Only accept a category that actually belongs to this server. */
+  let catId = null;
+  if (category_id) {
+    const cat = db.prepare('SELECT id FROM channel_categories WHERE id = ? AND server_id = ?').get(category_id, srv.id);
+    if (cat) catId = cat.id;
+  }
+  db.prepare('INSERT INTO channels (id, server_id, name, type, topic, position, created_at, category_id) VALUES (?,?,?,?,?,?,?,?)')
+    .run(id, srv.id, name, type || 'text', topic || '', maxPos + 1, Date.now(), catId);
   const ch = db.prepare('SELECT * FROM channels WHERE id = ?').get(id);
   broadcastChannels(srv.id);
   res.json({ channel: ch });
@@ -930,12 +975,69 @@ app.patch('/api/servers/:id/channels/order', auth, (req, res) => {
   if (!order || !order.length) return res.status(400).json({ error: 'An order array is required' });
   const existing = db.prepare('SELECT id FROM channels WHERE server_id = ?').all(srv.id).map(r => r.id);
   const valid = new Set(existing);
-  for (const id of order) if (!valid.has(id)) return res.status(400).json({ error: 'Unknown channel in order' });
-  const update = db.prepare('UPDATE channels SET position = ? WHERE id = ? AND server_id = ?');
-  const apply = db.transaction(() => { order.forEach((id, i) => update.run(i, id, srv.id)); });
+  /* Entries may be plain ids or { id, category_id } objects so a drag can move a
+     channel into another category at the same time as it reorders it. */
+  const ids = order.map(o => (typeof o === 'string' ? o : (o && o.id)));
+  for (const id of ids) if (!valid.has(id)) return res.status(400).json({ error: 'Unknown channel in order' });
+  const validCats = new Set(db.prepare('SELECT id FROM channel_categories WHERE server_id = ?').all(srv.id).map(r => r.id));
+  const update = db.prepare('UPDATE channels SET position = ?, category_id = ? WHERE id = ? AND server_id = ?');
+  const apply = db.transaction(() => {
+    order.forEach((o, i) => {
+      if (typeof o === 'string') {
+        update.run(i, db.prepare('SELECT category_id FROM channels WHERE id = ?').get(o).category_id, o, srv.id);
+      } else {
+        const cat = o.category_id && validCats.has(o.category_id) ? o.category_id : null;
+        update.run(i, cat, o.id, srv.id);
+      }
+    });
+  });
   apply();
   broadcastChannels(srv.id);
   res.json({ ok: true });
+});
+
+/* ---------------- Channel categories (owner + admins) ---------------- */
+app.post('/api/servers/:id/categories', auth, (req, res) => {
+  const srv = getServerForUser(req.params.id, req.user.id);
+  if (!srv) return res.status(404).json({ error: 'Server not found' });
+  if (!isServerAdmin(srv, req.user.id)) return res.status(403).json({ error: 'Only the owner and admins can manage channels' });
+  const name = String((req.body && req.body.name) || '').trim().slice(0, 40);
+  if (!name) return res.status(400).json({ error: 'Category name required' });
+  const maxPos = db.prepare('SELECT MAX(position) as p FROM channel_categories WHERE server_id = ?').get(srv.id).p || 0;
+  const id = newId();
+  db.prepare('INSERT INTO channel_categories (id, server_id, name, position, created_at) VALUES (?,?,?,?,?)')
+    .run(id, srv.id, name, maxPos + 1, Date.now());
+  const category = db.prepare('SELECT * FROM channel_categories WHERE id = ?').get(id);
+  broadcastChannels(srv.id);
+  res.json({ category });
+});
+
+app.patch('/api/servers/:id/categories/:catId', auth, (req, res) => {
+  const srv = getServerForUser(req.params.id, req.user.id);
+  if (!srv) return res.status(404).json({ error: 'Server not found' });
+  if (!isServerAdmin(srv, req.user.id)) return res.status(403).json({ error: 'Only the owner and admins can manage channels' });
+  const cat = db.prepare('SELECT * FROM channel_categories WHERE id = ? AND server_id = ?').get(req.params.catId, srv.id);
+  if (!cat) return res.status(404).json({ error: 'Category not found' });
+  if (req.body && 'name' in req.body) {
+    const name = String(req.body.name || '').trim().slice(0, 40);
+    if (!name) return res.status(400).json({ error: 'Category name required' });
+    db.prepare('UPDATE channel_categories SET name = ? WHERE id = ?').run(name, cat.id);
+  }
+  broadcastChannels(srv.id);
+  res.json({ category: db.prepare('SELECT * FROM channel_categories WHERE id = ?').get(cat.id) });
+});
+
+app.delete('/api/servers/:id/categories/:catId', auth, (req, res) => {
+  const srv = getServerForUser(req.params.id, req.user.id);
+  if (!srv) return res.status(404).json({ error: 'Server not found' });
+  if (!isServerAdmin(srv, req.user.id)) return res.status(403).json({ error: 'Only the owner and admins can manage channels' });
+  const cat = db.prepare('SELECT * FROM channel_categories WHERE id = ? AND server_id = ?').get(req.params.catId, srv.id);
+  if (!cat) return res.status(404).json({ error: 'Category not found' });
+  /* Channels inside the category are kept — they simply become uncategorised. */
+  db.prepare('UPDATE channels SET category_id = NULL WHERE category_id = ?').run(cat.id);
+  db.prepare('DELETE FROM channel_categories WHERE id = ?').run(cat.id);
+  broadcastChannels(srv.id);
+  res.json({ ok: true, id: cat.id });
 });
 
 /* Rename / re-topic a channel (owner + admins). */
@@ -951,6 +1053,19 @@ app.patch('/api/servers/:id/channels/:cid', auth, (req, res) => {
     updates.push('name = ?'); values.push(String(req.body.name).trim().toLowerCase().replace(/\s+/g, '-').slice(0, 40));
   }
   if ('topic' in req.body) { updates.push('topic = ?'); values.push(String(req.body.topic || '').slice(0, 200)); }
+  if ('category_id' in req.body) {
+    const cid = req.body.category_id || null;
+    let ok = null;
+    if (cid) {
+      const cat = db.prepare('SELECT id FROM channel_categories WHERE id = ? AND server_id = ?').get(cid, srv.id);
+      if (cat) ok = cat.id;
+    }
+    updates.push('category_id = ?'); values.push(ok);
+  }
+  if ('slow_mode' in req.body) {
+    const n = Math.max(0, Math.min(21600, parseInt(req.body.slow_mode, 10) || 0));
+    updates.push('slow_mode = ?'); values.push(n);
+  }
   if (updates.length) {
     values.push(ch.id);
     db.prepare(`UPDATE channels SET ${updates.join(', ')} WHERE id = ?`).run(...values);
@@ -1331,6 +1446,18 @@ app.post('/api/channels/:id/messages', auth, (req, res) => {
   if (!srv) return res.status(403).json({ error: 'Not a member of this server' });
   const { content, attachment_url, attachment_name, attachment_type, attachment_size, reply_to_id } = req.body || {};
   if ((!content || !content.trim()) && !attachment_url) return res.status(400).json({ error: 'Message cannot be empty' });
+
+  const sSettings = getServerSettings(srv.id);
+
+  /* Explicit Content Filter: when the server owner turns it on, messages that
+     contain explicit language or an explicit-looking attachment are rejected
+     before they are stored. Nothing is deleted — the message simply never
+     enters the channel. */
+  if (sSettings.explicit_filter) {
+    const bad = explicitContentReason(content, attachment_type, attachment_name);
+    if (bad) return res.status(400).json({ error: 'Blocked by the Explicit Content Filter: ' + bad });
+  }
+
   const id = newId();
   const now = Date.now();
   const mentionIds = parseMentionIds(content).filter(uid => uid !== req.user.id);
@@ -1346,6 +1473,28 @@ app.post('/api/channels/:id/messages', auth, (req, res) => {
     const orig = db.prepare('SELECT * FROM messages WHERE id = ?').get(reply_to_id);
     if (orig && orig.user_id !== req.user.id) createNotification(orig.user_id, 'reply', Object.assign({ message: full }, ctx));
   }
+
+  /* @everyone / @here. Gated by the server's "Allow @everyone / @here" setting,
+     and only the owner + admins may use it (so a random member cannot spam the
+     whole server). @here only reaches people who are currently online. */
+  const ping = parseBroadcastPing(content);
+  if (ping) {
+    const privileged = srv.owner_id === req.user.id || isServerAdmin(srv, req.user.id);
+    if (!sSettings.allow_everyone) {
+      /* Silently drop the ping; the message itself still posts. */
+    } else if (!privileged) {
+      /* Members without a role cannot broadcast. */
+    } else {
+      const members = db.prepare('SELECT user_id FROM server_members WHERE server_id = ?').all(srv.id).map(r => r.user_id);
+      const targets = ping === 'here' ? members.filter(uid => onlineUids.has(uid)) : members;
+      for (const uid of targets) {
+        if (uid === req.user.id) continue;
+        createNotification(uid, ping, Object.assign({ message: full, author_id: req.user.id }, ctx));
+      }
+      io.to(`channel:${ch.id}`).emit('broadcast_ping', { channel_id: ch.id, kind: ping, user_id: req.user.id });
+    }
+  }
+
   res.json({ message: full });
 });
 
@@ -1457,15 +1606,19 @@ app.delete('/api/messages/:id/pin', auth, (req, res) => {
 
 /* ---------------- Direct Messages ---------------- */
 app.get('/api/dms', auth, (req, res) => {
-  const rows = db.prepare(`SELECT d.* FROM dm_channels d
+  /* Most recent conversation first: order by the newest message in the thread,
+     falling back to when the thread was opened for empty conversations. */
+  const rows = db.prepare(`SELECT d.*,
+      COALESCE((SELECT MAX(m.created_at) FROM messages m WHERE m.dm_id = d.id), d.created_at) AS last_activity
+    FROM dm_channels d
     WHERE (d.user1_id = ? OR d.user2_id = ?)
       AND NOT EXISTS (SELECT 1 FROM dm_hidden h WHERE h.dm_id = d.id AND h.user_id = ?)
-    ORDER BY d.created_at DESC`).all(req.user.id, req.user.id, req.user.id);
+    ORDER BY last_activity DESC`).all(req.user.id, req.user.id, req.user.id);
   const dms = rows.map(d => {
     const otherId = d.user1_id === req.user.id ? d.user2_id : d.user1_id;
     const other = db.prepare('SELECT * FROM users WHERE id = ?').get(otherId);
     const last = db.prepare('SELECT * FROM messages WHERE dm_id = ? ORDER BY created_at DESC LIMIT 1').get(d.id);
-    return { id: d.id, user: publicUser(other), last_message: last ? messageWithMeta(last, req.user.id) : null };
+    return { id: d.id, user: publicUser(other), last_activity: d.last_activity, last_message: last ? messageWithMeta(last, req.user.id) : null };
   });
   res.json({ dms });
 });

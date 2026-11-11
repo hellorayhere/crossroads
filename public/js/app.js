@@ -34,6 +34,10 @@ const state = {
   settings: {},
   serverSettings: null,
   roles: [],
+  /* Channel categories (Discord-style collapsible groups). Visible to every
+     member, not just admins. collapsedCats remembers which groups are folded. */
+  categories: [],
+  collapsedCats: {},
   mention: { active: false, query: '', items: [], sel: 0, start: 0 }
 };
 
@@ -181,6 +185,8 @@ const ICONS = {
   'more-horizontal': '<circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/>',
   'calendar-days': '<rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/>',
   'note': '<path d="M15.5 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V8.5L15.5 3z"/><path d="M15 3v6h6"/>',
+  'folder': '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>',
+  'megaphone': '<path d="M3 11l18-8-3 18-6-5-3 3v-5z"/>',
   'image': '<rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/>',
   'film': '<rect x="2" y="2" width="20" height="20" rx="2.18" ry="2.18"/><line x1="7" y1="2" x2="7" y2="22"/><line x1="17" y1="2" x2="17" y2="22"/><line x1="2" y1="12" x2="22" y2="12"/><line x1="2" y1="7" x2="7" y2="7"/><line x1="2" y1="17" x2="7" y2="17"/><line x1="17" y1="17" x2="22" y2="17"/><line x1="17" y1="7" x2="22" y2="7"/>',
   'crown': '<path d="M5 16L3 5l5.5 5L12 4l3.5 6L21 5l-2 11H5z"/><path d="M5 19h14"/>',
@@ -1484,14 +1490,13 @@ async function openServer(id) {
   state.view = 'home';
   state.server = data.server;
   state.channels = data.channels;
+  state.categories = data.categories || [];
   state.members = data.members;
   state.serverSettings = data.settings || null;
   state.roles = data.roles || [];
   state.dm = null;
   setReplyTo(null);
   for (const m of data.members) state.usersCache[m.id] = m;
-  /* Seed current voice occupancy so connected members show up immediately. */
-  try { const v = await api('/api/servers/' + id + '/voice'); voice.states = v.states || {}; } catch (e) { voice.states = {}; }
   renderRail();
   $('rail-home').classList.remove('active');
   $('sidebar-name').textContent = data.server.name;
@@ -1504,6 +1509,14 @@ async function openServer(id) {
   if (firstText) openChannel(firstText.id);
   else { state.channel = null; renderEmptyChat('No text channels yet'); $('composer').classList.add('hidden'); }
   animateView();
+  /* Seed current voice occupancy in the background so opening a server never
+     waits on a second round-trip before the channel list appears. */
+  api('/api/servers/' + id + '/voice').then((v) => {
+    if (!state.server || state.server.id !== id) return;
+    voice.states = v.states || {};
+    renderVoicePanel();
+    renderChannelList();
+  }).catch(() => { /* voice occupancy is optional */ });
 }
 
 /* Show the server's banner directly under the server name in the sidebar. */
@@ -1522,46 +1535,97 @@ function syncSidebarBanner(animate) {
   }
 }
 
+function createChannelBtn(type, catId) {
+  const el = document.createElement('div');
+  el.className = 'channel-add';
+  el.innerHTML = `${icon('plus')} ${t('Create Channel')}`;
+  el.addEventListener('click', () => openCreateChannel(type, catId || null));
+  return el;
+}
+
+function createCategoryBtn() {
+  const el = document.createElement('div');
+  el.className = 'channel-add';
+  el.innerHTML = `${icon('plus')} ${t('Create Category')}`;
+  el.addEventListener('click', () => createCategory());
+  return el;
+}
+
+/* Render the channel list. Categories are collapsible groups that every member
+   sees (not just admins). Channels with no category float above the first
+   group, exactly like Discord. When a server has no categories we keep the
+   classic Text / Voice split so nothing regresses. */
 function renderChannelList() {
   const list = $('channel-list');
+  if (!list) return;
   list.innerHTML = '';
-  const textChannels = state.channels.filter(c => c.type === 'text');
-  const voiceChannels = state.channels.filter(c => c.type === 'voice');
   const admin = amIAdmin();
+  const cats = (state.categories || []).slice().sort((a, b) => (a.position || 0) - (b.position || 0));
+  const chans = (state.channels || []).slice().sort((a, b) => (a.position || 0) - (b.position || 0));
 
-  const tcat = document.createElement('div');
-  tcat.className = 'channel-category';
-  tcat.innerHTML = `${icon('caret-down')} ${t('Text Channels')}`;
-  list.appendChild(tcat);
-  for (const c of textChannels) list.appendChild(channelRow(c));
-  if (admin) {
-    const tadd = document.createElement('div');
-    tadd.className = 'channel-add';
-    tadd.innerHTML = `${icon('plus')} ${t('Create Channel')}`;
-    tadd.addEventListener('click', () => openCreateChannel('text'));
-    list.appendChild(tadd);
+  const appendChannel = (c) => {
+    if (c.type === 'voice') {
+      const wrap = document.createElement('div');
+      wrap.className = 'voice-chan-wrap';
+      wrap.dataset.cid = c.id;
+      wrap.appendChild(channelRow(c));
+      const mem = voiceMembersNode(c.id);
+      if (mem) wrap.appendChild(mem);
+      list.appendChild(wrap);
+    } else {
+      list.appendChild(channelRow(c));
+    }
+  };
+
+  if (!cats.length) {
+    const textChannels = chans.filter(c => c.type === 'text');
+    const voiceChannels = chans.filter(c => c.type === 'voice');
+    const tcat = document.createElement('div');
+    tcat.className = 'channel-category';
+    tcat.innerHTML = `${icon('caret-down')} ${t('Text Channels')}`;
+    list.appendChild(tcat);
+    for (const c of textChannels) appendChannel(c);
+    if (admin) list.appendChild(createChannelBtn('text', null));
+    const vcat = document.createElement('div');
+    vcat.className = 'channel-category';
+    vcat.innerHTML = `${icon('caret-down')} ${t('Voice Channels')}`;
+    list.appendChild(vcat);
+    for (const c of voiceChannels) appendChannel(c);
+    if (admin) list.appendChild(createChannelBtn('voice', null));
+    if (admin) list.appendChild(createCategoryBtn());
+    return;
   }
 
-  const vcat = document.createElement('div');
-  vcat.className = 'channel-category';
-  vcat.innerHTML = `${icon('caret-down')} ${t('Voice Channels')}`;
-  list.appendChild(vcat);
-  for (const c of voiceChannels) {
-    const wrap = document.createElement('div');
-    wrap.className = 'voice-chan-wrap';
-    wrap.dataset.cid = c.id;
-    wrap.appendChild(channelRow(c));
-    const mem = voiceMembersNode(c.id);
-    if (mem) wrap.appendChild(mem);
-    list.appendChild(wrap);
+  const catIds = new Set(cats.map(c => c.id));
+  const uncategorised = chans.filter(c => !c.category_id || !catIds.has(c.category_id));
+  for (const c of uncategorised) appendChannel(c);
+  if (admin && uncategorised.length) list.appendChild(createChannelBtn('text', null));
+
+  for (const cat of cats) {
+    const collapsed = !!state.collapsedCats[cat.id];
+    const header = document.createElement('div');
+    header.className = 'channel-category' + (collapsed ? ' collapsed' : '');
+    header.dataset.cat = cat.id;
+    header.innerHTML = `<span class="cat-caret">${icon(collapsed ? 'chevron-right' : 'caret-down')}</span>` +
+      `<span class="cat-name">${escapeHtml(cat.name)}</span>` +
+      (admin ? `<span class="cat-actions"><span class="cat-add" title="Create channel">${icon('plus')}</span></span>` : '');
+    header.addEventListener('click', (e) => {
+      if (e.target.closest('.cat-add')) return;
+      state.collapsedCats[cat.id] = !collapsed;
+      renderChannelList();
+    });
+    const addBtn = header.querySelector('.cat-add');
+    if (addBtn) addBtn.addEventListener('click', (e) => { e.stopPropagation(); openCreateChannel('text', cat.id); });
+    header.addEventListener('contextmenu', (e) => { e.preventDefault(); e.stopPropagation(); openCategoryContextMenu(e.clientX, e.clientY, cat.id); });
+    if (admin) wireCategoryDrop(header, cat.id);
+    list.appendChild(header);
+    if (!collapsed) {
+      const inCat = chans.filter(c => c.category_id === cat.id);
+      for (const c of inCat) appendChannel(c);
+      if (admin) list.appendChild(createChannelBtn('text', cat.id));
+    }
   }
-  if (admin) {
-    const vadd = document.createElement('div');
-    vadd.className = 'channel-add';
-    vadd.innerHTML = `${icon('plus')} ${t('Create Channel')}`;
-    vadd.addEventListener('click', () => openCreateChannel('voice'));
-    list.appendChild(vadd);
-  }
+  if (admin) list.appendChild(createCategoryBtn());
 }
 
 let dragChannelId = null;
@@ -1572,38 +1636,37 @@ function channelRow(c) {
     (c.type === 'voice' && voice.channel && voice.channel.id === c.id ? ' voice-active' : '');
   row.dataset.cid = c.id;
   row.dataset.ctype = c.type;
+  row.dataset.cat = c.category_id || '';
   const admin = amIAdmin();
   const ic = c.type === 'voice' ? icon('volume-high') : icon('hash');
-  const grip = admin ? `<span class="ch-grip" title="Drag to reorder">${icon('grip')}</span>` : '';
+  const grip = admin ? `<span class="ch-grip" title="Drag to reorder or move between categories">${icon('grip')}</span>` : '';
   row.innerHTML = `${grip}<span class="hash">${ic}</span><span class="ch-name">${escapeHtml(c.name)}</span>${badgeHTML(channelMentionCount(c.id))}`;
-  if (admin) row.classList.add('draggable');
+  if (admin) { row.classList.add('draggable'); row.draggable = true; wireChannelDrag(row, c); }
   row.addEventListener('click', () => {
     if (c.type === 'voice') { joinVoiceChannel(c.id); return; }
     openChannel(c.id);
   });
-  if (admin) wireChannelDrag(row, c);
   return row;
 }
 
-/* Drag-and-drop reordering of channels (owner + admins). Reordering is limited
-   to channels of the same type so text and voice lists stay independent. */
+function clearDropMarks() {
+  document.querySelectorAll('.channel.dragging, .channel.drop-before, .channel.drop-after, .channel-category.drop-into')
+    .forEach(el => el.classList.remove('dragging', 'drop-before', 'drop-after', 'drop-into'));
+}
+
+/* Drag a channel onto another channel (reorder / move into its category) or
+   onto a category header (append to that category). Works across types. */
 function wireChannelDrag(row, c) {
-  row.draggable = true;
   row.addEventListener('dragstart', (e) => {
     dragChannelId = c.id;
     row.classList.add('dragging');
     try { e.dataTransfer.setData('text/plain', c.id); e.dataTransfer.effectAllowed = 'move'; } catch (err) { /* ignore */ }
   });
-  row.addEventListener('dragend', () => {
-    dragChannelId = null;
-    document.querySelectorAll('.channel.dragging, .channel.drop-before, .channel.drop-after')
-      .forEach(el => el.classList.remove('dragging', 'drop-before', 'drop-after'));
-  });
+  row.addEventListener('dragend', () => { dragChannelId = null; clearDropMarks(); });
   row.addEventListener('dragover', (e) => {
     if (!dragChannelId || dragChannelId === c.id) return;
-    const dragged = state.channels.find(x => x.id === dragChannelId);
-    if (!dragged || dragged.type !== c.type) return;
     e.preventDefault();
+    e.stopPropagation();
     e.dataTransfer.dropEffect = 'move';
     const rect = row.getBoundingClientRect();
     const after = e.clientY > rect.top + rect.height / 2;
@@ -1613,41 +1676,68 @@ function wireChannelDrag(row, c) {
   row.addEventListener('dragleave', () => row.classList.remove('drop-before', 'drop-after'));
   row.addEventListener('drop', (e) => {
     e.preventDefault();
+    e.stopPropagation();
     const after = row.classList.contains('drop-after');
     row.classList.remove('drop-before', 'drop-after');
     if (!dragChannelId || dragChannelId === c.id) return;
-    reorderChannels(dragChannelId, c.id, after);
+    applyChannelMove(dragChannelId, c.category_id || null, c.id, after);
   });
 }
 
-async function reorderChannels(dragId, targetId, after) {
+function wireCategoryDrop(el, catId) {
+  el.addEventListener('dragover', (e) => {
+    if (!dragChannelId) return;
+    e.preventDefault();
+    e.stopPropagation();
+    e.dataTransfer.dropEffect = 'move';
+    el.classList.add('drop-into');
+  });
+  el.addEventListener('dragleave', () => el.classList.remove('drop-into'));
+  el.addEventListener('drop', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    el.classList.remove('drop-into');
+    if (!dragChannelId) return;
+    applyChannelMove(dragChannelId, catId || null, null, false);
+  });
+}
+
+/* Move a channel to a new category and/or position, optimistically updating the
+   UI then persisting the full ordering (with category ids) to the server. */
+async function applyChannelMove(dragId, targetCategoryId, targetId, after) {
   const dragged = state.channels.find(x => x.id === dragId);
-  const target = state.channels.find(x => x.id === targetId);
-  if (!dragged || !target || dragged.type !== target.type) return;
-  const sameType = state.channels.filter(x => x.type === dragged.type);
-  const rest = sameType.filter(x => x.id !== dragId);
-  let idx = rest.findIndex(x => x.id === targetId);
-  if (idx < 0) idx = rest.length;
-  if (after) idx += 1;
-  rest.splice(idx, 0, dragged);
-  const textOrder = dragged.type === 'text' ? rest : state.channels.filter(x => x.type === 'text');
-  const voiceOrder = dragged.type === 'voice' ? rest : state.channels.filter(x => x.type === 'voice');
-  const order = textOrder.concat(voiceOrder).map(x => x.id);
-  /* Optimistic local re-render so the move feels instant. */
-  const byId = new Map(state.channels.map(x => [x.id, x]));
-  state.channels = order.map((id, i) => { const ch = byId.get(id); ch.position = i; return ch; });
+  if (!dragged || !state.server) return;
+  const cat = targetCategoryId || null;
+  let ordered = state.channels.slice().sort((a, b) => (a.position || 0) - (b.position || 0));
+  ordered = ordered.filter(x => x.id !== dragId);
+  dragged.category_id = cat;
+  let insertAt;
+  if (targetId) {
+    const ti = ordered.findIndex(x => x.id === targetId);
+    insertAt = ti < 0 ? ordered.length : (after ? ti + 1 : ti);
+  } else {
+    let last = -1;
+    ordered.forEach((x, i) => { if ((x.category_id || null) === cat) last = i; });
+    insertAt = last >= 0 ? last + 1 : ordered.length;
+  }
+  ordered.splice(insertAt, 0, dragged);
+  ordered.forEach((x, i) => { x.position = i; });
+  state.channels = ordered;
   renderChannelList();
+  const order = ordered.map(x => ({ id: x.id, category_id: x.category_id || null }));
   try {
     await api('/api/servers/' + state.server.id + '/channels/order', { method: 'PATCH', body: JSON.stringify({ order }) });
   } catch (e) { toast(e.message, 'error'); }
 }
 
 async function moveChannelBy(c, dir) {
-  const sameType = state.channels.filter(x => x.type === c.type);
-  const idx = sameType.findIndex(x => x.id === c.id);
+  const sameCat = state.channels
+    .filter(x => (x.category_id || null) === (c.category_id || null))
+    .sort((a, b) => (a.position || 0) - (b.position || 0));
+  const idx = sameCat.findIndex(x => x.id === c.id);
   const j = idx + dir;
-  if (j < 0 || j >= sameType.length) return;
-  await reorderChannels(c.id, sameType[j].id, dir > 0);
+  if (j < 0 || j >= sameCat.length) return;
+  await applyChannelMove(c.id, c.category_id || null, sameCat[j].id, dir > 0);
 }
 
 async function openChannel(cid) {
@@ -2926,6 +3016,8 @@ function notifInfo(n) {
   else if (n.type === 'friend_accepted') { ico = 'user-check'; plain = `${name} accepted your friend request`; html = `<b>${escapeHtml(name)}</b> accepted your friend request`; }
   else if (n.type === 'mention') { ico = 'at-sign'; plain = `${name} mentioned you ${where}`; html = `<b>${escapeHtml(name)}</b> mentioned you ${escapeHtml(where)}`; }
   else if (n.type === 'reply') { ico = 'reply'; plain = `${name} replied to you ${where}`; html = `<b>${escapeHtml(name)}</b> replied to you ${escapeHtml(where)}`; }
+  else if (n.type === 'everyone') { ico = 'megaphone'; plain = `${name} pinged @everyone ${where}`; html = `<b>${escapeHtml(name)}</b> pinged <b>@everyone</b> ${escapeHtml(where)}`; }
+  else if (n.type === 'here') { ico = 'megaphone'; plain = `${name} pinged @here ${where}`; html = `<b>${escapeHtml(name)}</b> pinged <b>@here</b> ${escapeHtml(where)}`; }
   return { ico, plain, html, preview, user: u, where };
 }
 
@@ -3585,7 +3677,10 @@ function openJoinServer(prefill) {
   $('js-invite').focus();
 }
 
-function openCreateChannel(type) {
+function openCreateChannel(type, categoryId) {
+  const cats = (state.categories || []).slice().sort((a, b) => (a.position || 0) - (b.position || 0));
+  const catOpts = `<option value="">No category</option>` +
+    cats.map(k => `<option value="${k.id}"${categoryId === k.id ? ' selected' : ''}>${escapeHtml(k.name)}</option>`).join('');
   openModal(`
     <h3>Create ${type === 'voice' ? 'Voice' : 'Text'} Channel</h3>
     <p class="msub">in ${escapeHtml(state.server ? state.server.name : '')}</p>
@@ -3593,6 +3688,8 @@ function openCreateChannel(type) {
       <input id="cc-name" placeholder="${type === 'voice' ? 'e.g. Lounge, Game Night\u2026' : 'e.g. general-chat, announcements\u2026'}" maxlength="40"></div>
     <div class="field"><label>Topic (optional)</label>
       <input id="cc-topic" placeholder="Give this channel a short purpose or topic\u2026"></div>
+    ${cats.length ? `<div class="field"><label>Category</label>
+      <select id="cc-cat">${catOpts}</select></div>` : ''}
     <div class="modal-actions">
       <button class="btn secondary" id="cc-cancel">Cancel</button>
       <button class="btn" id="cc-create">Create Channel</button>
@@ -3601,18 +3698,109 @@ function openCreateChannel(type) {
   $('cc-create').addEventListener('click', async () => {
     const name = $('cc-name').value.trim().toLowerCase().replace(/\s+/g, '-');
     const topic = $('cc-topic').value.trim();
+    const catId = $('cc-cat') ? ($('cc-cat').value || null) : (categoryId || null);
     if (!name) { toast('Channel name required', 'error'); return; }
     try {
-      await api('/api/servers/' + state.server.id + '/channels', { method: 'POST', body: JSON.stringify({ name, type, topic }) });
+      await api('/api/servers/' + state.server.id + '/channels', { method: 'POST', body: JSON.stringify({ name, type, topic, category_id: catId }) });
       closeModal();
       const data = await api('/api/servers/' + state.server.id);
-      state.channels = data.channels; renderChannelList();
+      state.channels = data.channels; state.categories = data.categories || state.categories; renderChannelList();
       const created = data.channels.find(c => c.name === name && c.type === type);
       if (created && type === 'text') openChannel(created.id);
       toast('Channel created', 'success');
     } catch (e) { toast(e.message, 'error'); }
   });
   $('cc-name').focus();
+}
+
+/* ---------- Category management (owner / admins) ---------- */
+async function createCategory() {
+  const name = await promptDialog({ title: 'Create Category', body: 'Group related channels under a collapsible header.', label: 'Category name', value: '', confirmText: 'Create Category', maxlength: 40, placeholder: 'e.g. Text Channels, Voice, Staff' });
+  if (name === null) return;
+  const clean = name.trim();
+  if (!clean) { toast('Category name cannot be empty', 'error'); return; }
+  try {
+    await api('/api/servers/' + state.server.id + '/categories', { method: 'POST', body: JSON.stringify({ name: clean }) });
+    toast('Category created', 'success');
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+async function renameCategory(cat) {
+  const name = await promptDialog({ title: 'Rename Category', label: 'Category name', value: cat.name, confirmText: 'Rename', maxlength: 40 });
+  if (name === null) return;
+  const clean = name.trim();
+  if (!clean) { toast('Category name cannot be empty', 'error'); return; }
+  try {
+    await api('/api/servers/' + state.server.id + '/categories/' + cat.id, { method: 'PATCH', body: JSON.stringify({ name: clean }) });
+    toast('Category renamed', 'success');
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+async function deleteCategory(cat) {
+  const count = state.channels.filter(c => c.category_id === cat.id).length;
+  const ok = await confirmDialog({ title: 'Delete Category', body: `Delete <b>${escapeHtml(cat.name)}</b>? ${count ? `Its ${count} channel${count === 1 ? '' : 's'} will move to the top of the list and stay intact.` : 'This category is empty.'}`, confirmText: 'Delete Category', danger: true });
+  if (!ok) return;
+  try {
+    await api('/api/servers/' + state.server.id + '/categories/' + cat.id, { method: 'DELETE' });
+    toast('Category deleted', 'success');
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+function openCategoryContextMenu(x, y, catId) {
+  const cat = (state.categories || []).find(k => k.id === catId);
+  if (!cat) return;
+  const items = [];
+  if (amIAdmin()) {
+    items.push({ label: 'Create Channel Here', icon: 'plus', onClick: () => openCreateChannel('text', cat.id) });
+    items.push({ sep: true });
+    items.push({ label: 'Rename Category', icon: 'pencil', onClick: () => renameCategory(cat) });
+    items.push({ label: 'Delete Category', icon: 'trash', danger: true, onClick: () => deleteCategory(cat) });
+  } else {
+    items.push({ label: cat.name, icon: 'folder', onClick: () => {} });
+  }
+  showContextMenu(x, y, items);
+}
+
+/* ---------- Full channel editor (owner / admins) ---------- */
+function openEditChannel(c) {
+  if (!amIAdmin()) return;
+  const cats = (state.categories || []).slice().sort((a, b) => (a.position || 0) - (b.position || 0));
+  const catOpts = `<option value="">No category</option>` +
+    cats.map(k => `<option value="${k.id}"${(c.category_id || '') === k.id ? ' selected' : ''}>${escapeHtml(k.name)}</option>`).join('');
+  const slow = c.slow_mode || 0;
+  openModal(`
+    <h3>Edit Channel</h3>
+    <p class="msub">#${escapeHtml(c.name)} \u00b7 ${c.type === 'voice' ? 'Voice' : 'Text'} channel</p>
+    <div class="field"><label>Channel Name <span class="req">*</span></label>
+      <input id="ec-name" value="${escapeHtml(c.name)}" maxlength="40"></div>
+    <div class="field"><label>Topic</label>
+      <input id="ec-topic" value="${escapeHtml(c.topic || '')}" placeholder="What is this channel about?" maxlength="200"></div>
+    <div class="field"><label>Category</label>
+      <select id="ec-cat">${catOpts}</select></div>
+    <div class="field"><label>Slow Mode (seconds between messages)</label>
+      <input id="ec-slow" type="number" min="0" max="21600" value="${slow}">
+      <div class="hint">0 = off. Members must wait this long between messages.</div></div>
+    <div class="modal-actions">
+      <button class="btn secondary" id="ec-cancel">Cancel</button>
+      <button class="btn" id="ec-save">${icon('check')} Save Changes</button>
+    </div>`);
+  $('ec-cancel').addEventListener('click', closeModal);
+  $('ec-save').addEventListener('click', async () => {
+    const name = $('ec-name').value.trim().toLowerCase().replace(/\s+/g, '-');
+    if (!name) { toast('Channel name required', 'error'); return; }
+    const payload = {
+      name,
+      topic: $('ec-topic').value.trim(),
+      category_id: $('ec-cat').value || null,
+      slow_mode: Math.max(0, Math.min(21600, parseInt($('ec-slow').value, 10) || 0))
+    };
+    try {
+      await api('/api/servers/' + state.server.id + '/channels/' + c.id, { method: 'PATCH', body: JSON.stringify(payload) });
+      closeModal();
+      toast('Channel updated', 'success');
+    } catch (e) { toast(e.message, 'error'); }
+  });
+  $('ec-name').focus();
 }
 
 async function openNewDM() {
@@ -5096,8 +5284,8 @@ function renderSafetyTab(body, s) {
         <div class="hint">Where join and moderation notices are posted.</div>
       </div>
     </div>
-    <div class="set-row"><div><div class="sr-title">Explicit Content Filter</div><div class="sr-desc">Scan and block messages containing explicit media.</div></div><div class="toggle${st.explicit_filter ? ' on' : ''}" data-ss-toggle="explicit_filter"></div></div>
-    <div class="set-row"><div><div class="sr-title">Allow @everyone / @here</div><div class="sr-desc">Let members ping the whole server or everyone online.</div></div><div class="toggle${st.allow_everyone ? ' on' : ''}" data-ss-toggle="allow_everyone"></div></div>
+    <div class="set-row"><div><div class="sr-title">Explicit Content Filter</div><div class="sr-desc">Block messages and attachment names that contain explicit language or media. Blocked messages are never posted.</div></div><div class="toggle${st.explicit_filter ? ' on' : ''}" data-ss-toggle="explicit_filter"></div></div>
+    <div class="set-row"><div><div class="sr-title">Allow @everyone / @here</div><div class="sr-desc">Let the owner and admins ping the whole server (@everyone) or only members who are online (@here). When off, these pings are ignored.</div></div><div class="toggle${st.allow_everyone ? ' on' : ''}" data-ss-toggle="allow_everyone"></div></div>
     ${admin ? `<div class="ss-actions"><button class="btn" id="ss-save-settings">${icon('check')} Save Settings</button></div>` : '<div class="ss-note">Only the owner and admins can edit these settings.</div>'}
   `;
   hydrateIcons(body);
@@ -5226,8 +5414,11 @@ function openChannelContextMenu(x, y, cid) {
   if (!c) return;
   const items = [];
   if (amIAdmin()) {
-    items.push({ label: 'New Text Channel', icon: 'plus', onClick: () => openCreateChannel('text') });
-    items.push({ label: 'New Voice Channel', icon: 'volume-high', onClick: () => openCreateChannel('voice') });
+    items.push({ label: 'Edit Channel', icon: 'sliders', onClick: () => openEditChannel(c) });
+    items.push({ sep: true });
+    items.push({ label: 'New Text Channel', icon: 'plus', onClick: () => openCreateChannel('text', c.category_id || null) });
+    items.push({ label: 'New Voice Channel', icon: 'volume-high', onClick: () => openCreateChannel('voice', c.category_id || null) });
+    items.push({ label: 'New Category', icon: 'folder', onClick: () => createCategory() });
     items.push({ sep: true });
     items.push({ label: 'Rename Channel', icon: 'pencil', onClick: () => renameChannel(c) });
     items.push({ label: 'Edit Channel Topic', icon: 'note', onClick: () => editChannelTopic(c) });
