@@ -116,7 +116,7 @@ button:active, .rail-item:active, .channel:active, .dm-item:active, .member:acti
 
 @keyframes fade { from { opacity: 0; } to { opacity: 1; } }
 @keyframes pop { from { transform: scale(.97); opacity: 0; } to { transform: scale(1); opacity: 1; } }
-@keyframes toastIn { from { opacity: 0; transform: translateY(12px) scale(.97); } to { opacity: 1; transform: translateY(0) scale(1); } }
+@keyframes toastIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
 @keyframes msgIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
 @keyframes viewEnter { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
 @keyframes navPop { 0% { transform: scale(.9); } 55% { transform: scale(1.06); } 100% { transform: scale(1); } }
@@ -742,11 +742,30 @@ button:active, .rail-item:active, .channel:active, .dm-item:active, .member:acti
 .dm-item .dm-name { font-size: 15px; font-weight: 500; color: var(--text-muted); flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .dm-item.active .dm-name, .dm-item:hover .dm-name { color: var(--text-normal); }
 
-.toast-wrap { position: fixed; bottom: 28px; left: 50%; transform: translateX(-50%); z-index: 400; display: flex; flex-direction: column; align-items: center; gap: 8px; pointer-events: none; }
-.toast { background: var(--menu-bg); color: var(--text-header); padding: 12px 18px; border-radius: var(--radius); font-size: 14px; box-shadow: var(--elevation-lg); animation: toastIn .24s ease; border-left: 3px solid var(--brand); pointer-events: auto; max-width: 440px; }
+/* Toasts are embedded in the app shell: anchored to the bottom-right of the
+   content area, flat surface, hairline border, no floating drop shadow. */
+.toast-wrap { position: fixed; right: 18px; bottom: 78px; left: auto; transform: none; z-index: 400; display: flex; flex-direction: column; align-items: flex-end; gap: 6px; pointer-events: none; }
+.toast {
+  background: color-mix(in srgb, var(--bg-base) 88%, var(--text-header));
+  color: var(--text-header);
+  padding: 9px 13px;
+  border-radius: var(--radius-sm);
+  font-size: 13.5px;
+  line-height: 1.35;
+  border: 1px solid var(--divider);
+  border-left: 2px solid var(--brand);
+  box-shadow: none;
+  animation: toastIn .16s ease;
+  pointer-events: auto;
+  max-width: 360px;
+}
 .toast.error, .toast.alert { border-left-color: var(--red); }
-.toast.alert { background: linear-gradient(90deg, rgba(242,63,67,.18), var(--menu-bg)); }
+.toast.alert { background: color-mix(in srgb, var(--bg-base) 88%, var(--text-header)); }
 .toast.success { border-left-color: var(--green); }
+@media (max-width: 640px) {
+  .toast-wrap { left: 12px; right: 12px; bottom: 84px; align-items: stretch; }
+  .toast { max-width: none; }
+}
 
 .empty-state { flex: 1; display: grid; place-items: center; text-align: center; padding: 40px; }
 .empty-state .inner { max-width: 440px; }
@@ -1784,3 +1803,31 @@ body[data-theme="light"] .oprofile-modal .bio-link { color: #0066cc; }
 .cs-type:hover { background: var(--hover); color: var(--text-normal); }
 .cs-type.sel { background: color-mix(in srgb, var(--brand) 16%, transparent); border-color: var(--brand); color: var(--text-header); }
 @media (max-width: 640px) { .cs-grid { grid-template-columns: 1fr; } .cs-preview { position: static; } }
+
+/* ---------------- Inline upload progress (replaces the old upload toast) ---------------- */
+.attach-preview .ap-uploading { display: flex; align-items: center; gap: 10px; width: 100%; }
+.attach-preview .ap-spin {
+  width: 16px; height: 16px; flex: 0 0 auto; border-radius: 50%;
+  border: 2px solid var(--divider);
+  border-top-color: var(--brand);
+  animation: apSpin .7s linear infinite;
+}
+@keyframes apSpin { to { transform: rotate(360deg); } }
+
+/* ---------------- Settings: discard / save footer ---------------- */
+.settings-dirty-note {
+  align-self: center;
+  font-size: 12.5px;
+  color: var(--text-muted);
+  margin-right: 2px;
+}
+.settings-dirty-note::before {
+  content: '';
+  display: inline-block;
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: var(--yellow, #f0b232);
+  margin-right: 6px;
+  vertical-align: middle;
+}
+.settings-footer .btn[disabled] { opacity: .45; cursor: default; pointer-events: none; }

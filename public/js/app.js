@@ -561,12 +561,20 @@ function promptDialog(opts = {}) {
    ============================================================ */
 const TAB_OFFLINE_MS = 3 * 60 * 1000;
 const IDLE_MS = 5 * 60 * 1000;
+/* One low-frequency tick drives everything. Browsers throttle (and after a
+   while freeze) timers in hidden tabs, so a single 3-minute setTimeout can be
+   delayed by minutes or never fire at all. Comparing timestamps on a short
+   interval is reliable even when the tab is in the background. */
+const PRESENCE_TICK_MS = 10 * 1000;
+
 let myChosenStatus = (me && me.status) || 'online';
 let tabAwayOffline = false;
 let userIsIdle = false;
-let tabTimer = null;
-let idleTimer = null;
+let hiddenAt = 0;
+let lastActivityAt = Date.now();
+let lastPushedStatus = null;
 let presenceReady = false;
+let presenceTicks = 0;
 
 function computeEffectiveStatus() {
   if (tabAwayOffline) return 'offline';
@@ -574,26 +582,57 @@ function computeEffectiveStatus() {
   return myChosenStatus;
 }
 
-function pushPresence() {
+function pushPresence(force) {
   if (!socket || !socket.connected) return;
-  socket.emit('set_presence', { status: computeEffectiveStatus() });
+  const status = computeEffectiveStatus();
+  if (!force && status === lastPushedStatus) return;
+  lastPushedStatus = status;
+  socket.emit('set_presence', { status });
+}
+
+/* Called on every tick and on visibility / activity changes. */
+function presenceTick() {
+  const now = Date.now();
+  presenceTicks++;
+
+  if (document.hidden) {
+    if (!hiddenAt) hiddenAt = now;
+    if (!tabAwayOffline && now - hiddenAt >= TAB_OFFLINE_MS) {
+      tabAwayOffline = true;
+      pushPresence();
+    }
+    return;
+  }
+
+  /* Back in view: the away override no longer applies. */
+  if (hiddenAt) { hiddenAt = 0; lastActivityAt = now; }
+  if (tabAwayOffline) { tabAwayOffline = false; pushPresence(); }
+
+  /* Idle only downgrades online/idle; a chosen dnd/offline is left alone. */
+  if (!userIsIdle && (myChosenStatus === 'online' || myChosenStatus === 'idle') &&
+      now - lastActivityAt >= IDLE_MS) {
+    userIsIdle = true;
+    pushPresence();
+  } else if (userIsIdle && now - lastActivityAt < IDLE_MS) {
+    /* Activity resumed (even if the event listener was missed) — clear idle. */
+    userIsIdle = false;
+    pushPresence();
+  }
+
+  /* Re-assert the effective status about once a minute so a server restart or
+     a dropped/restored socket can never leave a stale status behind. */
+  if (presenceTicks % 6 === 0) pushPresence(true);
 }
 
 function resetIdleTimer() {
-  clearTimeout(idleTimer);
-  if (document.hidden) return;
-  idleTimer = setTimeout(() => {
-    if (document.hidden) return;
-    if (myChosenStatus === 'online' || myChosenStatus === 'idle') {
-      userIsIdle = true;
-      pushPresence();
-    }
-  }, IDLE_MS);
+  lastActivityAt = Date.now();
+  if (userIsIdle) { userIsIdle = false; pushPresence(); }
 }
 
 function markActivity() {
+  if (document.hidden) return;
+  lastActivityAt = Date.now();
   if (userIsIdle) { userIsIdle = false; pushPresence(); }
-  resetIdleTimer();
 }
 
 function initPresence() {
@@ -602,28 +641,26 @@ function initPresence() {
 
   document.addEventListener('visibilitychange', () => {
     if (document.hidden) {
-      /* Do not change anything yet — only after the tab has stayed hidden for
-         the full three minutes. */
-      clearTimeout(tabTimer);
-      tabTimer = setTimeout(() => {
-        if (document.hidden) { tabAwayOffline = true; pushPresence(); }
-      }, TAB_OFFLINE_MS);
+      hiddenAt = Date.now();
     } else {
-      clearTimeout(tabTimer);
-      const wasAway = tabAwayOffline;
-      tabAwayOffline = false;
+      /* Returning counts as activity, and clears any away/idle override. */
+      hiddenAt = 0;
+      lastActivityAt = Date.now();
       userIsIdle = false;
-      if (wasAway) pushPresence();
-      resetIdleTimer();
+      tabAwayOffline = false;
+      pushPresence();
     }
+    presenceTick();
   });
 
   ['mousemove', 'mousedown', 'keydown', 'touchstart', 'scroll', 'wheel', 'pointerdown']
     .forEach(evt => window.addEventListener(evt, markActivity, { passive: true }));
 
-  window.addEventListener('focus', () => { if (tabAwayOffline) { tabAwayOffline = false; pushPresence(); } });
+  window.addEventListener('focus', () => { presenceTick(); });
+  window.addEventListener('pageshow', () => { presenceTick(); });
 
-  resetIdleTimer();
+  setInterval(presenceTick, PRESENCE_TICK_MS);
+  presenceTick();
 }
 
 /* Called whenever the user deliberately changes their status. */
@@ -632,8 +669,9 @@ function setChosenStatus(status) {
   myChosenStatus = status;
   userIsIdle = false;
   tabAwayOffline = false;
-  pushPresence();
-  resetIdleTimer();
+  hiddenAt = document.hidden ? Date.now() : 0;
+  lastActivityAt = Date.now();
+  pushPresence(true);
 }
 
 async function init() {
@@ -718,8 +756,9 @@ function connectSocket() {
     if (state.channel) socket.emit('join_channel', state.channel.id);
     if (state.dm) socket.emit('join_dm', state.dm.id);
     /* Re-assert our effective presence after a reconnect (the server keeps
-       overrides in memory only). */
-    pushPresence();
+       overrides in memory only). Force it so a fresh socket always re-sends. */
+    lastPushedStatus = null;
+    pushPresence(true);
   });
   socket.on('message', (m) => {
     if (state.channel && m.channel_id === state.channel.id) {
@@ -2552,12 +2591,20 @@ async function handleFile(file) {
   if (file.size > 25 * 1024 * 1024) { toast('File is too large (maximum 25 MB)', 'error'); return; }
   const fd = new FormData();
   fd.append('file', file);
-  toast('Uploading ' + file.name + '\u2026');
+  /* Inline progress in the composer instead of a floating toast. */
+  showUploadProgress(file.name);
   try {
     const data = await api('/api/upload', { method: 'POST', body: fd });
     state.pendingAttachment = data;
     renderAttachmentPreview();
-  } catch (e) { toast(e.message, 'error'); }
+  } catch (e) { clearAttachment(); toast(e.message, 'error'); }
+}
+function showUploadProgress(name) {
+  const p = $('attach-preview');
+  if (!p) return;
+  p.classList.remove('hidden');
+  $('composer-box').classList.add('attached');
+  p.innerHTML = `<div class="ap-uploading"><span class="ap-spin" aria-hidden="true"></span><span class="ap-name">Uploading ${escapeHtml(name)}\u2026</span></div>`;
 }
 function renderAttachmentPreview() {
   const p = $('attach-preview');
@@ -2745,7 +2792,6 @@ function editMessage(m) {
       m.content = message.content; m.edited_at = message.edited_at;
       box.remove(); textEl.style.display = '';
       updateMessageNode(message);
-      toast('Message edited', 'success');
     } catch (e) { toast(e.message, 'error'); }
   };
   box.querySelector('.msg-edit-cancel').addEventListener('click', cancel);
@@ -3370,7 +3416,7 @@ function openCreateServer() {
   descInput.addEventListener('input', () => { descInput.dataset.auto = '0'; });
   const dz = $('cs-icon-dz');
   wireDropzone(dz, $('cs-icon-file'), async (f) => {
-    try { const d = await uploadImage(f); iconUrl = d.url; dzSetPreview(dz, d.url, () => { iconUrl = null; syncPreview(); }); syncPreview(); toast('Icon ready', 'success'); }
+    try { const d = await uploadImage(f); iconUrl = d.url; dzSetPreview(dz, d.url, () => { iconUrl = null; syncPreview(); }); syncPreview(); }
     catch (err) { toast(err.message, 'error'); }
   });
   $('cs-cancel').addEventListener('click', closeModal);
@@ -3770,11 +3816,24 @@ const SETTINGS_NAV = [
 let settingsUploads = { avatar_url: null, banner_url: null };
 let settingsDirty = false;
 let settingsSaveFn = null;
+let settingsSection = 'account';
+
+/* Central place that flips the dirty flag and keeps the footer buttons in sync. */
+function setSettingsDirty(v) {
+  settingsDirty = !!v;
+  const discard = $('set-discard');
+  const save = $('set-done');
+  const note = $('set-dirty-note');
+  if (discard) discard.disabled = !settingsDirty;
+  if (save) save.disabled = !settingsDirty;
+  if (note) note.hidden = !settingsDirty;
+}
 
 function openSettings(section) {
   const u = me;
   settingsDirty = false;
   settingsSaveFn = null;
+  settingsSection = section || 'account';
   const nav = SETTINGS_NAV.map(item => {
     if (item.cat) return `<div class="sn-cat">${t(item.cat)}</div>`;
     return `<div class="sn-item" data-sec="${item.id}">${t(item.label)} <span class="chev">${icon('chevron-right')}</span></div>`;
@@ -3799,17 +3858,27 @@ function openSettings(section) {
     <div class="settings-footer">
       <button class="btn secondary" id="set-logout">${t('Log Out')}</button>
       <div style="flex:1"></div>
-      <button class="btn" id="set-done">${t('Save')}</button>
+      <span class="settings-dirty-note" id="set-dirty-note" hidden>Unsaved changes</span>
+      <button class="btn secondary" id="set-discard" disabled>${t('Discard')}</button>
+      <button class="btn" id="set-done" disabled>${t('Save Changes')}</button>
     </div>`, { modalClass: 'settings-modal' });
 
-  const discardThen = (after) => {
-    settingsDirty = false;
+  /* Discard throws away every unsaved edit: uploads are reset to what is
+     stored on the server and the panel is rebuilt from the saved profile. */
+  const discardChanges = () => {
+    settingsUploads = { avatar_url: me.avatar_url || null, banner_url: me.banner_url || null };
+    setSettingsDirty(false);
     previewSelf();
+    renderSettings(settingsSection);
+    toast('Changes discarded');
+  };
+  const discardThen = (after) => {
+    discardChanges();
     if (after) after(); else closeModal();
   };
   const saveThen = async (after) => {
     const ok = settingsSaveFn ? await settingsSaveFn() : true;
-    if (ok) { settingsDirty = false; if (after) after(); else closeModal(); }
+    if (ok) { setSettingsDirty(false); if (after) after(); else closeModal(); }
     return ok;
   };
   const guardLogout = () => {
@@ -3830,9 +3899,13 @@ function openSettings(section) {
     if (settingsDirty && settingsSaveFn) {
       const ok = await settingsSaveFn();
       if (!ok) return;
-      settingsDirty = false;
+      setSettingsDirty(false);
     }
     closeModal();
+  });
+  $('set-discard').addEventListener('click', () => {
+    if (!settingsDirty) return;
+    discardChanges();
   });
   $('set-logout').addEventListener('click', guardLogout);
   document.querySelectorAll('#settings-nav .sn-item[data-sec]').forEach(el => {
@@ -3842,6 +3915,7 @@ function openSettings(section) {
 }
 
 function renderSettings(section) {
+  settingsSection = section;
   document.querySelectorAll('#settings-nav .sn-item[data-sec]').forEach(el => el.classList.toggle('active', el.dataset.sec === section));
   const panel = $('settings-panel');
   panel.innerHTML = settingsPanelHTML(section);
@@ -4101,7 +4175,7 @@ function wireAccountPanel() {
   settingsUploads = { avatar_url: u.avatar_url || null, banner_url: u.banner_url || null };
   $('set-status').value = u.status || 'online';
 
-  const markDirty = () => { settingsDirty = true; };
+  const markDirty = () => setSettingsDirty(true);
 
   $('sa-upload').addEventListener('click', () => $('sa-file').click());
   $('sa-file').addEventListener('change', (e) => {
@@ -4112,7 +4186,6 @@ function wireAccountPanel() {
         settingsUploads.avatar_url = d.url;
         previewSelf({ avatar_url: d.url });
         markDirty();
-        toast('Avatar ready \u2014 remember to save', 'success');
       } catch (err) { toast(err.message, 'error'); }
     } });
   });
@@ -4141,7 +4214,6 @@ function wireAccountPanel() {
       try {
         const d = await uploadImage(blob, filename);
         settingsUploads.banner_url = d.url; paintBanner(); markDirty();
-        toast('Banner ready \u2014 remember to save', 'success');
       } catch (err) { toast(err.message, 'error'); }
     } });
   });
@@ -4233,7 +4305,7 @@ function wireAccountPanel() {
       const { user } = await api('/api/me', { method: 'PATCH', body: JSON.stringify(body) });
       me = user; localStorage.setItem('cr_user', JSON.stringify(me));
       myChosenStatus = me.status || myChosenStatus; userIsIdle = false; tabAwayOffline = false; resetIdleTimer();
-      settingsDirty = false;
+      setSettingsDirty(false);
       previewSelf();
       renderRail(); renderMembers();
       toast('Profile updated', 'success');
@@ -4248,14 +4320,14 @@ function wireProfilesPanel() {
   let color = me.banner_color || '#5865F2';
   document.querySelectorAll('#prof-banner-row .swatch').forEach(sw => sw.addEventListener('click', () => {
     color = sw.dataset.color;
-    settingsDirty = true;
+    setSettingsDirty(true);
     document.querySelectorAll('#prof-banner-row .swatch').forEach(x => x.classList.toggle('sel', x === sw));
   }));
   const doSave = async () => {
     try {
       const { user } = await api('/api/me', { method: 'PATCH', body: JSON.stringify({ banner_color: color }) });
       me = user; localStorage.setItem('cr_user', JSON.stringify(me));
-      settingsDirty = false;
+      setSettingsDirty(false);
       toast('Profile style saved', 'success');
       return true;
     } catch (e) { toast(e.message, 'error'); return false; }
@@ -4675,7 +4747,6 @@ function renderServerTab(tab, s, isOwner) {
         const d = await uploadImage(f); iconUrl = d.url;
         iconDrop.innerHTML = `<img src="${escapeHtml(d.url)}" alt=""><div class="ss-icon-overlay">${icon('upload')}</div>`;
         hydrateIcons(iconDrop);
-        toast('Icon ready \u2014 remember to save', 'success');
       } catch (err) { toast(err.message, 'error'); }
       e.target.value = '';
     });
@@ -4688,7 +4759,6 @@ function renderServerTab(tab, s, isOwner) {
       try {
         const d = await uploadImage(f); bannerUrl = d.url;
         bannerEl.style.background = `url('${d.url}') center/cover`;
-        toast('Banner ready \u2014 remember to save', 'success');
       } catch (err) { toast(err.message, 'error'); }
       e.target.value = '';
     });
@@ -4697,7 +4767,6 @@ function renderServerTab(tab, s, isOwner) {
       bannerUrl = null;
       bannerEl.style.background = 'linear-gradient(135deg, var(--brand), color-mix(in srgb, var(--brand) 40%, #000))';
       rm.remove();
-      toast('Banner removed \u2014 remember to save', 'success');
     });
   }
   const save = $('ss-save');

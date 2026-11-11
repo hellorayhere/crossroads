@@ -31,9 +31,14 @@ const onlineUids = new Set();
    status automatically. */
 const presenceOverrides = new Map();
 
-/* Resolve the status other people should see for a user. */
+/* Resolve the status other people should see for a user.
+   1. A transient override (hidden tab / idle) always wins.
+   2. No live socket at all means the person is genuinely offline, even if the
+      database still holds the status they last chose.
+   3. Otherwise fall back to the chosen status. */
 function effectiveStatus(uid, dbStatus) {
   if (presenceOverrides.has(uid)) return presenceOverrides.get(uid);
+  if (!onlineUids.has(uid)) return 'offline';
   return dbStatus || 'online';
 }
 
@@ -57,8 +62,13 @@ function sign(user) {
   return jwt.sign({ uid: user.id }, JWT_SECRET, { expiresIn: '30d' });
 }
 
-function publicUser(u) {
+function publicUser(u, opts = {}) {
   if (!u) return null;
+  /* Report the *effective* status (which may be a transient "offline" after a
+     hidden tab or "idle" after inactivity) so that REST responses never snap a
+     user back to the status stored in the database. `opts.self` is used for
+     /api/me, where the caller always wants the status they actually chose. */
+  const status = opts.self ? (u.status || 'online') : effectiveStatus(u.id, u.status);
   return {
     id: u.id,
     username: u.username,
@@ -74,7 +84,7 @@ function publicUser(u) {
     banner_url: u.banner_url,
     accent_color: u.accent_color,
     bio: u.bio,
-    status: u.status,
+    status,
     created_at: u.created_at
   };
 }
@@ -571,7 +581,7 @@ app.post('/api/password/reset', (req, res) => {
 });
 
 app.get('/api/me', auth, (req, res) => {
-  res.json({ user: publicUser(req.user) });
+  res.json({ user: publicUser(req.user, { self: true }) });
 });
 
 app.patch('/api/me', auth, (req, res) => {
@@ -609,7 +619,7 @@ app.patch('/api/me', auth, (req, res) => {
   // update live across member lists, DM lists, message authors and profiles.
   broadcastProfile(user);
   if (statusChanged) io.emit('presence', { user_id: uid, status: user.status });
-  res.json({ user: publicUser(user) });
+  res.json({ user: publicUser(user, { self: true }) });
 });
 
 /* Change password (Privacy & Safety). Verifies the current password first. */

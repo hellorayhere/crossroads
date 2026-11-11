@@ -1,40 +1,31 @@
-# Crossroads — Round 7 Task List
+# Crossroads — Round 8 Task List
 
-## 1. User banner "split in half" fix
-- [x] Fix `.oprofile-banner` background shorthand resetting background-size to auto/repeat
-- [x] Fix `.mini-banner` same shorthand bug
-- [x] Ensure banner always renders the whole uploaded image as one piece (cover, no-repeat, center)
+## 1. Presence status not updating (reported bug)
+- [x] REST responses now return the *effective* status (offline/idle override) instead of the stored status
+- [x] `/api/me` still returns the status the user actually chose
+- [x] Users with no live socket now report `offline` everywhere
+- [x] Replace the single long `setTimeout` (throttled/frozen in hidden tabs) with a 10s timestamp tick
+- [x] Idle clears itself when activity resumes, even if an event was missed
+- [x] Re-assert presence after reconnect and once a minute
 
-## 2. Presence logic
-- [x] Tab hidden for 3 minutes -> show offline; return restores chosen status
-- [x] Idle (no activity) -> show idle; activity restores chosen status
-- [x] Server: transient presence override (in-memory, not persisted) + set_presence socket event
-- [x] Client: visibilitychange + idle timers, chosen-status tracking
+## 2. Remove toast UIs from uploads / edits / media
+- [x] Composer upload now shows inline progress in the attachment bar (no toast)
+- [x] Remove "Message edited" toast
+- [x] Remove avatar / banner / server icon / server banner "ready — remember to save" toasts
 
-## 3. Server sidebar banner taller
-- [x] Increase `.sidebar-banner` height
+## 3. Settings Discard / Save system
+- [x] Footer gets Discard + Save Changes buttons, disabled until something changes
+- [x] "Unsaved changes" indicator
+- [x] Discard reverts fields and pending uploads to the saved profile
 
-## 4. Remove "deleted" breadcrumb/toast UI
-- [x] Remove the "Message deleted" toast on message delete
+## 4. Embed all toast UIs
+- [x] Toasts anchored bottom-right inside the app shell, flat surface, hairline border, no drop shadow
+- [x] Mobile full-width variant
 
-## 5. De-cartoon / embed UIs
-- [x] Tone down heavy rounding, gradients and floaty shadows so panels feel embedded
-
-## 6. Create a Server modal redesign
-- [x] More detail (description, visibility, preview) + flatter, embedded styling
-
-## 7. Edit Message
-- [x] Server: PATCH /api/messages/:id (author only, sets edited_at, broadcasts message_updated)
-- [x] Client: "Edit Message" in 3-dot menu + inline edit UI + edited indicator
-
-## 8. Delete Server verification
-- [x] Require typing the server name before delete (owner-only already enforced server-side)
-
-## 9. First-load flash fix
-- [x] Inline auth redirect before paint when no token
-- [x] Boot gate overlay until init() resolves; redirect on invalid token
-
-## 10. Test & deploy
-- [x] Test locally on isolated data (port 3210)
-- [x] Commit + push to main
-- [x] Render deploy + verify live, data preserved
+## 5. Test & deploy
+- [x] Verified presence via socket + REST (online / idle / offline / disconnect)
+- [x] Verified presence timers in a real browser (idle, away >3 min, return)
+- [x] Verified settings footer + discard behaviour
+- [x] Verified inline upload progress and toast styling
+- [ ] Commit + push to main
+- [ ] Render deploy + verify live, data preserved
