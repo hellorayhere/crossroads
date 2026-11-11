@@ -27,5 +27,5 @@
 - [x] Verified presence timers in a real browser (idle, away >3 min, return)
 - [x] Verified settings footer + discard behaviour
 - [x] Verified inline upload progress and toast styling
-- [ ] Commit + push to main
-- [ ] Render deploy + verify live, data preserved
+- [x] Commit + push to main
+- [x] Render deploy + verify live, data preserved
