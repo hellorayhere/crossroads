@@ -2443,7 +2443,11 @@ function ensureVoiceAudioContainer() {
 function voiceConstraints() {
   return {
     audio: {
-      deviceId: setting('micDeviceId') ? { exact: setting('micDeviceId') } : undefined,
+      /* `ideal`, not `exact`: a saved device id can go stale when the user
+         switches browser, unplugs a headset, or the OS rotates the id. With
+         `exact` that stale id throws OverconstrainedError and voice refuses to
+         join at all - which is exactly the "I joined but have no audio" bug. */
+      deviceId: setting('micDeviceId') ? { ideal: setting('micDeviceId') } : undefined,
       echoCancellation: setting('echoCancel') !== false,
       noiseSuppression: setting('noiseSuppress') !== false,
       autoGainControl: setting('autoGain') !== false,
@@ -2452,6 +2456,35 @@ function voiceConstraints() {
     },
     video: false
   };
+}
+
+/* Acquire a microphone with graceful degradation. Some devices reject the
+   full constraint set (sampleRate/channelCount/echoCancellation) or a pinned
+   device id; rather than failing the whole join we retry with simpler
+   constraints before giving up. Permission denials are never retried. */
+async function acquireMic() {
+  const base = voiceConstraints();
+  const relaxed = {
+    audio: {
+      echoCancellation: base.audio.echoCancellation,
+      noiseSuppression: base.audio.noiseSuppression,
+      autoGainControl: base.audio.autoGainControl,
+      channelCount: 1,
+      sampleRate: 48000
+    },
+    video: false
+  };
+  const attempts = [base, relaxed, { audio: true, video: false }];
+  let lastErr = null;
+  for (const c of attempts) {
+    try { return await navigator.mediaDevices.getUserMedia(c); }
+    catch (e) {
+      lastErr = e;
+      /* The user said no (or the page is insecure): retrying cannot help. */
+      if (e && (e.name === 'NotAllowedError' || e.name === 'SecurityError')) throw e;
+    }
+  }
+  throw lastErr;
 }
 
 /* Route the raw microphone through a gain node so the Input Volume slider and
@@ -2495,7 +2528,7 @@ async function joinVoiceChannel(cid) {
       toast('This browser does not support voice channels', 'error');
       return;
     }
-    const raw = await navigator.mediaDevices.getUserMedia(voiceConstraints());
+    const raw = await acquireMic();
     voice.rawStream = raw;
     const built = buildProcessedMic(raw);
     voice.localStream = built.stream;
@@ -2509,11 +2542,15 @@ async function joinVoiceChannel(cid) {
     startSpeakingDetection();
     renderVoicePanel();
     renderChannelList();
-    toast('Connected to ' + c.name, 'success');
   } catch (e) {
-    const msg = (e && e.name === 'NotAllowedError')
+    const name = e && e.name;
+    const msg = name === 'NotAllowedError'
       ? 'Microphone permission was blocked - allow it in your browser to join voice'
-      : 'Microphone access is required for voice channels';
+      : name === 'NotFoundError'
+        ? 'No microphone was found - plug one in to join voice'
+        : name === 'NotReadableError'
+          ? 'Your microphone is busy in another app - close it and try again'
+          : 'Could not access your microphone - check your device and try again';
     toast(msg, 'error');
   } finally {
     voice.joining = false;
@@ -2587,8 +2624,13 @@ function createVoicePeer(uid, initiator) {
     remoteSet: false,
     makingOffer: false,
     ignoreOffer: false,
-    /* Deterministic, symmetric politeness so glare resolves the same way on
-       both sides. */
+    /* Exactly one side of every pair drives the initial offer: the person who
+       just joined (the "initiator"). The peers who were already in the channel
+       only answer. Both sides offering at the same time caused a glare race
+       that could leave the connection half-negotiated and silent. */
+    shouldInitiate: !!initiator,
+    /* Deterministic, symmetric politeness so any later glare (ICE restart)
+       still resolves the same way on both ends. */
     polite: String((me && me.id) || '') < String(uid),
     restartTimer: 0
   };
@@ -2620,10 +2662,12 @@ function createVoicePeer(uid, initiator) {
     } catch (err) {}
   };
 
-  /* Modern negotiation: let the browser tell us when an offer is needed. This
-     covers the case where the mic track is added after the peer exists. */
+  /* Modern negotiation: the browser tells us when an offer is needed (e.g. the
+     mic track was added). Only the designated initiator acts on it - the other
+     side waits for the offer and answers, which removes the initial glare. */
   pc.onnegotiationneeded = async () => {
-    if (peer.ignoreOffer) return;
+    if (!peer.shouldInitiate || peer.ignoreOffer) return;
+    if (pc.signalingState !== 'stable') return;
     try {
       peer.makingOffer = true;
       await pc.setLocalDescription();
@@ -2635,15 +2679,18 @@ function createVoicePeer(uid, initiator) {
 
   const recover = () => {
     if (peer.restartTimer) return;
-    peer.restartTimer = setTimeout(() => {
+    peer.restartTimer = setTimeout(async () => {
       peer.restartTimer = 0;
       if (!voice.peers[uid]) return;
+      if (pc.signalingState !== 'stable') return;
       try {
+        peer.makingOffer = true;
         if (typeof pc.restartIce === 'function') pc.restartIce();
-        else if (peer.polite) pc.createOffer({ iceRestart: true }).then(o => pc.setLocalDescription(o)).then(() => {
+        await pc.setLocalDescription();
+        if (pc.localDescription) {
           socket.emit('voice_signal', { to: uid, data: { type: pc.localDescription.type, sdp: pc.localDescription } });
-        }).catch(() => {});
-      } catch (e) { /* ignore */ }
+        }
+      } catch (e) { /* ignore */ } finally { peer.makingOffer = false; }
     }, 1500);
   };
 
@@ -2659,19 +2706,9 @@ function createVoicePeer(uid, initiator) {
     else if (pc.connectionState === 'connected') tuneAudioSenders(pc);
   };
 
-  if (initiator) {
-    /* Kick off immediately for the joining side; onnegotiationneeded would do
-       it anyway, but this removes a round-trip of latency. */
-    (async () => {
-      try {
-        peer.makingOffer = true;
-        await pc.setLocalDescription();
-        if (pc.localDescription) {
-          socket.emit('voice_signal', { to: uid, data: { type: pc.localDescription.type, sdp: pc.localDescription } });
-        }
-      } catch (e) { /* ignore */ } finally { peer.makingOffer = false; }
-    })();
-  }
+  /* The initial offer is produced by onnegotiationneeded (fired because the
+     local mic tracks were just added). We deliberately do NOT fire a second
+     offer here - doing so raced with onnegotiationneeded and produced glare. */
   return peer;
 }
 
@@ -2701,6 +2738,9 @@ async function handleVoiceSignal(from, data) {
         await pc.setRemoteDescription(desc);
       }
       peer.remoteSet = true;
+      /* An answer means the current negotiation succeeded - clear any stale
+         "ignore" flag so a later ICE restart can still negotiate. */
+      if (desc.type === 'answer') peer.ignoreOffer = false;
       flushIce(peer);
       if (desc.type === 'offer') {
         await pc.setLocalDescription();
@@ -2817,34 +2857,61 @@ function renderVoicePanel() {
   if (!sidebar) return;
   let panel = $('voice-panel');
   if (!voice.channel) { if (panel) panel.remove(); return; }
+  const c = voice.channel;
+  const count = (voice.states[c.id] || []).length;
+
+  /* Build the panel exactly once and then patch it in place. Rebuilding the
+     innerHTML on every voice_state event (which fires on each speaking change,
+     many times a second) used to destroy the disconnect button between
+     mousedown and mouseup, so hanging up silently did nothing. */
   if (!panel) {
     panel = document.createElement('div');
     panel.className = 'voice-panel';
     panel.id = 'voice-panel';
-    const userPanel = sidebar.querySelector('.user-panel');
-    sidebar.insertBefore(panel, userPanel);
-  }
-  const c = voice.channel;
-  const count = (voice.states[c.id] || []).length;
-  panel.innerHTML = `
-    <div class="vp-top">
-      <div class="vp-signal${voice.speaking ? ' speaking' : ''}">${icon('signal')}</div>
-      <div class="vp-info">
-        <div class="vp-title">Voice Connected</div>
-        <div class="vp-sub">${escapeHtml(c.name)}${count ? ' \\u00b7 ' + count : ''}</div>
+    panel.innerHTML = `
+      <div class="vp-top">
+        <div class="vp-signal">${icon('signal')}</div>
+        <div class="vp-info">
+          <div class="vp-title"></div>
+          <div class="vp-sub"></div>
+        </div>
+        <button class="vp-disconnect" id="vp-disconnect" title="Disconnect">${icon('phone-off')}</button>
       </div>
-      <button class="vp-disconnect" id="vp-disconnect" title="Disconnect">${icon('phone-off')}</button>
-    </div>
-    <div class="vp-actions">
-      <button class="vp-act${voice.muted ? ' off' : ''}" id="vp-mute" title="${voice.muted ? 'Unmute' : 'Mute'}">${icon(voice.muted ? 'mic-off' : 'mic')}</button>
-      <button class="vp-act${voice.deafened ? ' off' : ''}" id="vp-deafen" title="${voice.deafened ? 'Undeafen' : 'Deafen'}">${icon(voice.deafened ? 'headphones-off' : 'headphones')}</button>
-      <button class="vp-act" id="vp-settings" title="Voice Settings">${icon('settings')}</button>
-    </div>`;
-  hydrateIcons(panel);
-  $('vp-disconnect').addEventListener('click', leaveVoiceChannel);
-  $('vp-mute').addEventListener('click', toggleVoiceMute);
-  $('vp-deafen').addEventListener('click', toggleVoiceDeafen);
-  $('vp-settings').addEventListener('click', () => openSettings('voice'));
+      <div class="vp-actions">
+        <button class="vp-act" id="vp-mute"></button>
+        <button class="vp-act" id="vp-deafen"></button>
+        <button class="vp-act" id="vp-settings" title="Voice Settings">${icon('settings')}</button>
+      </div>`;
+    const userPanel = sidebar.querySelector('.user-panel');
+    if (userPanel) sidebar.insertBefore(panel, userPanel); else sidebar.appendChild(panel);
+    hydrateIcons(panel);
+    /* Bound once: these handlers now survive every state update. */
+    $('vp-disconnect').addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); leaveVoiceChannel(); });
+    $('vp-mute').addEventListener('click', toggleVoiceMute);
+    $('vp-deafen').addEventListener('click', toggleVoiceDeafen);
+    $('vp-settings').addEventListener('click', () => openSettings('voice'));
+  }
+
+  const sig = panel.querySelector('.vp-signal');
+  if (sig) sig.classList.toggle('speaking', !!voice.speaking);
+  const title = panel.querySelector('.vp-title');
+  if (title) title.textContent = c.name;
+  const sub = panel.querySelector('.vp-sub');
+  if (sub) sub.textContent = 'Voice' + (count ? ' \u00b7 ' + count + (count === 1 ? ' person' : ' people') : '');
+  const muteBtn = panel.querySelector('#vp-mute');
+  if (muteBtn) {
+    muteBtn.classList.toggle('off', !!voice.muted);
+    muteBtn.title = voice.muted ? 'Unmute' : 'Mute';
+    const want = voice.muted ? 'mic-off' : 'mic';
+    if (muteBtn.dataset.ic !== want) { muteBtn.dataset.ic = want; muteBtn.innerHTML = icon(want); }
+  }
+  const deafBtn = panel.querySelector('#vp-deafen');
+  if (deafBtn) {
+    deafBtn.classList.toggle('off', !!voice.deafened);
+    deafBtn.title = voice.deafened ? 'Undeafen' : 'Deafen';
+    const want = voice.deafened ? 'headphones-off' : 'headphones';
+    if (deafBtn.dataset.ic !== want) { deafBtn.dataset.ic = want; deafBtn.innerHTML = icon(want); }
+  }
 }
 
 /* Build the little list of connected members shown under a voice channel row. */
@@ -6087,7 +6154,7 @@ async function startMicTest() {
   if (!fill) return;
   if (vsTestStream) { stopMicTest(); if (hint) hint.textContent = 'Test stopped.'; return; }
   try {
-    const stream = await navigator.mediaDevices.getUserMedia(voiceConstraints());
+    const stream = await acquireMic();
     vsTestStream = stream;
     const Ctx = window.AudioContext || window.webkitAudioContext;
     if (!Ctx) return;
