@@ -129,7 +129,7 @@ button:active, .rail-item:active, .channel:active, .dm-item:active, .member:acti
 .server-rail {
   width: 72px; flex: 0 0 72px; background: var(--rail-bg);
   display: flex; flex-direction: column; align-items: center;
-  padding: 12px 0; gap: 8px; overflow-y: auto; overflow-x: hidden;
+  padding: 12px 0; gap: 12px; overflow-y: auto; overflow-x: hidden;
 }
 .server-rail::-webkit-scrollbar { display: none; }
 .rail-item {
@@ -152,6 +152,11 @@ button:active, .rail-item:active, .channel:active, .dm-item:active, .member:acti
 .rail-divider { width: 32px; height: 2px; background: color-mix(in srgb, var(--rail-bg) 70%, #fff); opacity: .25; border-radius: 1px; margin: 2px 0; flex: 0 0 auto; }
 .rail-item.add, .rail-item.explore { color: #fff; }
 .rail-item.add:hover, .rail-item.explore:hover { background: #404249; color: #fff; }
+/* Drag-to-reorder server icons */
+.rail-item[draggable="true"] { cursor: grab; }
+.rail-item.rail-dragging-item { opacity: .4; cursor: grabbing; }
+.rail-item.drop-before { box-shadow: inset 0 3px 0 0 #fff; }
+.rail-item.drop-after { box-shadow: inset 0 -3px 0 0 #fff; }
 
 .tip { position: relative; }
 .tip::after {
@@ -1126,8 +1131,6 @@ button:active, .rail-item:active, .channel:active, .dm-item:active, .member:acti
 .msg-pin { display: inline-flex; align-items: center; vertical-align: -2px; margin-right: 6px; color: var(--yellow); font-size: 13px; }
 .msg-pin i { display: inline-flex; }
 /* End-to-end encryption indicators */
-.msg-lock { display: inline-flex; align-items: center; vertical-align: -2px; margin-right: 6px; color: var(--green, #3ba55d); font-size: 12px; opacity: .85; }
-.msg-lock i, .msg-lock svg { display: inline-flex; width: 12px; height: 12px; }
 .msg-undecryptable { display: inline-flex; align-items: center; gap: 5px; color: var(--text-faint); font-style: italic; font-size: 13px; }
 .msg-undecryptable svg { width: 12px; height: 12px; }
 
@@ -1192,7 +1195,9 @@ input:focus::placeholder, textarea:focus::placeholder { color: color-mix(in srgb
 .fr-add-row input::placeholder { color: color-mix(in srgb, var(--text-faint) 82%, transparent); }
 
 /* ============ INVITE CODE TOKEN (inline in messages) ============ */
-.invite-code { display: inline-flex; align-items: center; padding: 1px 8px; border-radius: 6px; font-weight: 600; font-family: ui-monospace, 'SFMono-Regular', Menlo, monospace; font-size: .92em; color: #fff; background: linear-gradient(135deg, var(--brand), color-mix(in srgb, var(--brand) 55%, #000)); box-shadow: 0 1px 0 rgba(255,255,255,.15) inset; }
+.invite-code { display: inline; padding: 0; border-radius: 0; font-weight: 600; font-family: inherit; font-size: inherit; color: #00a8fc; background: none; box-shadow: none; text-decoration: none; cursor: pointer; }
+.invite-code:hover { text-decoration: underline; }
+.invite-code:visited { color: #00a8fc; }
 
 /* ============ INVITE EMBED (in chat) ============ */
 .invite-embed { margin-top: 8px; max-width: 440px; border-radius: 10px; overflow: hidden; background: var(--card); border: 1px solid var(--divider); box-shadow: var(--elevation); }
@@ -1312,7 +1317,7 @@ input:focus::placeholder, textarea:focus::placeholder { color: color-mix(in srgb
 .ss-body { overflow-y: auto; }
 
 /* banner */
-.ss-banner { position: relative; height: 230px; border-radius: 12px; overflow: hidden; background-size: cover; background-position: center; display: flex; align-items: flex-start; justify-content: flex-end; border: 1px solid var(--divider); }
+.ss-banner { position: relative; height: 340px; border-radius: 12px; overflow: hidden; background-size: cover; background-position: center; display: flex; align-items: flex-start; justify-content: flex-end; border: 1px solid var(--divider); }
 .ss-banner-shade { position: absolute; inset: 0; background: linear-gradient(180deg, rgba(0,0,0,.28), rgba(0,0,0,0) 60%); pointer-events: none; }
 .ss-banner-actions { position: relative; z-index: 1; display: flex; gap: 8px; padding: 14px; }
 .ss-banner-btn { display: flex; align-items: center; gap: 8px; padding: 8px 14px; border-radius: 8px; font-size: 13px; font-weight: 700; color: #fff; background: rgba(0,0,0,.55); backdrop-filter: blur(3px); border: 1px solid rgba(255,255,255,.15); transition: background .15s, transform .1s; }
@@ -1894,8 +1899,18 @@ body[data-theme="light"] .oprofile-modal .bio-link { color: #0066cc; }
 .vp-vol { width: 70px; -webkit-appearance: none; appearance: none; height: 4px; border-radius: 2px; background: rgba(255,255,255,.32); cursor: pointer; }
 .vp-vol::-webkit-slider-thumb { -webkit-appearance: none; width: 12px; height: 12px; border-radius: 50%; background: #fff; cursor: pointer; }
 .vp-vol::-moz-range-thumb { width: 12px; height: 12px; border-radius: 50%; background: #fff; border: none; cursor: pointer; }
-.vp:fullscreen { max-width: none; width: 100%; height: 100%; border-radius: 0; }
-.vp:fullscreen .vp-video { max-width: none; max-height: none; width: 100%; height: 100%; }
+.vp:fullscreen, .vp:-webkit-full-screen, .vp:-moz-full-screen, .vp:-ms-fullscreen {
+  max-width: none; width: 100%; height: 100%; border-radius: 0; background: #000;
+  display: flex; align-items: center; justify-content: center;
+}
+.vp:fullscreen .vp-video, .vp:-webkit-full-screen .vp-video, .vp:-moz-full-screen .vp-video, .vp:-ms-fullscreen .vp-video {
+  max-width: none; max-height: none; width: 100%; height: 100%; object-fit: contain;
+}
+/* When the browser only allows the <video> itself to go fullscreen, keep it
+   filling the screen with the correct aspect ratio. */
+.vp-video:fullscreen, .vp-video:-webkit-full-screen { width: 100%; height: 100%; max-width: none; max-height: none; object-fit: contain; background: #000; }
+/* Controls stay visible on top while fullscreen. */
+.vp:fullscreen .vp-controls, .vp:-webkit-full-screen .vp-controls { opacity: 1; pointer-events: auto; }
 @media (max-width: 640px) { .vp-vol { display: none; } }
 
 /* ---------- Channel reordering (drag handle + drop indicators) ---------- */

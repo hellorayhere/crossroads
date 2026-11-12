@@ -966,7 +966,7 @@ function logout() {
    message. Legacy plaintext messages still render normally.
    ============================================================ */
 const E2E_PREFIX = '\u0001E2E1:';
-const e2e = { ready: null, priv: null, pub: null, keyId: null, config: null };
+const e2e = { ready: null, priv: null, pub: null, keyId: null, config: null, keyring: [] };
 
 function e2eB64e(buf) {
   const bytes = new Uint8Array(buf);
@@ -981,7 +981,22 @@ function e2eB64d(str) {
   return out;
 }
 function e2eStorageKey() { return 'cr_e2e_' + (me && me.id ? me.id : 'anon'); }
+function e2eKeyringKey() { return 'cr_e2e_keys_' + (me && me.id ? me.id : 'anon'); }
 function e2eSupported() { return !!(window.crypto && window.crypto.subtle && window.isSecureContext !== false); }
+
+/* Import a stored keypair, returning null when the JWK is unusable (e.g. it was
+   written by a browser that exported it differently). A bad entry must never
+   stop the whole E2E layer from coming up. */
+async function e2eImportSaved(entry) {
+  if (!entry || !entry.priv || !entry.pub || !entry.keyId) return null;
+  try {
+    const priv = await crypto.subtle.importKey('jwk', entry.priv, { name: 'ECDH', namedCurve: 'P-256' }, false, ['deriveBits']);
+    return { priv, pub: entry.pub, keyId: entry.keyId };
+  } catch (e) {
+    console.warn('[e2e] could not import saved key', entry.keyId, e);
+    return null;
+  }
+}
 
 async function e2eInit() {
   if (e2e.ready) return e2e.ready;
@@ -989,28 +1004,72 @@ async function e2eInit() {
     if (!e2eSupported() || !me) { e2e.ready = null; return false; }
     let saved = null;
     try { saved = JSON.parse(localStorage.getItem(e2eStorageKey()) || 'null'); } catch (e) { saved = null; }
+    let ring = [];
+    try { ring = JSON.parse(localStorage.getItem(e2eKeyringKey()) || '[]') || []; } catch (e) { ring = []; }
+    if (!Array.isArray(ring)) ring = [];
+
+    /* Build the keyring: every keypair this browser has ever held for this
+       account, plus any keypairs left behind by other accounts on this same
+       device. Keeping old keys lets us decrypt messages that were wrapped
+       before a key rotation (or before this account joined) instead of
+       showing "Unable to decrypt". */
+    const imported = [];
+    const seenIds = new Set();
+    const addEntry = async (entry) => {
+      if (!entry || seenIds.has(entry.keyId)) return;
+      const k = await e2eImportSaved(entry);
+      if (k) { seenIds.add(k.keyId); imported.push(k); }
+    };
+    for (const entry of ring) await addEntry(entry);
     try {
-      if (saved && saved.priv && saved.pub && saved.keyId) {
-        e2e.priv = await crypto.subtle.importKey('jwk', saved.priv, { name: 'ECDH', namedCurve: 'P-256' }, false, ['deriveBits']);
-        e2e.pub = saved.pub;
-        e2e.keyId = saved.keyId;
-      } else {
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (!key || key.indexOf('cr_e2e_') !== 0 || key.indexOf('cr_e2e_keys_') === 0) continue;
+        let entry = null;
+        try { entry = JSON.parse(localStorage.getItem(key) || 'null'); } catch (e) { entry = null; }
+        if (entry && entry.priv && entry.keyId) await addEntry(entry);
+      }
+    } catch (e) { /* storage unavailable */ }
+    const current = await e2eImportSaved(saved);
+    if (current && !seenIds.has(current.keyId)) { seenIds.add(current.keyId); imported.unshift(current); }
+    e2e.keyring = imported;
+
+    if (current) {
+      e2e.priv = current.priv; e2e.pub = current.pub; e2e.keyId = current.keyId;
+    } else {
+      /* No usable key yet (first run, cleared storage, or a corrupt entry):
+         generate a fresh device keypair rather than failing outright. */
+      try {
         const kp = await crypto.subtle.generateKey({ name: 'ECDH', namedCurve: 'P-256' }, true, ['deriveBits']);
         const privJwk = await crypto.subtle.exportKey('jwk', kp.privateKey);
         const pubJwk = await crypto.subtle.exportKey('jwk', kp.publicKey);
         e2e.keyId = 'k_' + Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
         e2e.priv = kp.privateKey;
         e2e.pub = pubJwk;
-        localStorage.setItem(e2eStorageKey(), JSON.stringify({ priv: privJwk, pub: pubJwk, keyId: e2e.keyId }));
+        const record = { priv: privJwk, pub: pubJwk, keyId: e2e.keyId };
+        localStorage.setItem(e2eStorageKey(), JSON.stringify(record));
+        ring.push(record);
+        e2e.keyring.unshift({ priv: kp.privateKey, pub: pubJwk, keyId: e2e.keyId });
+      } catch (err) {
+        console.warn('[e2e] key generation failed', err);
+        e2e.ready = null;
+        return false;
       }
-      /* Register (or refresh) this device's public key. */
-      await api('/api/e2e/keys', { method: 'POST', body: JSON.stringify({ key_id: e2e.keyId, public_jwk: JSON.stringify(e2e.pub) }) });
-      return true;
-    } catch (err) {
-      console.warn('[e2e] init failed', err);
-      e2e.ready = null;   /* allow a later retry */
-      return false;
     }
+    /* Persist the keyring so a later rotation never orphans older messages. */
+    try {
+      if (saved && saved.keyId && !ring.some(r => r && r.keyId === saved.keyId)) ring.push(saved);
+      localStorage.setItem(e2eKeyringKey(), JSON.stringify(ring));
+    } catch (e) { /* quota */ }
+
+    /* Register (or refresh) this device's public key. A network hiccup here
+       must not disable decryption of messages we already have keys for. */
+    try {
+      await api('/api/e2e/keys', { method: 'POST', body: JSON.stringify({ key_id: e2e.keyId, public_jwk: JSON.stringify(e2e.pub) }) });
+    } catch (err) {
+      console.warn('[e2e] key registration failed (will retry on next send)', err);
+    }
+    return true;
   })();
   return e2e.ready;
 }
@@ -1090,37 +1149,54 @@ async function e2eDecrypt(content) {
   if (typeof content !== 'string' || !content.startsWith(E2E_PREFIX)) return content;
   const ok = await e2eInit();
   if (!ok) return null;
-  try {
-    const env = JSON.parse(content.slice(E2E_PREFIX.length));
-    const entry = env.keys && env.keys[e2e.keyId];
-    if (!entry) return null;
-    const ephPub = await crypto.subtle.importKey('jwk', entry.e, { name: 'ECDH', namedCurve: 'P-256' }, false, []);
-    const bits = await crypto.subtle.deriveBits({ name: 'ECDH', public: ephPub }, e2e.priv, 256);
-    /* v2 uses HKDF + AAD; v1 (legacy) uses the raw ECDH bits directly. */
-    const isV2 = Number(env.v) >= 2;
-    const kekBits = (isV2 && entry.s)
-      ? await e2eHkdf(bits, e2eB64d(entry.s), 'crossroads-e2e-kek-v2')
-      : bits;
-    const kek = await crypto.subtle.importKey('raw', kekBits, { name: 'AES-GCM' }, false, ['decrypt']);
-    const wrapAad = isV2 ? new TextEncoder().encode('E2E1|v2|' + e2e.keyId) : undefined;
-    const raw = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: e2eB64d(entry.i), additionalData: wrapAad }, kek, e2eB64d(entry.k));
-    const key = await crypto.subtle.importKey('raw', raw, { name: 'AES-GCM' }, false, ['decrypt']);
-    const msgAad = isV2 ? new TextEncoder().encode('E2E1|v2') : undefined;
-    const pt = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: e2eB64d(env.iv), additionalData: msgAad }, key, e2eB64d(env.ct));
-    return new TextDecoder().decode(pt);
-  } catch (e) {
-    return null;
+  let env;
+  try { env = JSON.parse(content.slice(E2E_PREFIX.length)); } catch (e) { return null; }
+  if (!env || !env.keys) return null;
+  /* Try the current device key first, then any older key this browser still
+     holds. This is what lets messages sent before a key rotation decrypt. */
+  const candidates = [];
+  if (e2e.keyId && env.keys[e2e.keyId]) candidates.push({ keyId: e2e.keyId, priv: e2e.priv });
+  for (const k of (e2e.keyring || [])) {
+    if (k.keyId !== e2e.keyId && env.keys[k.keyId]) candidates.push({ keyId: k.keyId, priv: k.priv });
   }
+  for (const cand of candidates) {
+    try {
+      const entry = env.keys[cand.keyId];
+      const ephPub = await crypto.subtle.importKey('jwk', entry.e, { name: 'ECDH', namedCurve: 'P-256' }, false, []);
+      const bits = await crypto.subtle.deriveBits({ name: 'ECDH', public: ephPub }, cand.priv, 256);
+      /* v2 uses HKDF + AAD; v1 (legacy) uses the raw ECDH bits directly. */
+      const isV2 = Number(env.v) >= 2;
+      const kekBits = (isV2 && entry.s)
+        ? await e2eHkdf(bits, e2eB64d(entry.s), 'crossroads-e2e-kek-v2')
+        : bits;
+      const kek = await crypto.subtle.importKey('raw', kekBits, { name: 'AES-GCM' }, false, ['decrypt']);
+      const wrapAad = isV2 ? new TextEncoder().encode('E2E1|v2|' + cand.keyId) : undefined;
+      const raw = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: e2eB64d(entry.i), additionalData: wrapAad }, kek, e2eB64d(entry.k));
+      const key = await crypto.subtle.importKey('raw', raw, { name: 'AES-GCM' }, false, ['decrypt']);
+      const msgAad = isV2 ? new TextEncoder().encode('E2E1|v2') : undefined;
+      const pt = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: e2eB64d(env.iv), additionalData: msgAad }, key, e2eB64d(env.ct));
+      return new TextDecoder().decode(pt);
+    } catch (e) {
+      /* try the next key */
+    }
+  }
+  return null;
 }
 
-/* Decrypt in place so every downstream render path sees plaintext. */
+/* Decrypt in place so every downstream render path sees plaintext.
+   The original ciphertext is preserved on the message (`_e2eRaw`) so a
+   transient failure (keys still loading, brief network error) can be retried
+   later instead of permanently blanking the message. */
 async function e2eDecryptMessage(m) {
   if (!m) return m;
-  if (typeof m.content === 'string' && m.content.startsWith(E2E_PREFIX)) {
+  if (!m._e2eRaw && typeof m.content === 'string' && m.content.startsWith(E2E_PREFIX)) m._e2eRaw = m.content;
+  if (m._e2eRaw) {
     m.encrypted = true;
-    const pt = await e2eDecrypt(m.content);
+    /* Always (re)try: a previous failure may simply mean the keyring had not
+       finished loading. Successful results are cached in m.content. */
+    const pt = await e2eDecrypt(m._e2eRaw);
     if (pt == null) { m.content = ''; m.decrypt_failed = true; }
-    else m.content = pt;
+    else { m.content = pt; m.decrypt_failed = false; }
   }
   if (m.reply_to) await e2eDecryptMessage(m.reply_to);
   return m;
@@ -1131,11 +1207,45 @@ async function e2eDecryptAll(list) {
   return list;
 }
 
+/* If any message in the open conversation still failed to decrypt (for
+   example the keyring finished loading a moment late), retry it and repaint.
+   This keeps every message visible instead of leaving error placeholders. */
+async function e2eRetryFailed() {
+  const ok = await e2eInit();
+  if (!ok) return;
+  let changed = false;
+  for (const m of (state.messages || [])) {
+    if (m && m._e2eRaw && m.decrypt_failed) {
+      await e2eDecryptMessage(m);
+      if (!m.decrypt_failed) changed = true;
+    }
+  }
+  if (changed && typeof renderMessages === 'function') renderMessages();
+}
+
 /* Recipient ids for the conversation currently open. */
 function e2eRecipients() {
   if (state.channel) return (state.members || []).map(x => x.id);
   if (state.dm && state.dm.user) return [me.id, state.dm.user.id];
   return [me.id];
+}
+
+/* Same as e2eRecipients(), but if we are in a channel and the cached member
+   list looks empty/stale we re-fetch it first. This stops a message from being
+   encrypted for only the sender (which would make it unreadable for everyone
+   else in the server). */
+async function e2eRecipientsSafe() {
+  let ids = e2eRecipients();
+  if (state.channel && state.server && ids.length < 2) {
+    try {
+      const d = await api('/api/servers/' + state.server.id);
+      if (Array.isArray(d.members) && d.members.length) {
+        state.members = d.members;
+        ids = d.members.map(x => x.id);
+      }
+    } catch (e) { /* fall back to whatever we have */ }
+  }
+  return ids;
 }
 
 /* Mention ids / broadcast ping computed locally (the server cannot parse
@@ -1858,20 +1968,39 @@ async function loadServers() {
   renderRail();
 }
 
+/* Apply the user's saved server order (per-user, stored in settings.serverOrder).
+   Servers not present in the saved order are appended in their natural order. */
+function orderedServers() {
+  const servers = state.servers || [];
+  const saved = setting('serverOrder');
+  if (!Array.isArray(saved) || !saved.length) return servers.slice();
+  const byId = new Map(servers.map(s => [String(s.id), s]));
+  const out = [];
+  const used = new Set();
+  for (const id of saved) {
+    const s = byId.get(String(id));
+    if (s && !used.has(String(s.id))) { out.push(s); used.add(String(s.id)); }
+  }
+  for (const s of servers) if (!used.has(String(s.id))) out.push(s);
+  return out;
+}
+
 function renderRail() {
   const wrap = $('rail-servers');
   wrap.innerHTML = '';
-  for (const s of state.servers) {
+  const list = orderedServers();
+  const canReorder = list.length > 1;
+  for (const s of list) {
     const d = document.createElement('div');
     d.className = 'rail-item tip' + (state.server && state.server.id === s.id ? ' active' : '');
     d.dataset.tip = s.name;
     d.dataset.sid = s.id;
-    if (s.icon_url) d.innerHTML = `<img src="${escapeHtml(s.icon_url)}" alt="">`;
+    if (s.icon_url) d.innerHTML = `<img src="${escapeHtml(s.icon_url)}" alt="" draggable="false">`;
     else if (s.icon) d.textContent = s.icon;
     else d.textContent = s.name.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase();
     const mentions = serverMentionCount(s.id);
     if (mentions) d.innerHTML += `<span class="badge">${mentions > 99 ? '99+' : mentions}</span>`;
-    d.addEventListener('click', () => openServer(s.id));
+    d.addEventListener('click', () => { if (!wrap.classList.contains('rail-dragging')) openServer(s.id); });
     d.addEventListener('contextmenu', (e) => {
       e.preventDefault();
       showContextMenu(e.clientX, e.clientY, [
@@ -1881,8 +2010,55 @@ function renderRail() {
         { label: 'Copy Server Name', icon: 'copy', onClick: () => copyToClipboard(s.name, 'Server name') }
       ]);
     });
+    if (canReorder) attachRailDrag(d, wrap);
     wrap.appendChild(d);
   }
+}
+
+/* Drag-to-reorder for the server rail. Persists the new order to settings. */
+let railDragId = null;
+function attachRailDrag(el, wrap) {
+  el.setAttribute('draggable', 'true');
+  el.addEventListener('dragstart', (e) => {
+    railDragId = el.dataset.sid;
+    el.classList.add('rail-dragging-item');
+    wrap.classList.add('rail-dragging');
+    try { e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', railDragId); } catch (_) {}
+  });
+  el.addEventListener('dragend', () => {
+    railDragId = null;
+    wrap.classList.remove('rail-dragging');
+    wrap.querySelectorAll('.rail-item').forEach(n => n.classList.remove('rail-dragging-item', 'drop-before', 'drop-after'));
+  });
+  el.addEventListener('dragover', (e) => {
+    if (!railDragId || el.dataset.sid === railDragId) return;
+    e.preventDefault();
+    try { e.dataTransfer.dropEffect = 'move'; } catch (_) {}
+    const r = el.getBoundingClientRect();
+    const after = (e.clientY - r.top) > r.height / 2;
+    wrap.querySelectorAll('.rail-item').forEach(n => n.classList.remove('drop-before', 'drop-after'));
+    el.classList.add(after ? 'drop-after' : 'drop-before');
+  });
+  el.addEventListener('dragleave', () => { el.classList.remove('drop-before', 'drop-after'); });
+  el.addEventListener('drop', (e) => {
+    e.preventDefault();
+    if (!railDragId || el.dataset.sid === railDragId) return;
+    const r = el.getBoundingClientRect();
+    const after = (e.clientY - r.top) > r.height / 2;
+    const ids = orderedServers().map(s => String(s.id));
+    const from = ids.indexOf(String(railDragId));
+    if (from < 0) return;
+    ids.splice(from, 1);
+    let to = ids.indexOf(String(el.dataset.sid));
+    if (to < 0) to = ids.length;
+    if (after) to += 1;
+    ids.splice(to, 0, String(railDragId));
+    railDragId = null;
+    wrap.classList.remove('rail-dragging');
+    wrap.querySelectorAll('.rail-item').forEach(n => n.classList.remove('rail-dragging-item', 'drop-before', 'drop-after'));
+    saveSetting('serverOrder', ids);
+    renderRail();
+  });
 }
 
 /* ============================================================
@@ -2090,6 +2266,7 @@ async function openDM(d) {
   await e2eDecryptAll(messages);
   state.messages = messages;
   renderMessages();
+  e2eRetryFailed();
   $('composer').classList.remove('hidden');
   $('message-input').placeholder = 'Write a direct message to @' + d.user.username + '\u2026';
   $('composer-hint').textContent = '';
@@ -2826,6 +3003,7 @@ async function openChannel(cid) {
   await e2eDecryptAll(messages);
   state.messages = messages;
   renderMessages();
+  e2eRetryFailed();
   $('composer').classList.remove('hidden');
   const locked = !!c.read_only && !can('manage_channels') && !can('manage_messages');
   $('message-input').disabled = locked;
@@ -3520,7 +3698,7 @@ function messageNode(m, grouped, animate) {
   const nEmoji = emojiOnly ? emojiCount(bodyText || '') : 0;
   const jumboCls = emojiOnly ? (nEmoji <= 3 ? ' jumbo' : (nEmoji <= 6 ? ' jumbo lg' : '')) : '';
   node.innerHTML = `${toolbar}${gutter}<div class="body">${m.reply_to ? replyRefHTML(m.reply_to) : ''}${head}
-    <div class="text" data-content>${m.encrypted ? `<span class="msg-lock" title="End-to-end encrypted">${icon('lock')}</span>` : ''}${m.pinned ? `<span class="msg-pin" title="Pinned message">${icon('pin')}</span>` : ''}${failed ? `<span class="text-body msg-undecryptable">${icon('lock')} Unable to decrypt this message</span>` : `<span class="text-body${jumboCls}">${formatContent(bodyText)}</span>`}${m.edited_at ? `<span class="msg-edited" title="Edited ${escapeHtml(formatTime(m.edited_at))}">(edited)</span>` : ''}</div>
+    <div class="text" data-content>${m.pinned ? `<span class="msg-pin" title="Pinned message">${icon('pin')}</span>` : ''}${failed ? `<span class="text-body msg-undecryptable" title="This message was encrypted for a different device and cannot be read here">${icon('lock')} Encrypted message</span>` : `<span class="text-body${jumboCls}">${formatContent(bodyText)}</span>`}${m.edited_at ? `<span class="msg-edited" title="Edited ${escapeHtml(formatTime(m.edited_at))}">(edited)</span>` : ''}</div>
     <div class="attachment-slot"></div>
     <div class="embed-slot"></div>
     <div class="reactions">${reactionsHTML(m.reactions)}</div>
@@ -3699,8 +3877,9 @@ function formatContent(text) {
     s = s.replace(/(^|[\s(])_([^_\n]+)_(?=[\s).,!?]|$)/g, '$1<em>$2</em>');
     // Strikethrough ~~text~~
     s = s.replace(/~~([^~\n]+)~~/g, '<s>$1</s>');
-    // Invite codes gg/xxxx
-    s = s.replace(/(^|[\s(])(gg\/[A-Za-z0-9_-]{4,64})/g, '$1<span class="invite-code">$2</span>');
+    // Invite codes gg/xxxx — rendered as a blue clickable link (opens the join flow)
+    s = s.replace(/(^|[\s(])((?:gg|invite)\/([A-Za-z0-9_-]{4,64}))/g,
+      (m, pre, full, code) => `${pre}<a class="invite-code" href="/app.html?invite=${encodeURIComponent(code)}" target="_blank" rel="noopener noreferrer" data-invite="${encodeURIComponent(code)}">${full}</a>`);
     // @mentions
     s = s.replace(/@([a-zA-Z0-9._]+)/g, (mt, name) => {
       const u = userByName(name);
@@ -3858,12 +4037,44 @@ function videoPlayerNode(url, name) {
   seek.addEventListener('input', () => { if (video.duration) video.currentTime = (seek.value / 1000) * video.duration; });
   muteBtn.addEventListener('click', () => { video.muted = !video.muted; setVolIcon(); });
   vol.addEventListener('input', () => { video.volume = Number(vol.value); video.muted = Number(vol.value) === 0; setVolIcon(); });
+  /* Fullscreen: try the wrapper first (keeps our custom control bar), then the
+     <video> element itself, then the iOS-only webkit path. Some browsers refuse
+     fullscreen on a plain <div>, which is why the button previously did nothing
+     for certain videos. */
+  const goFullscreen = () => {
+    const req = player.requestFullscreen || player.webkitRequestFullscreen || player.mozRequestFullScreen || player.msRequestFullscreen;
+    if (req) {
+      try { const p = req.call(player); if (p && p.catch) p.catch(() => fallbackVideoFullscreen()); return; }
+      catch (e) { fallbackVideoFullscreen(); return; }
+    }
+    fallbackVideoFullscreen();
+  };
+  const fallbackVideoFullscreen = () => {
+    if (video.requestFullscreen) { video.requestFullscreen().catch(() => {}); return; }
+    if (video.webkitEnterFullscreen) { video.webkitEnterFullscreen(); return; }
+    if (video.webkitRequestFullscreen) { video.webkitRequestFullscreen(); return; }
+    if (video.msRequestFullscreen) { video.msRequestFullscreen(); return; }
+    /* Last resort: open the raw file in a new tab so it can be viewed full size. */
+    window.open(url, '_blank', 'noopener');
+  };
+  const exitFullscreen = () => {
+    const ex = document.exitFullscreen || document.webkitExitFullscreen || document.mozCancelFullScreen || document.msExitFullscreen;
+    if (ex) { try { ex.call(document); } catch (e) { /* ignore */ } }
+  };
   fsBtn.addEventListener('click', () => {
-    if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
-    else if (player.requestFullscreen) player.requestFullscreen().catch(() => {});
-    else if (video.webkitEnterFullscreen) video.webkitEnterFullscreen();
+    const isFs = document.fullscreenElement || document.webkitFullscreenElement || document.msFullscreenElement;
+    if (isFs) exitFullscreen();
+    else goFullscreen();
   });
-  player.addEventListener('fullscreenchange', () => { fsBtn.innerHTML = document.fullscreenElement ? icon('minimize') : icon('maximize'); });
+  const onFsChange = () => {
+    const isFs = document.fullscreenElement || document.webkitFullscreenElement || document.msFullscreenElement;
+    fsBtn.innerHTML = isFs ? icon('minimize') : icon('maximize');
+    fsBtn.setAttribute('aria-label', isFs ? 'Exit fullscreen' : 'Fullscreen');
+  };
+  document.addEventListener('fullscreenchange', onFsChange);
+  document.addEventListener('webkitfullscreenchange', onFsChange);
+  /* Double-clicking the video is the familiar shortcut for fullscreen. */
+  video.addEventListener('dblclick', (e) => { e.preventDefault(); goFullscreen(); });
 
   setPlayIcon(false);
   setVolIcon();
@@ -4239,7 +4450,7 @@ async function sendMessage() {
 
   const explicitErr = await e2eExplicitCheck(content);
   if (explicitErr) { toast('Message blocked: ' + explicitErr, 'error'); return; }
-  const enc = await e2eEncrypt(content, e2eRecipients());
+  const enc = await e2eEncrypt(content, await e2eRecipientsSafe());
 
   const payload = { content: enc.content };
   if (enc.encrypted) {
@@ -4603,7 +4814,7 @@ function updateMessageNode(m) {
   if (!node) return;
   const body = node.querySelector('.text-body');
   if (body && m.decrypt_failed) {
-    body.innerHTML = icon('lock') + ' Unable to decrypt this message';
+    body.innerHTML = icon('lock') + ' Encrypted message';
     body.className = 'text-body msg-undecryptable';
   } else if (body) {
     body.innerHTML = formatContent(m.content);
@@ -4653,7 +4864,7 @@ function editMessage(m) {
     if (!val) { toast('Message cannot be empty', 'error'); return; }
     if (val === (m.content || '').trim()) { cancel(); return; }
     try {
-      const enc = await e2eEncrypt(val, e2eRecipients());
+      const enc = await e2eEncrypt(val, await e2eRecipientsSafe());
       const body = { content: enc.content };
       if (enc.encrypted) { body.mentions = e2eMentionIds(val); body.broadcast = e2eBroadcast(val); }
       const { message } = await api('/api/messages/' + m.id, { method: 'PATCH', body: JSON.stringify(body) });
@@ -9843,6 +10054,14 @@ function bindGlobalEvents() {
   $('messages').addEventListener('click', (e) => {
     const sp = e.target.closest('.spoiler');
     if (sp) { sp.classList.toggle('revealed'); return; }
+    /* Invite links (gg/xxxx) open the in-app join flow instead of reloading. */
+    const inv = e.target.closest('a.invite-code');
+    if (inv) {
+      e.preventDefault();
+      const code = inv.dataset.invite || '';
+      if (code) openJoinServer(decodeURIComponent(code));
+      return;
+    }
     const men = e.target.closest('.mention');
     if (!men) return;
     if (men.dataset.uid) {

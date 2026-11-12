@@ -114,3 +114,14 @@ https://crossroadsv2.onrender.com/app.html **without wiping any data**
 - [x] Test account has a fixed, always-valid code: 343815
 - [x] Custom "Reset your two-step code?" UI reachable even when two-step is off
 - [x] Reset requires password + invalidates the old code
+
+# Round 14 — Chat polish
+- [x] Remove green end-to-end encrypted lock badge (E2E itself unchanged)
+- [x] Server banner taller (230px → 340px)
+- [x] Video fullscreen works for every video (vendor fallbacks, dblclick, CSS)
+- [x] Space out server rail icons (gap 8px → 12px)
+- [x] Drag to reorder server icons when in more than one server (persisted per user)
+- [x] Invite codes (gg/xxxx) render as blue clickable links that open the join flow
+- [x] Fix "Unable to decrypt this message": device keyring + cross-account keys + retry + graceful label
+- [x] Ensure channel messages encrypt for every server member (fresh member fetch)
+- [x] Syntax checks, local smoke test, commit + push, Render deploy, verify live, data preserved
