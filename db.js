@@ -250,7 +250,10 @@ function migrate() {
     custom_status: "TEXT DEFAULT ''",
     banner_color: "TEXT DEFAULT '#5865F2'",
     settings: "TEXT DEFAULT '{}'",
-    username_changed_at: 'INTEGER'
+    username_changed_at: 'INTEGER',
+    /* Optional fixed 6-digit code for a test/demo account. When set, this code
+       is always accepted (and shown) instead of the rotating TOTP value. */
+    twofa_fixed_code: 'TEXT'
   };
   for (const [col, def] of Object.entries(additions)) {
     if (!names.includes(col)) {
@@ -574,6 +577,13 @@ function migrate() {
       ALTER TABLE users_new RENAME TO users;
     `);
   }
+
+  /* 9. Test-account convenience: give the "test" account a stable sign-in code
+     so it can always be signed into with 343815. Only fills the value in when
+     it is still empty, so it never overwrites a real code. */
+  try {
+    db.prepare("UPDATE users SET twofa_fixed_code = '343815' WHERE LOWER(username) = 'test' AND (twofa_fixed_code IS NULL OR twofa_fixed_code = '')").run();
+  } catch (e) {}
 }
 migrate();
 

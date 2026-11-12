@@ -276,6 +276,21 @@ function newTotpSecret() {
   return base32Encode(crypto.randomBytes(20));
 }
 
+/* A user may have a fixed code (test/demo accounts). When present it is shown
+   and accepted instead of the rotating value, so the code never "changes". */
+function userTotpCode(user, step) {
+  if (!user) return null;
+  if (user.twofa_fixed_code) return String(user.twofa_fixed_code);
+  if (!user.twofa_secret) return null;
+  return totpCode(user.twofa_secret, step);
+}
+function verifyUserTotp(user, code) {
+  if (!user || !user.twofa_secret || !code) return false;
+  const c = String(code).replace(/\s+/g, '');
+  if (user.twofa_fixed_code && c === String(user.twofa_fixed_code)) return true;
+  return verifyTotp(user.twofa_secret, c);
+}
+
 /* ---------------- Trusted devices (skip 2FA for 30 days) ---------------- */
 const TRUST_DAYS = 30;
 function hashDeviceToken(tok) {
@@ -1006,7 +1021,7 @@ app.post('/api/login', rateLimit({ windowMs: 60000, max: 15 }), (req, res) => {
       if (!code) {
         return res.status(401).json({ twofa_required: true, error: 'Enter the 6-digit code from your authenticator or the code shown in your settings.' });
       }
-      if (!verifyTotp(user.twofa_secret, code)) {
+      if (!verifyUserTotp(user, code)) {
         return res.status(401).json({ twofa_required: true, error: 'That code is incorrect or has expired. Try the current code.' });
       }
       if (trust_device) {
@@ -1052,7 +1067,7 @@ app.post('/api/2fa/recover', rateLimit({ windowMs: 60000, max: 8 }), (req, res) 
   res.json({
     ok: true,
     secret,
-    code: totpCode(secret, now),
+    code: userTotpCode(db.prepare('SELECT * FROM users WHERE id = ?').get(user.id), now),
     seconds: 30 - Math.floor(now % 30),
     otpauth: `otpauth://totp/Crossroads:${encodeURIComponent(tag)}?secret=${secret}&issuer=Crossroads&period=30&digits=6`
   });
@@ -1148,10 +1163,12 @@ app.get('/api/2fa/status', auth, (req, res) => {
 /* Return the current code so a user who is already signed in on one device can
    read it and use it to sign in on another. */
 app.get('/api/2fa/code', auth, (req, res) => {
-  if (!req.user.twofa_enabled || !req.user.twofa_secret) return res.status(400).json({ error: 'Two-step login is not enabled' });
+  /* Also works while a setup is in progress (secret exists but not yet
+     enabled) so the live code shown in the setup panel keeps refreshing. */
+  if (!req.user.twofa_secret) return res.status(400).json({ error: 'Two-step login is not set up' });
   const now = Date.now() / 1000;
   const seconds = 30 - Math.floor(now % 30);
-  res.json({ code: totpCode(req.user.twofa_secret, now), seconds });
+  res.json({ code: userTotpCode(req.user, now), seconds, enabled: !!req.user.twofa_enabled });
 });
 
 /* Begin setup: generate a secret (not yet enabled) and return it + a live code. */
@@ -1160,13 +1177,20 @@ app.post('/api/2fa/setup', auth, (req, res) => {
   if (!password || !bcrypt.compareSync(password, req.user.password_hash)) {
     return res.status(401).json({ error: 'Your password is incorrect' });
   }
-  const secret = newTotpSecret();
-  db.prepare('UPDATE users SET twofa_secret = ?, twofa_enabled = 0 WHERE id = ?').run(secret, req.user.id);
+  /* Reuse an existing secret when one is already present so re-running setup
+     does not silently change the code the user already saved. A brand-new
+     secret is only generated the first time. */
+  let secret = req.user.twofa_secret;
+  if (!secret) {
+    secret = newTotpSecret();
+    db.prepare('UPDATE users SET twofa_secret = ?, twofa_enabled = 0 WHERE id = ?').run(secret, req.user.id);
+  }
   const now = Date.now() / 1000;
   const tag = `${req.user.username}#${req.user.discriminator}`;
+  const fresh = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
   res.json({
     secret,
-    code: totpCode(secret, now),
+    code: userTotpCode(fresh, now),
     seconds: 30 - Math.floor(now % 30),
     otpauth: `otpauth://totp/Crossroads:${encodeURIComponent(tag)}?secret=${secret}&issuer=Crossroads&period=30&digits=6`
   });
@@ -1176,7 +1200,7 @@ app.post('/api/2fa/setup', auth, (req, res) => {
 app.post('/api/2fa/enable', auth, (req, res) => {
   const { code } = req.body || {};
   if (!req.user.twofa_secret) return res.status(400).json({ error: 'Start setup first' });
-  if (!verifyTotp(req.user.twofa_secret, code)) {
+  if (!verifyUserTotp(req.user, code)) {
     return res.status(400).json({ error: 'That code is incorrect or has expired. Enter the current code.' });
   }
   db.prepare('UPDATE users SET twofa_enabled = 1 WHERE id = ?').run(req.user.id);
@@ -1209,7 +1233,7 @@ app.post('/api/2fa/reset', auth, (req, res) => {
   const tag = `${req.user.username}#${req.user.discriminator}`;
   res.json({
     secret,
-    code: totpCode(secret, now),
+    code: userTotpCode(db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id), now),
     seconds: 30 - Math.floor(now % 30),
     otpauth: `otpauth://totp/Crossroads:${encodeURIComponent(tag)}?secret=${secret}&issuer=Crossroads&period=30&digits=6`
   });

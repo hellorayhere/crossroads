@@ -6246,7 +6246,7 @@ async function wireTwoFactor() {
         const d = await api('/api/2fa/reset', { method: 'POST', body: JSON.stringify({ password: pw }) });
         stopTimer();
         showSetup(d);
-        toast('Old code invalidated \\u2014 new two-step code generated', 'success');
+        toast('Old code invalidated \u2014 new two-step code generated', 'success');
       } catch (e) { toast(e.message, 'error'); }
     });
     $('twofa-disable').addEventListener('click', async () => {
@@ -6266,7 +6266,10 @@ async function wireTwoFactor() {
     statusEl.className = 'twofa-status';
     body.innerHTML = `
       <p class="twofa-desc">Two-step login is currently off. Turn it on to require a rotating 6-digit code at sign-in.</p>
-      <div class="twofa-actions"><button class="btn" id="twofa-start">Set up two-step login</button></div>`;
+      <div class="twofa-actions">
+        <button class="btn" id="twofa-start">Set up two-step login</button>
+        <button class="btn secondary" id="twofa-reset-off">Reset two-step code</button>
+      </div>`;
     $('twofa-start').addEventListener('click', async () => {
       const pw = await promptDialog({ title: 'Set up two-step login', body: 'Enter your password to begin.', input: 'password', placeholder: 'Password', confirmText: 'Continue' });
       if (pw == null) return;
@@ -6274,6 +6277,18 @@ async function wireTwoFactor() {
         const d = await api('/api/2fa/setup', { method: 'POST', body: JSON.stringify({ password: pw }) });
         setupSecret = d.secret;
         showSetup(d);
+      } catch (e) { toast(e.message, 'error'); }
+    });
+    /* The custom reset dialog is available even when two-step is off, so the
+       "Reset your two-step code?" UI is always reachable. */
+    $('twofa-reset-off').addEventListener('click', async () => {
+      const pw = await twoFactorResetDialog();
+      if (pw == null) return;
+      try {
+        const d = await api('/api/2fa/reset', { method: 'POST', body: JSON.stringify({ password: pw }) });
+        stopTimer();
+        showSetup(d);
+        toast('Old code invalidated \u2014 new two-step code generated', 'success');
       } catch (e) { toast(e.message, 'error'); }
     });
   };

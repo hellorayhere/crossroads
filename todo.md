@@ -107,3 +107,10 @@ https://crossroadsv2.onrender.com/app.html **without wiping any data**
 - [x] Local smoke test
 - [x] Commit + push
 - [x] Render deploy + verify live, data preserved
+
+# Round 13 — Two-step code fixes
+- [x] Setup no longer regenerates the secret (code stays stable)
+- [x] `/api/2fa/code` works during setup so the live code refreshes
+- [x] Test account has a fixed, always-valid code: 343815
+- [x] Custom "Reset your two-step code?" UI reachable even when two-step is off
+- [x] Reset requires password + invalidates the old code
