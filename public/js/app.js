@@ -523,34 +523,11 @@ function logout() {
   window.location.href = '/';
 }
 
-/* ---------------- Inline notices ----------------
-   Feedback used to be a floating toast popup. It is now an embedded strip that
-   sits inside the chat column above the composer, so it reads as part of the
-   interface instead of floating over it. Errors stay a little longer than
-   confirmations and every notice can be dismissed. */
-const noticeTimers = new WeakMap();
-function toast(msg, type = '') {
-  const wrap = $('inline-notices');
-  if (!wrap) return;
-  /* Keep at most three notices so the strip never grows out of hand. */
-  while (wrap.children.length >= 3) wrap.firstElementChild.remove();
-
-  const n = document.createElement('div');
-  n.className = 'notice' + (type ? ' ' + type : '');
-  const ico = type === 'error' || type === 'alert' ? 'circle-exclamation'
-    : type === 'success' ? 'check' : 'circle-info';
-  n.innerHTML = `<span class="notice-ico">${icon(ico)}</span><span class="notice-text"></span><button class="notice-x" aria-label="Dismiss">${icon('xmark')}</button>`;
-  n.querySelector('.notice-text').textContent = msg;
-  hydrateIcons(n);
-  const kill = () => {
-    clearTimeout(noticeTimers.get(n));
-    n.classList.add('out');
-    setTimeout(() => n.remove(), 160);
-  };
-  n.querySelector('.notice-x').addEventListener('click', kill);
-  wrap.appendChild(n);
-  noticeTimers.set(n, setTimeout(kill, type === 'error' || type === 'alert' ? 5200 : 3200));
-}
+/* ---------------- Notices (removed) ----------------
+   The grey notification strip at the bottom of the chat column has been
+   removed entirely. `toast()` is kept as a no-op so the many call sites that
+   report success/failure keep working without spamming the interface. */
+function toast() {}
 
 /* ---------------- Custom confirm / prompt ---------------- */
 function confirmDialog(opts = {}) {
@@ -1207,7 +1184,7 @@ function renderDMList() {
   friendsBtn.className = 'dm-item friends-entry' + (state.view === 'friends' ? ' active' : '');
   friendsBtn.id = 'friends-entry';
   const pendingCount = (state.friends && state.friends.incoming) ? state.friends.incoming.length : 0;
-  friendsBtn.innerHTML = `<span class="dm-ic">${icon('user-group')}</span><span class="dm-name">${t('Friends')}</span>${pendingCount ? `<span class="friend-badge">${pendingCount}</span>` : ''}`;
+  friendsBtn.innerHTML = `<span class="dm-name">${t('Friends')}</span>${pendingCount ? `<span class="friend-badge">${pendingCount}</span>` : ''}`;
   friendsBtn.addEventListener('click', openFriends);
   list.appendChild(friendsBtn);
 
@@ -1342,7 +1319,9 @@ async function openFriends() {
 }
 
 function emptyFriends(msg, ic) {
-  return `<div class="fr-empty"><div class="fr-empty-ic">${icon(ic || 'users')}</div><div class="fr-empty-txt">${msg}</div></div>`;
+  /* The friends tabs are deliberately icon-free, so empty states are plain
+     text too. `ic` is accepted for call-site compatibility and ignored. */
+  return `<div class="fr-empty"><div class="fr-empty-txt">${msg}</div></div>`;
 }
 
 function friendRow(u, kind) {
@@ -1389,13 +1368,6 @@ function renderFriendsView() {
     pending: f.incoming.length + f.outgoing.length,
     blocked: f.blocked.length
   };
-
-  const navItem = (id, label, count, ic) =>
-    `<button class="fr-nav-item${tab === id ? ' active' : ''}" data-tab="${id}">
-       <span class="fr-nav-ic">${icon(ic)}</span>
-       <span class="fr-nav-lbl">${label}</span>
-       ${count ? `<span class="fr-nav-count">${count}</span>` : ''}
-     </button>`;
 
   const HEADINGS = {
     online: ['Online', 'Friends who are around right now.'],
@@ -3701,7 +3673,6 @@ function openCreateServer() {
   ];
   openModal(`
     <div class="cs-head">
-      <div class="cs-head-ico">${icon('plus')}</div>
       <div>
         <h3>Create a Server</h3>
         <p class="msub">Your server is a private space for you and your people. Set it up now — you can change everything later.</p>
@@ -3711,14 +3682,14 @@ function openCreateServer() {
       <div class="cs-preview">
         <div class="cs-preview-label">Live Preview</div>
         <div class="cs-preview-card">
-          <div class="cs-preview-ico" id="cs-preview-ico">${icon('hash')}</div>
+          <div class="cs-preview-ico" id="cs-preview-ico"></div>
           <div class="cs-preview-meta">
             <div class="cs-preview-name" id="cs-preview-name">Your Server</div>
             <div class="cs-preview-sub" id="cs-preview-sub">Private · Invite only</div>
           </div>
         </div>
         <div class="cs-preview-desc empty" id="cs-preview-desc">Add a short description so people know what this space is for.</div>
-        <div class="cs-preview-note">${icon('lock')} New servers are private. Share an invite link to let people in.</div>
+        <div class="cs-preview-note">New servers are private. Share an invite link to let people in.</div>
       </div>
       <div class="cs-fields">
         <div class="cs-section-title">Basics</div>
@@ -3729,7 +3700,7 @@ function openCreateServer() {
           <textarea id="cs-desc" rows="3" maxlength="500" placeholder="What is this server about? Who is it for?"></textarea></div>
         <div class="cs-section-title">Style</div>
         <div class="field"><label>Server Type</label>
-          <div class="cs-types" id="cs-types">${templates.map((t, i) => `<button type="button" class="cs-type${i === 0 ? ' sel' : ''}" data-id="${t.id}"><span class="cs-type-ico">${icon(t.icon)}</span>${t.label}</button>`).join('')}</div>
+          <div class="cs-types" id="cs-types">${templates.map((t, i) => `<button type="button" class="cs-type${i === 0 ? ' sel' : ''}" data-id="${t.id}">${t.label}</button>`).join('')}</div>
           <div class="hint" id="cs-type-hint">${escapeHtml(templates[0].desc)}</div></div>
         <div class="field"><label>Server Icon <span class="opt">(optional)</span></label>
           ${dropzoneHTML('cs-icon-dz', 'Upload Image', 'PNG, JPG or GIF — up to 25 MB')}
@@ -3737,7 +3708,7 @@ function openCreateServer() {
       </div>
     </div>
     <div class="modal-actions cs-actions">
-      <span class="cs-foot-hint">${icon('lock')} Only people you invite can join.</span>
+      <span class="cs-foot-hint">Only people you invite can join.</span>
       <div style="flex:1"></div>
       <button class="btn secondary" id="cs-cancel">Cancel</button>
       <button class="btn" id="cs-create">Create Server</button>
@@ -3753,7 +3724,7 @@ function openCreateServer() {
   let selectedType = templates[0].label;
   const syncPreview = () => {
     previewName.textContent = nameInput.value.trim() || 'Your Server';
-    previewIco.innerHTML = iconUrl ? `<img src="${escapeHtml(iconUrl)}" alt="">` : icon('hash');
+    previewIco.innerHTML = iconUrl ? `<img src="${escapeHtml(iconUrl)}" alt="">` : '';
     if (previewSub) previewSub.textContent = selectedType + ' · Private';
     const d = descInput.value.trim();
     if (previewDesc) {
@@ -3806,15 +3777,12 @@ function openJoinServer(prefill) {
     </div>
     <div class="js-details">
       <div class="js-detail">
-        <span class="js-detail-ico">${icon('hash')}</span>
         <div class="js-detail-txt"><strong>Jump right in</strong><p>You will land in the server's text and voice channels instantly.</p></div>
       </div>
       <div class="js-detail">
-        <span class="js-detail-ico">${icon('users')}</span>
         <div class="js-detail-txt"><strong>Meet the community</strong><p>See members, roles and conversations as they happen in real time.</p></div>
       </div>
       <div class="js-detail">
-        <span class="js-detail-ico">${icon('shield')}</span>
         <div class="js-detail-txt"><strong>Come and go freely</strong><p>You can leave a server at any time from its settings.</p></div>
       </div>
     </div>
