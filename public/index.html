@@ -86,6 +86,14 @@
             <input type="text" id="login-code" inputmode="numeric" maxlength="6" placeholder="6-digit code" autocomplete="one-time-code" />
           </div>
           <div class="msg error">Enter the 6-digit code from your authenticator or settings.</div>
+          <label class="trust-device" for="login-trust">
+            <input type="checkbox" id="login-trust" />
+            <span class="trust-box" aria-hidden="true"></span>
+            <span class="trust-text">
+              <span class="trust-title">Trust this device for 30 days</span>
+              <span class="trust-sub">Skip the code on this browser for 30 days. Only do this on a device you trust.</span>
+            </span>
+          </label>
         </div>
 
         <button type="submit" class="btn" id="login-btn"><span class="btn-label">Sign In</span></button>

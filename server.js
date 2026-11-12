@@ -282,6 +282,35 @@ function newTotpSecret() {
   return base32Encode(crypto.randomBytes(20));
 }
 
+/* ---------------- Trusted devices (skip 2FA for 30 days) ---------------- */
+const TRUST_DAYS = 30;
+function hashDeviceToken(tok) {
+  return crypto.createHash('sha256').update(String(tok)).digest('hex');
+}
+function createTrustedDevice(userId, req) {
+  const token = crypto.randomBytes(32).toString('hex');
+  const now = Date.now();
+  const expires = now + TRUST_DAYS * 24 * 60 * 60 * 1000;
+  let label = '';
+  try { label = describeDevice(req.headers['user-agent']); } catch (e) { label = ''; }
+  try {
+    db.prepare('INSERT INTO trusted_devices (id, user_id, token_hash, device_label, created_at, expires_at) VALUES (?,?,?,?,?,?)')
+      .run(newId(), userId, hashDeviceToken(token), label, now, expires);
+    /* Opportunistically prune this user's expired tokens. */
+    db.prepare('DELETE FROM trusted_devices WHERE user_id = ? AND expires_at < ?').run(userId, now);
+  } catch (e) { /* table should exist; ignore */ }
+  return { token, expires_at: expires };
+}
+function isTrustedDevice(userId, token) {
+  if (!token) return false;
+  try {
+    const row = db.prepare('SELECT * FROM trusted_devices WHERE user_id = ? AND token_hash = ?').get(userId, hashDeviceToken(token));
+    if (!row) return false;
+    if (row.expires_at < Date.now()) { db.prepare('DELETE FROM trusted_devices WHERE id = ?').run(row.id); return false; }
+    return true;
+  } catch (e) { return false; }
+}
+
 /* Badges assigned to a user, newest assignment first. Kept tiny so it can be
    embedded in every public user payload without extra round-trips. */
 function badgesForUser(userId) {
@@ -474,12 +503,47 @@ function memberRole(serverId, userId) {
   return row ? (row.role || 'member') : null;
 }
 
-/* Owner + admins can manage channels, invites and member roles. */
+/* Resolve the full set of permissions a member holds in a server. The owner
+   and base admins implicitly hold every permission ('*'); a member with a
+   custom role also gains whatever keys that role grants. This is what makes
+   the role permission toggles actually do something. */
+function memberPermissions(server, userId) {
+  const perms = new Set();
+  if (!server) return perms;
+  if (server.owner_id === userId) { perms.add('*'); return perms; }
+  let m;
+  try {
+    m = db.prepare('SELECT role, custom_role_id FROM server_members WHERE server_id = ? AND user_id = ?').get(server.id, userId);
+  } catch (e) { m = null; }
+  if (!m) return perms;
+  if (m.role === 'owner' || m.role === 'admin') perms.add('*');
+  if (m.custom_role_id) {
+    try {
+      const r = db.prepare('SELECT permissions FROM server_roles WHERE id = ? AND server_id = ?').get(m.custom_role_id, server.id);
+      if (r) {
+        const p = JSON.parse(r.permissions || '{}');
+        for (const k of Object.keys(p)) if (p[k]) perms.add(k);
+      }
+    } catch (e) { /* ignore malformed role permissions */ }
+  }
+  return perms;
+}
+
+/* Does this member hold `key`? 'administrator' and owner/admin ('*') satisfy
+   every check, matching Discord's behaviour. */
+function hasPerm(server, userId, key) {
+  const p = memberPermissions(server, userId);
+  return p.has('*') || p.has('administrator') || p.has(key);
+}
+
+/* Owner + admins (and members whose custom role grants Administrator) can
+   manage channels, invites and member roles. */
 function isServerAdmin(server, userId) {
   if (!server) return false;
   if (server.owner_id === userId) return true;
   const r = memberRole(server.id, userId);
-  return r === 'owner' || r === 'admin';
+  if (r === 'owner' || r === 'admin') return true;
+  return hasPerm(server, userId, 'administrator');
 }
 
 /* ---------------- Server settings / roles / bans ---------------- */
@@ -923,7 +987,7 @@ app.post('/api/register', rateLimit({ windowMs: 60000, max: 10 }), (req, res) =>
 });
 
 app.post('/api/login', rateLimit({ windowMs: 60000, max: 15 }), (req, res) => {
-  let { identifier, username, password, code } = req.body || {};
+  let { identifier, username, password, code, trust_device, device_token } = req.body || {};
   const login = (identifier || username || '').trim();
   if (!login || !password) return res.status(400).json({ error: 'Credentials required' });
   let user;
@@ -938,18 +1002,29 @@ app.post('/api/login', rateLimit({ windowMs: 60000, max: 15 }), (req, res) => {
   }
   if (user.disabled) return res.status(403).json({ error: 'This account has been disabled.' });
   if (isGloballyBanned(user.id)) return res.status(403).json({ error: 'This account has been banned.' });
-  /* Two-step login: when enabled, a valid rotating code is required. */
+  /* Two-step login: when enabled, a valid rotating code is required unless
+     this browser is a previously trusted device (still within 30 days). */
+  let trustedToken = null;
   if (user.twofa_enabled) {
-    if (!code) {
-      return res.status(401).json({ twofa_required: true, error: 'Enter the 6-digit code from your authenticator or the code shown in your settings.' });
-    }
-    if (!verifyTotp(user.twofa_secret, code)) {
-      return res.status(401).json({ twofa_required: true, error: 'That code is incorrect or has expired. Try the current code.' });
+    const trusted = isTrustedDevice(user.id, device_token);
+    if (!trusted) {
+      if (!code) {
+        return res.status(401).json({ twofa_required: true, error: 'Enter the 6-digit code from your authenticator or the code shown in your settings.' });
+      }
+      if (!verifyTotp(user.twofa_secret, code)) {
+        return res.status(401).json({ twofa_required: true, error: 'That code is incorrect or has expired. Try the current code.' });
+      }
+      if (trust_device) {
+        const d = createTrustedDevice(user.id, req);
+        trustedToken = d.token;
+      }
     }
   }
   const sid = createSession(user.id, req);
   const token = sign(user, sid);
-  res.json({ token, user: publicUser(user) });
+  const out = { token, user: publicUser(user) };
+  if (trustedToken) { out.trusted_device_token = trustedToken; out.trusted_device_days = TRUST_DAYS; }
+  res.json(out);
 });
 
 /* Password reset (unauthenticated). Requires the exact username#tag so a user
@@ -1083,7 +1158,30 @@ app.post('/api/2fa/disable', auth, (req, res) => {
     return res.status(401).json({ error: 'Your password is incorrect' });
   }
   db.prepare('UPDATE users SET twofa_enabled = 0, twofa_secret = NULL WHERE id = ?').run(req.user.id);
+  try { db.prepare('DELETE FROM trusted_devices WHERE user_id = ?').run(req.user.id); } catch (e) {}
   res.json({ ok: true, enabled: false });
+});
+
+/* Reset the two-step code: generate a brand-new secret (for when the user has
+   lost access to their authenticator). Requires the password. Two-step is
+   switched off until the user confirms the new code, so they can never be
+   locked out mid-reset. */
+app.post('/api/2fa/reset', auth, (req, res) => {
+  const { password } = req.body || {};
+  if (!password || !bcrypt.compareSync(password, req.user.password_hash)) {
+    return res.status(401).json({ error: 'Your password is incorrect' });
+  }
+  const secret = newTotpSecret();
+  db.prepare('UPDATE users SET twofa_secret = ?, twofa_enabled = 0 WHERE id = ?').run(secret, req.user.id);
+  try { db.prepare('DELETE FROM trusted_devices WHERE user_id = ?').run(req.user.id); } catch (e) {}
+  const now = Date.now() / 1000;
+  const tag = `${req.user.username}#${req.user.discriminator}`;
+  res.json({
+    secret,
+    code: totpCode(secret, now),
+    seconds: 30 - Math.floor(now % 30),
+    otpauth: `otpauth://totp/Crossroads:${encodeURIComponent(tag)}?secret=${secret}&issuer=Crossroads&period=30&digits=6`
+  });
 });
 
 app.get('/api/me', auth, (req, res) => {
@@ -1414,7 +1512,7 @@ app.get('/api/servers/:id/voice', auth, (req, res) => {
 app.post('/api/servers/:id/channels', auth, (req, res) => {
   const srv = getServerForUser(req.params.id, req.user.id);
   if (!srv) return res.status(404).json({ error: 'Server not found' });
-  if (!isServerAdmin(srv, req.user.id)) return res.status(403).json({ error: 'Only the owner and admins can manage channels' });
+  if (!hasPerm(srv, req.user.id, 'manage_channels')) return res.status(403).json({ error: 'You need the Manage Channels permission' });
   let { name, type, topic, category_id } = req.body || {};
   name = (name || '').trim();
   if (!name) return res.status(400).json({ error: 'Channel name required' });
@@ -1440,7 +1538,7 @@ app.post('/api/servers/:id/channels', auth, (req, res) => {
 app.patch('/api/servers/:id/channels/order', auth, (req, res) => {
   const srv = getServerForUser(req.params.id, req.user.id);
   if (!srv) return res.status(404).json({ error: 'Server not found' });
-  if (!isServerAdmin(srv, req.user.id)) return res.status(403).json({ error: 'Only the owner and admins can manage channels' });
+  if (!hasPerm(srv, req.user.id, 'manage_channels')) return res.status(403).json({ error: 'You need the Manage Channels permission' });
   const order = (req.body && Array.isArray(req.body.order)) ? req.body.order : null;
   if (!order || !order.length) return res.status(400).json({ error: 'An order array is required' });
   const existing = db.prepare('SELECT id FROM channels WHERE server_id = ?').all(srv.id).map(r => r.id);
@@ -1470,7 +1568,7 @@ app.patch('/api/servers/:id/channels/order', auth, (req, res) => {
 app.post('/api/servers/:id/categories', auth, (req, res) => {
   const srv = getServerForUser(req.params.id, req.user.id);
   if (!srv) return res.status(404).json({ error: 'Server not found' });
-  if (!isServerAdmin(srv, req.user.id)) return res.status(403).json({ error: 'Only the owner and admins can manage channels' });
+  if (!hasPerm(srv, req.user.id, 'manage_channels')) return res.status(403).json({ error: 'You need the Manage Channels permission' });
   const name = String((req.body && req.body.name) || '').trim().slice(0, 40);
   if (!name) return res.status(400).json({ error: 'Category name required' });
   const maxPos = db.prepare('SELECT MAX(position) as p FROM channel_categories WHERE server_id = ?').get(srv.id).p || 0;
@@ -1482,10 +1580,27 @@ app.post('/api/servers/:id/categories', auth, (req, res) => {
   res.json({ category });
 });
 
+/* Reorder categories (owner + admins). Body: { order: [categoryId, ...] }.
+   Positions are renumbered 0..n-1 and broadcast so every client syncs. */
+app.patch('/api/servers/:id/categories/order', auth, (req, res) => {
+  const srv = getServerForUser(req.params.id, req.user.id);
+  if (!srv) return res.status(404).json({ error: 'Server not found' });
+  if (!hasPerm(srv, req.user.id, 'manage_channels')) return res.status(403).json({ error: 'You need the Manage Channels permission' });
+  const order = (req.body && Array.isArray(req.body.order)) ? req.body.order : null;
+  if (!order || !order.length) return res.status(400).json({ error: 'An order array is required' });
+  const valid = new Set(db.prepare('SELECT id FROM channel_categories WHERE server_id = ?').all(srv.id).map(r => r.id));
+  for (const id of order) if (!valid.has(id)) return res.status(400).json({ error: 'Unknown category in order' });
+  const update = db.prepare('UPDATE channel_categories SET position = ? WHERE id = ? AND server_id = ?');
+  const apply = db.transaction(() => { order.forEach((id, i) => update.run(i, id, srv.id)); });
+  apply();
+  broadcastChannels(srv.id);
+  res.json({ ok: true });
+});
+
 app.patch('/api/servers/:id/categories/:catId', auth, (req, res) => {
   const srv = getServerForUser(req.params.id, req.user.id);
   if (!srv) return res.status(404).json({ error: 'Server not found' });
-  if (!isServerAdmin(srv, req.user.id)) return res.status(403).json({ error: 'Only the owner and admins can manage channels' });
+  if (!hasPerm(srv, req.user.id, 'manage_channels')) return res.status(403).json({ error: 'You need the Manage Channels permission' });
   const cat = db.prepare('SELECT * FROM channel_categories WHERE id = ? AND server_id = ?').get(req.params.catId, srv.id);
   if (!cat) return res.status(404).json({ error: 'Category not found' });
   if (req.body && 'name' in req.body) {
@@ -1500,7 +1615,7 @@ app.patch('/api/servers/:id/categories/:catId', auth, (req, res) => {
 app.delete('/api/servers/:id/categories/:catId', auth, (req, res) => {
   const srv = getServerForUser(req.params.id, req.user.id);
   if (!srv) return res.status(404).json({ error: 'Server not found' });
-  if (!isServerAdmin(srv, req.user.id)) return res.status(403).json({ error: 'Only the owner and admins can manage channels' });
+  if (!hasPerm(srv, req.user.id, 'manage_channels')) return res.status(403).json({ error: 'You need the Manage Channels permission' });
   const cat = db.prepare('SELECT * FROM channel_categories WHERE id = ? AND server_id = ?').get(req.params.catId, srv.id);
   if (!cat) return res.status(404).json({ error: 'Category not found' });
   /* Channels inside the category are kept — they simply become uncategorised. */
@@ -1514,7 +1629,7 @@ app.delete('/api/servers/:id/categories/:catId', auth, (req, res) => {
 app.patch('/api/servers/:id/channels/:cid', auth, (req, res) => {
   const srv = getServerForUser(req.params.id, req.user.id);
   if (!srv) return res.status(404).json({ error: 'Server not found' });
-  if (!isServerAdmin(srv, req.user.id)) return res.status(403).json({ error: 'Only the owner and admins can manage channels' });
+  if (!hasPerm(srv, req.user.id, 'manage_channels')) return res.status(403).json({ error: 'You need the Manage Channels permission' });
   const ch = db.prepare('SELECT * FROM channels WHERE id = ? AND server_id = ?').get(req.params.cid, srv.id);
   if (!ch) return res.status(404).json({ error: 'Channel not found' });
   const updates = [];
@@ -1536,6 +1651,12 @@ app.patch('/api/servers/:id/channels/:cid', auth, (req, res) => {
     const n = Math.max(0, Math.min(21600, parseInt(req.body.slow_mode, 10) || 0));
     updates.push('slow_mode = ?'); values.push(n);
   }
+  if ('read_only' in req.body) { updates.push('read_only = ?'); values.push(req.body.read_only ? 1 : 0); }
+  if ('nsfw' in req.body) { updates.push('nsfw = ?'); values.push(req.body.nsfw ? 1 : 0); }
+  if ('user_limit' in req.body) {
+    const n = Math.max(0, Math.min(99, parseInt(req.body.user_limit, 10) || 0));
+    updates.push('user_limit = ?'); values.push(n);
+  }
   if (updates.length) {
     values.push(ch.id);
     db.prepare(`UPDATE channels SET ${updates.join(', ')} WHERE id = ?`).run(...values);
@@ -1549,7 +1670,7 @@ app.patch('/api/servers/:id/channels/:cid', auth, (req, res) => {
 app.delete('/api/servers/:id/channels/:cid', auth, (req, res) => {
   const srv = getServerForUser(req.params.id, req.user.id);
   if (!srv) return res.status(404).json({ error: 'Server not found' });
-  if (!isServerAdmin(srv, req.user.id)) return res.status(403).json({ error: 'Only the owner and admins can manage channels' });
+  if (!hasPerm(srv, req.user.id, 'manage_channels')) return res.status(403).json({ error: 'You need the Manage Channels permission' });
   const ch = db.prepare('SELECT * FROM channels WHERE id = ? AND server_id = ?').get(req.params.cid, srv.id);
   if (!ch) return res.status(404).json({ error: 'Channel not found' });
   const remaining = db.prepare('SELECT COUNT(*) AS c FROM channels WHERE server_id = ?').get(srv.id).c;
@@ -1568,7 +1689,7 @@ app.delete('/api/servers/:id/channels/:cid', auth, (req, res) => {
 app.patch('/api/servers/:id/members/:uid', auth, (req, res) => {
   const srv = db.prepare('SELECT * FROM servers WHERE id = ?').get(req.params.id);
   if (!srv) return res.status(404).json({ error: 'Server not found' });
-  if (!isServerAdmin(srv, req.user.id)) return res.status(403).json({ error: 'Only the owner and admins can manage members' });
+  if (!hasPerm(srv, req.user.id, 'manage_members')) return res.status(403).json({ error: 'You need the Manage Members permission' });
   const target = req.params.uid;
   const body0 = req.body || {};
   /* The owner cannot be demoted or timed out, but may still be given custom
@@ -1640,7 +1761,7 @@ app.get('/api/servers/:id/settings', auth, (req, res) => {
 app.patch('/api/servers/:id/settings', auth, (req, res) => {
   const srv = db.prepare('SELECT * FROM servers WHERE id = ?').get(req.params.id);
   if (!srv) return res.status(404).json({ error: 'Server not found' });
-  if (!isServerAdmin(srv, req.user.id)) return res.status(403).json({ error: 'Only the owner and admins can edit settings' });
+  if (!hasPerm(srv, req.user.id, 'manage_server')) return res.status(403).json({ error: 'You need the Manage Server permission' });
   const cur = getServerSettings(srv.id);
   const body = req.body || {};
   const next = {
@@ -1664,7 +1785,7 @@ app.patch('/api/servers/:id/settings', auth, (req, res) => {
 app.post('/api/servers/:id/kick', auth, (req, res) => {
   const srv = db.prepare('SELECT * FROM servers WHERE id = ?').get(req.params.id);
   if (!srv) return res.status(404).json({ error: 'Server not found' });
-  if (!isServerAdmin(srv, req.user.id)) return res.status(403).json({ error: 'Only the owner and admins can kick members' });
+  if (!hasPerm(srv, req.user.id, 'kick_members')) return res.status(403).json({ error: 'You need the Kick Members permission' });
   const target = (req.body && req.body.user_id) || '';
   if (!target) return res.status(400).json({ error: 'user_id required' });
   if (target === srv.owner_id) return res.status(400).json({ error: 'You cannot kick the server owner' });
@@ -1680,7 +1801,7 @@ app.post('/api/servers/:id/kick', auth, (req, res) => {
 app.post('/api/servers/:id/bans', auth, (req, res) => {
   const srv = db.prepare('SELECT * FROM servers WHERE id = ?').get(req.params.id);
   if (!srv) return res.status(404).json({ error: 'Server not found' });
-  if (!isServerAdmin(srv, req.user.id)) return res.status(403).json({ error: 'Only the owner and admins can ban members' });
+  if (!hasPerm(srv, req.user.id, 'ban_members')) return res.status(403).json({ error: 'You need the Ban Members permission' });
   const target = (req.body && req.body.user_id) || '';
   if (!target) return res.status(400).json({ error: 'user_id required' });
   if (target === srv.owner_id) return res.status(400).json({ error: 'You cannot ban the server owner' });
@@ -1699,7 +1820,7 @@ app.post('/api/servers/:id/bans', auth, (req, res) => {
 app.get('/api/servers/:id/bans', auth, (req, res) => {
   const srv = db.prepare('SELECT * FROM servers WHERE id = ?').get(req.params.id);
   if (!srv) return res.status(404).json({ error: 'Server not found' });
-  if (!isServerAdmin(srv, req.user.id)) return res.status(403).json({ error: 'Only the owner and admins can view bans' });
+  if (!hasPerm(srv, req.user.id, 'ban_members')) return res.status(403).json({ error: 'You need the Ban Members permission' });
   const rows = db.prepare(`SELECT b.*, u.username, u.discriminator, u.display_name, u.avatar, u.avatar_url, u.accent_color
     FROM server_bans b LEFT JOIN users u ON u.id = b.user_id WHERE b.server_id = ? ORDER BY b.created_at DESC`).all(srv.id);
   const bans = rows.map(r => ({
@@ -1716,7 +1837,7 @@ app.get('/api/servers/:id/bans', auth, (req, res) => {
 app.delete('/api/servers/:id/bans/:uid', auth, (req, res) => {
   const srv = db.prepare('SELECT * FROM servers WHERE id = ?').get(req.params.id);
   if (!srv) return res.status(404).json({ error: 'Server not found' });
-  if (!isServerAdmin(srv, req.user.id)) return res.status(403).json({ error: 'Only the owner and admins can manage bans' });
+  if (!hasPerm(srv, req.user.id, 'ban_members')) return res.status(403).json({ error: 'You need the Ban Members permission' });
   db.prepare('DELETE FROM server_bans WHERE server_id = ? AND user_id = ?').run(srv.id, req.params.uid);
   addAudit(srv.id, req.user.id, 'unban', req.params.uid, '');
   res.json({ ok: true });
@@ -1726,7 +1847,7 @@ app.delete('/api/servers/:id/bans/:uid', auth, (req, res) => {
 app.post('/api/servers/:id/members/:uid/timeout', auth, (req, res) => {
   const srv = db.prepare('SELECT * FROM servers WHERE id = ?').get(req.params.id);
   if (!srv) return res.status(404).json({ error: 'Server not found' });
-  if (!isServerAdmin(srv, req.user.id)) return res.status(403).json({ error: 'Only the owner and admins can time out members' });
+  if (!hasPerm(srv, req.user.id, 'manage_members')) return res.status(403).json({ error: 'You need the Manage Members permission' });
   const target = req.params.uid;
   if (target === srv.owner_id) return res.status(400).json({ error: 'You cannot time out the server owner' });
   const member = db.prepare('SELECT 1 FROM server_members WHERE server_id = ? AND user_id = ?').get(srv.id, target);
@@ -1755,7 +1876,7 @@ app.get('/api/servers/:id/roles', auth, (req, res) => {
 app.post('/api/servers/:id/roles', auth, (req, res) => {
   const srv = db.prepare('SELECT * FROM servers WHERE id = ?').get(req.params.id);
   if (!srv) return res.status(404).json({ error: 'Server not found' });
-  if (!isServerAdmin(srv, req.user.id)) return res.status(403).json({ error: 'Only the owner and admins can manage roles' });
+  if (!hasPerm(srv, req.user.id, 'manage_roles')) return res.status(403).json({ error: 'You need the Manage Roles permission' });
   const name = String((req.body && req.body.name) || '').trim().slice(0, 32);
   if (!name) return res.status(400).json({ error: 'Role name required' });
   const color = /^#[0-9a-fA-F]{6}$/.test((req.body && req.body.color) || '') ? req.body.color : '#5865F2';
@@ -1778,7 +1899,7 @@ app.post('/api/servers/:id/roles', auth, (req, res) => {
 app.patch('/api/servers/:id/roles/:rid', auth, (req, res) => {
   const srv = db.prepare('SELECT * FROM servers WHERE id = ?').get(req.params.id);
   if (!srv) return res.status(404).json({ error: 'Server not found' });
-  if (!isServerAdmin(srv, req.user.id)) return res.status(403).json({ error: 'Only the owner and admins can manage roles' });
+  if (!hasPerm(srv, req.user.id, 'manage_roles')) return res.status(403).json({ error: 'You need the Manage Roles permission' });
   const role = db.prepare('SELECT * FROM server_roles WHERE id = ? AND server_id = ?').get(req.params.rid, srv.id);
   if (!role) return res.status(404).json({ error: 'Role not found' });
   const updates = []; const values = [];
@@ -1798,7 +1919,7 @@ app.patch('/api/servers/:id/roles/:rid', auth, (req, res) => {
 app.delete('/api/servers/:id/roles/:rid', auth, (req, res) => {
   const srv = db.prepare('SELECT * FROM servers WHERE id = ?').get(req.params.id);
   if (!srv) return res.status(404).json({ error: 'Server not found' });
-  if (!isServerAdmin(srv, req.user.id)) return res.status(403).json({ error: 'Only the owner and admins can manage roles' });
+  if (!hasPerm(srv, req.user.id, 'manage_roles')) return res.status(403).json({ error: 'You need the Manage Roles permission' });
   db.prepare('UPDATE server_members SET custom_role_id = NULL WHERE server_id = ? AND custom_role_id = ?').run(srv.id, req.params.rid);
   db.prepare('DELETE FROM server_roles WHERE id = ? AND server_id = ?').run(req.params.rid, srv.id);
   addAudit(srv.id, req.user.id, 'role_delete', req.params.rid, '');
@@ -1812,7 +1933,7 @@ app.delete('/api/servers/:id/roles/:rid', auth, (req, res) => {
 app.post('/api/servers/:id/roles/:rid/move', auth, (req, res) => {
   const srv = db.prepare('SELECT * FROM servers WHERE id = ?').get(req.params.id);
   if (!srv) return res.status(404).json({ error: 'Server not found' });
-  if (!isServerAdmin(srv, req.user.id)) return res.status(403).json({ error: 'Only the owner and admins can manage roles' });
+  if (!hasPerm(srv, req.user.id, 'manage_roles')) return res.status(403).json({ error: 'You need the Manage Roles permission' });
   const dir = (req.body && req.body.dir === 'down') ? 'down' : 'up';
   const roles = db.prepare('SELECT id, position FROM server_roles WHERE server_id = ? ORDER BY position ASC, created_at ASC').all(srv.id);
   const idx = roles.findIndex(r => r.id === req.params.rid);
@@ -1967,6 +2088,25 @@ app.post('/api/channels/:id/messages', auth, (req, res) => {
   const srv = getServerForUser(ch.server_id, req.user.id);
   if (!srv) return res.status(403).json({ error: 'Not a member of this server' });
   if (req.user.muted) return res.status(403).json({ error: 'You are muted by a platform administrator.' });
+  /* Locked / read-only channels: members can read but not post. Staff with
+     Manage Channels (or Administrator) can still speak so the channel is not
+     a dead end for moderators. */
+  const canManageHere = hasPerm(srv, req.user.id, 'manage_channels') || hasPerm(srv, req.user.id, 'manage_messages');
+  if (ch.read_only && !canManageHere) {
+    return res.status(403).json({ error: 'This channel is locked. Only staff can send messages here.' });
+  }
+  /* Slow mode: enforce the per-channel cooldown server-side so it cannot be
+     bypassed by calling the API directly. Staff are exempt. */
+  const slowSecs = Number(ch.slow_mode) || 0;
+  if (slowSecs > 0 && !canManageHere) {
+    const last = db.prepare('SELECT created_at FROM messages WHERE channel_id = ? AND user_id = ? ORDER BY created_at DESC LIMIT 1').get(ch.id, req.user.id);
+    if (last) {
+      const waitMs = slowSecs * 1000 - (Date.now() - last.created_at);
+      if (waitMs > 0) {
+        return res.status(429).json({ error: `Slow mode is on. Wait ${Math.ceil(waitMs / 1000)}s before sending again.` });
+      }
+    }
+  }
   const { content, attachment_url, attachment_name, attachment_type, attachment_size, reply_to_id, mentions: mentionsIn, broadcast: broadcastIn } = req.body || {};
   if ((!content || !content.trim()) && !attachment_url) return res.status(400).json({ error: 'Message cannot be empty' });
 
@@ -2004,7 +2144,7 @@ app.post('/api/channels/:id/messages', auth, (req, res) => {
      whole server). @here only reaches people who are currently online. */
   const ping = resolveBroadcast(content, broadcastIn);
   if (ping) {
-    const privileged = srv.owner_id === req.user.id || isServerAdmin(srv, req.user.id);
+    const privileged = hasPerm(srv, req.user.id, 'mention_everyone');
     if (!sSettings.allow_everyone) {
       /* Silently drop the ping; the message itself still posts. */
     } else if (!privileged) {

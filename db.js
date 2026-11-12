@@ -305,6 +305,18 @@ function migrate() {
   if (!chCols.includes('slow_mode')) {
     try { db.exec('ALTER TABLE channels ADD COLUMN slow_mode INTEGER DEFAULT 0'); } catch (e) {}
   }
+  /* Extra per-channel options exposed by the expanded Edit Channel dialog.
+     All additive: existing channels simply default to "normal". */
+  const extraChCols = {
+    read_only: 'INTEGER DEFAULT 0',   // members can read but not send messages
+    nsfw: 'INTEGER DEFAULT 0',        // age-restricted channel marker
+    user_limit: 'INTEGER DEFAULT 0'   // voice channel user cap (0 = unlimited)
+  };
+  for (const [col, def] of Object.entries(extraChCols)) {
+    if (!chCols.includes(col)) {
+      try { db.exec(`ALTER TABLE channels ADD COLUMN ${col} ${def}`); } catch (e) {}
+    }
+  }
 
   // 1d. Additive migration for server member roles (owner / admin / member).
   const memCols = db.prepare('PRAGMA table_info(server_members)').all().map(c => c.name);
@@ -372,6 +384,23 @@ function migrate() {
       last_seen_at INTEGER NOT NULL
     )`);
     db.exec('CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id)');
+  } catch (e) {}
+
+  /* ---------------- Trusted devices for two-step login ----------------
+     When a user ticks "Trust this device for 30 days" while entering their
+     code, we store a hashed device token here. A later sign-in from the same
+     browser can present the token and skip the code until it expires. Purely
+     additive: the table is created only if missing. */
+  try {
+    db.exec(`CREATE TABLE IF NOT EXISTS trusted_devices (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      token_hash TEXT NOT NULL,
+      device_label TEXT DEFAULT '',
+      created_at INTEGER NOT NULL,
+      expires_at INTEGER NOT NULL
+    )`);
+    db.exec('CREATE INDEX IF NOT EXISTS idx_trusted_devices_user ON trusted_devices(user_id)');
   } catch (e) {}
 
   /* ---------------- Performance indexes ----------------

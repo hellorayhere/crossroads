@@ -181,6 +181,10 @@
     const codeField = document.getElementById('f-login-code');
     const codeInput = document.getElementById('login-code');
     const code = codeInput ? codeInput.value.trim() : '';
+    const trustInput = document.getElementById('login-trust');
+    const trustDevice = !!(trustInput && trustInput.checked);
+    let deviceToken = '';
+    try { deviceToken = localStorage.getItem('cr_trusted_device') || ''; } catch (e) { /* ignore */ }
     let ok = true;
     if (!identifier) { markInvalid('f-login-id', true); ok = false; } else markInvalid('f-login-id', false);
     if (!password) { markInvalid('f-login-pass', true); ok = false; } else markInvalid('f-login-pass', false);
@@ -189,9 +193,12 @@
     const btn = document.getElementById('login-btn');
     setLoading(btn, true, 'Signing in…');
     try {
-      const data = await post('/api/login', { identifier, password, code });
+      const data = await post('/api/login', { identifier, password, code, trust_device: trustDevice, device_token: deviceToken });
       localStorage.setItem('cr_token', data.token);
       localStorage.setItem('cr_user', JSON.stringify(data.user));
+      if (data.trusted_device_token) {
+        try { localStorage.setItem('cr_trusted_device', data.trusted_device_token); } catch (e) { /* ignore */ }
+      }
       window.location.href = '/app.html';
     } catch (err) {
       if (err && err.twofaRequired) {

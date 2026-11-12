@@ -519,7 +519,7 @@ button:active, .rail-item:active, .channel:active, .dm-item:active, .member:acti
 .dropzone .dz-clear { position: absolute; top: 8px; right: 8px; width: 28px; height: 28px; border-radius: 50%; background: rgba(0,0,0,.6); color: #fff; display: grid; place-items: center; font-size: 14px; }
 
 /* ============ PROFILE MODAL ============ */
-.profile-modal { max-width: 1140px; width: 100%; padding: 0; overflow: hidden; background: var(--sidebar-bg); border-radius: var(--radius-lg); display: flex; flex-direction: column; max-height: 88vh; }
+.profile-modal { max-width: 1240px; width: 100%; padding: 0; overflow: hidden; background: var(--sidebar-bg); border-radius: var(--radius-lg); display: flex; flex-direction: column; max-height: 92vh; }
 .profile-topbar { display: flex; align-items: center; justify-content: space-between; padding: 14px 20px; border-bottom: 1px solid var(--divider); }
 .profile-topbar .pt-title { font-size: 15px; font-weight: 600; color: var(--text-header); display: flex; align-items: center; gap: 10px; }
 .profile-topbar .pt-close { width: 32px; height: 32px; border-radius: 50%; display: grid; place-items: center; color: var(--text-muted); font-size: 16px; }
@@ -543,7 +543,7 @@ button:active, .rail-item:active, .channel:active, .dm-item:active, .member:acti
 .profile-tab { padding: 10px 16px; font-size: 14px; font-weight: 600; color: var(--text-muted); border-bottom: 2px solid transparent; cursor: pointer; }
 .profile-tab:hover { color: var(--text-normal); }
 .profile-tab.active { color: var(--text-header); border-bottom-color: var(--text-header); }
-.profile-hero { height: 168px; background: var(--brand); background-size: cover; background-position: center; position: relative; }
+.profile-hero { height: 200px; background: var(--brand); background-size: cover; background-position: center; position: relative; }
 .profile-hero::after { content: ''; position: absolute; inset: 0; background: linear-gradient(180deg, rgba(0,0,0,0) 45%, rgba(0,0,0,.4)); pointer-events: none; }
 .profile-hero .hero-edit { position: absolute; top: 12px; right: 12px; z-index: 2; background: rgba(0,0,0,.55); color: #fff; font-size: 13px; padding: 7px 12px; border-radius: var(--radius-sm); font-weight: 600; display: flex; align-items: center; gap: 8px; backdrop-filter: blur(2px); }
 .profile-hero .hero-edit:hover { background: rgba(0,0,0,.78); }
@@ -586,7 +586,7 @@ button:active, .rail-item:active, .channel:active, .dm-item:active, .member:acti
   --pf-bg: color-mix(in srgb, var(--accent) 38%, var(--pf-base));
   --pf-card: color-mix(in srgb, var(--accent) 50%, var(--pf-base));
   --pf-hover: color-mix(in srgb, var(--accent) 62%, var(--pf-base));
-  width: 100%; max-width: 780px; padding: 0; overflow: hidden;
+  width: 100%; max-width: 880px; padding: 0; overflow: hidden;
   background:
     /* A dark scrim over the lower half keeps body text legible while the top
        of the card stays vividly accent-coloured. */
@@ -632,7 +632,7 @@ button:active, .rail-item:active, .channel:active, .dm-item:active, .member:acti
    and the avatar alone is offset upward, so the name, handle and custom status
    always render on clean background below the banner. */
 .dp-head { display: flex; align-items: flex-start; gap: 18px; margin-top: 0; position: relative; z-index: 5; }
-.dp-avatar { flex: 0 0 auto; position: relative; z-index: 10; margin-top: -68px; left: -14px; }
+.dp-avatar { flex: 0 0 auto; position: relative; z-index: 10; margin-top: -58px; left: -12px; }
 .dp-avatar .avatar {
   /* No accent ring around the profile picture: the border stays 7px wide so
      the avatar's size and position are unchanged, but it is transparent. */
@@ -1400,7 +1400,10 @@ input:focus::placeholder, textarea:focus::placeholder { color: color-mix(in srgb
 .mini-banner { background-repeat: no-repeat; background-position: center; background-size: cover; }
 
 /* ============ MINI PROFILE (bottom-left user panel) ============ */
-.mini-profile { position: fixed; z-index: 320; width: 340px; background: var(--menu-bg); border: 1px solid var(--divider); border-radius: var(--radius-lg); box-shadow: var(--elevation-lg); overflow: hidden; animation: pop .13s ease; }
+.mini-profile { position: fixed; z-index: 320; width: 340px; background: var(--menu-bg); border: 1px solid var(--divider); border-radius: var(--radius-lg); box-shadow: var(--elevation-lg); overflow: hidden; transform-origin: bottom left; animation: miniIn .18s cubic-bezier(.22,.61,.36,1); }
+.mini-profile.mini-out { animation: miniOut .15s ease forwards; }
+@keyframes miniIn { from { opacity: 0; transform: translateY(8px) scale(.97); } to { opacity: 1; transform: none; } }
+@keyframes miniOut { to { opacity: 0; transform: translateY(6px) scale(.98); } }
 .mini-banner { height: 72px; background-color: var(--brand); position: relative; }
 .mini-body { padding: 0 14px 14px; }
 .mini-avatar-wrap { margin-top: -30px; position: relative; display: inline-block; }
@@ -1782,7 +1785,7 @@ body[data-theme="light"] .ss-modal select {
 .accent-preview .ap-hero { height: 48px; background: color-mix(in srgb, var(--accent) 74%, var(--accent-shade)); }
 .accent-preview .ap-row { display: flex; align-items: center; gap: 12px; padding: 12px 14px; }
 .accent-preview .ap-avatar { flex: 0 0 auto; }
-.accent-preview .ap-avatar .avatar { border: 3px solid var(--accent); }
+.accent-preview .ap-avatar .avatar { border: 0; box-shadow: 0 6px 18px rgba(0,0,0,.4); }
 .accent-preview .ap-meta { min-width: 0; flex: 1; }
 .accent-preview .ap-name { font-size: 15px; font-weight: 800; color: var(--accent-ink, #fff); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .accent-preview .ap-tag { font-size: 12.5px; color: var(--accent-ink-2, rgba(255,255,255,.78)); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -3352,15 +3355,14 @@ body[data-theme="light"] .update-card { box-shadow: 0 24px 70px rgba(0, 0, 0, .2
     radial-gradient(120% 70% at 50% 0%, color-mix(in srgb, var(--accent) 42%, transparent) 0%, transparent 70%),
     radial-gradient(80% 50% at 100% 100%, color-mix(in srgb, var(--accent) 18%, transparent) 0%, transparent 70%);
 }
-.oprofile-banner { height: 168px; }
+/* Banner is deliberately taller so the profile art has room to breathe. */
+.oprofile-banner { height: 224px; }
 .oprofile-banner::after {
   background: linear-gradient(180deg, rgba(0,0,0,0) 42%, color-mix(in srgb, var(--accent) 34%, rgba(0,0,0,.55)) 100%);
 }
+/* No accent-coloured ring around the avatar — the circle stays clean. */
 .dp-avatar .avatar {
-  box-shadow:
-    0 0 0 4px color-mix(in srgb, var(--accent) 82%, #000),
-    0 0 0 8px rgba(0,0,0,.42),
-    0 8px 26px color-mix(in srgb, var(--accent) 50%, transparent);
+  box-shadow: 0 6px 20px rgba(0,0,0,.45);
 }
 .dp-name { color: #fff; text-shadow: 0 1px 10px color-mix(in srgb, var(--accent) 50%, transparent); }
 .dp-name::after {
@@ -3374,10 +3376,77 @@ body[data-theme="light"] .update-card { box-shadow: 0 24px 70px rgba(0, 0, 0, .2
   box-shadow: 0 4px 16px color-mix(in srgb, var(--accent) 38%, transparent);
 }
 .dp-btn.primary:hover { background: color-mix(in srgb, var(--accent) 86%, #fff); }
-.dp-label { color: var(--accent); text-transform: uppercase; letter-spacing: .07em; font-size: 10.5px; font-weight: 800; opacity: .95; }
+/* Section labels and their values stay white/neutral like the username, so the
+   accent never bleeds into "Member Since", "Mutual Servers" or "Note". */
+.dp-label { color: #f2f3f5; text-transform: uppercase; letter-spacing: .07em; font-size: 10.5px; font-weight: 800; opacity: .95; }
+.dp-value { color: #dbdee1; }
+.dp-note-text { color: #dbdee1; }
+.dp-note-empty, .dp-note-hint { color: #949ba4; }
 .dp-divider { background: linear-gradient(90deg, color-mix(in srgb, var(--accent) 65%, transparent), transparent 85%); }
 .dp-note { border-left: 2px solid color-mix(in srgb, var(--accent) 60%, transparent); }
 .dp-server-ico { box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 35%, transparent); }
-.dp-mutual-label { color: var(--accent); }
+.dp-mutual-label { color: #f2f3f5; }
 .dp-section .profile-roles { margin-top: 6px; }
 .oprofile-modal .profile-role-pill { background: color-mix(in srgb, currentColor 14%, transparent) !important; }
+
+/* ---------- Round 4: modal animation, channel options, category drag ---------- */
+@keyframes modalPop {
+  from { opacity: 0; transform: scale(.94) translateY(10px); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes modalOut {
+  to { opacity: 0; transform: scale(.96) translateY(6px); }
+}
+@keyframes overlayOut { to { opacity: 0; } }
+.modal.modal-in { animation: modalPop .22s cubic-bezier(.22,.61,.36,1); }
+.profile-modal.modal-in, .oprofile-modal.modal-in { animation: modalPop .26s cubic-bezier(.2,.8,.2,1); }
+.modal.closing, .profile-modal.closing, .oprofile-modal.closing { animation: modalOut .16s ease forwards; }
+.overlay.closing { animation: overlayOut .16s ease forwards; }
+
+/* Locked / age-restricted channel markers in the sidebar. */
+.channel .ch-lock { display: inline-flex; align-items: center; color: var(--text-faint); flex: 0 0 auto; }
+.channel .ch-lock .ic { width: 13px; height: 13px; }
+.channel .ch-nsfw {
+  flex: 0 0 auto; font-size: 9.5px; font-weight: 800; letter-spacing: .03em;
+  color: #fff; background: var(--red, #ed4245); border-radius: 3px; padding: 1px 4px; line-height: 1.3;
+}
+
+/* Category drag handle + drop indicators. */
+.channel-category .cat-grip {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 14px; height: 14px; flex: 0 0 auto; color: var(--text-faint);
+  cursor: grab; opacity: 0; transition: opacity .12s ease; margin-right: 1px;
+}
+.channel-category .cat-grip .ic { width: 14px; height: 14px; }
+.channel-category.draggable-cat:hover .cat-grip { opacity: .8; }
+.channel-category .cat-grip:active { cursor: grabbing; }
+.channel-category.dragging { opacity: .4; }
+.channel-category.drop-before { box-shadow: inset 0 2px 0 0 var(--brand); }
+.channel-category.drop-after { box-shadow: inset 0 -2px 0 0 var(--brand); }
+
+/* Edit Channel toggles. */
+.ec-toggles { display: flex; flex-direction: column; gap: 8px; margin: 4px 0 6px; }
+.ec-toggle {
+  display: flex; align-items: center; justify-content: space-between; gap: 16px;
+  padding: 11px 13px; border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--chat-bg) 82%, #000);
+  border: 1px solid var(--divider); cursor: pointer;
+}
+.ec-toggle:hover { border-color: color-mix(in srgb, var(--brand) 45%, var(--divider)); }
+.ec-toggle-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.ec-toggle-title { font-size: 14px; font-weight: 600; color: var(--text-normal); }
+.ec-toggle-desc { font-size: 12px; color: var(--text-muted); line-height: 1.35; }
+.ec-actions { align-items: center; }
+.ec-actions .btn { display: inline-flex; align-items: center; gap: 6px; }
+
+/* --- Round 4: two-step "trusted device" note in settings --- */
+.twofa-trust-note {
+  margin-top: 12px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--text-3, #949ba4);
+  background: var(--hover, rgba(255,255,255,.04));
+  border: 1px solid var(--divider, rgba(255,255,255,.08));
+  border-radius: 10px;
+  padding: 10px 12px;
+}

@@ -2481,18 +2481,19 @@ function renderChannelList() {
     const header = document.createElement('div');
     header.className = 'channel-category' + (collapsed ? ' collapsed' : '');
     header.dataset.cat = cat.id;
-    header.innerHTML = `<span class="cat-caret">${icon(collapsed ? 'chevron-right' : 'caret-down')}</span>` +
+    header.innerHTML = (admin ? `<span class="cat-grip" title="Drag to reorder category">${icon('grip')}</span>` : '') +
+      `<span class="cat-caret">${icon(collapsed ? 'chevron-right' : 'caret-down')}</span>` +
       `<span class="cat-name">${escapeHtml(cat.name)}</span>` +
       (admin ? `<span class="cat-actions"><span class="cat-add" title="Create channel">${icon('plus')}</span></span>` : '');
     header.addEventListener('click', (e) => {
-      if (e.target.closest('.cat-add')) return;
+      if (e.target.closest('.cat-add') || e.target.closest('.cat-grip')) return;
       state.collapsedCats[cat.id] = !collapsed;
       renderChannelList();
     });
     const addBtn = header.querySelector('.cat-add');
     if (addBtn) addBtn.addEventListener('click', (e) => { e.stopPropagation(); openCreateChannel('text', cat.id); });
     header.addEventListener('contextmenu', (e) => { e.preventDefault(); e.stopPropagation(); openCategoryContextMenu(e.clientX, e.clientY, cat.id); });
-    if (admin) wireCategoryDrop(header, cat.id);
+    if (admin) { wireCategoryDrop(header, cat.id); wireCategoryDrag(header, cat); }
     list.appendChild(header);
     if (!collapsed) {
       const inCat = chans.filter(c => c.category_id === cat.id);
@@ -2515,7 +2516,7 @@ function channelRow(c) {
   const admin = amIAdmin();
   const ic = c.type === 'voice' ? icon('volume-high') : icon('hash');
   const grip = admin ? `<span class="ch-grip" title="Drag to reorder or move between categories">${icon('grip')}</span>` : '';
-  row.innerHTML = `${grip}<span class="hash">${ic}</span><span class="ch-name">${escapeHtml(c.name)}</span>${badgeHTML(channelMentionCount(c.id))}`;
+  row.innerHTML = `${grip}<span class="hash">${ic}</span><span class="ch-name">${escapeHtml(c.name)}</span>${c.read_only ? `<span class="ch-lock" title="Locked channel">${icon('lock')}</span>` : ''}${c.nsfw ? `<span class="ch-nsfw" title="Age-restricted">18+</span>` : ''}${badgeHTML(channelMentionCount(c.id))}`;
   if (admin) { row.classList.add('draggable'); row.draggable = true; wireChannelDrag(row, c); }
   row.addEventListener('click', () => {
     if (c.type === 'voice') { joinVoiceChannel(c.id); return; }
@@ -2525,7 +2526,7 @@ function channelRow(c) {
 }
 
 function clearDropMarks() {
-  document.querySelectorAll('.channel.dragging, .channel.drop-before, .channel.drop-after, .channel-category.drop-into')
+  document.querySelectorAll('.channel.dragging, .channel.drop-before, .channel.drop-after, .channel-category.drop-into, .channel-category.dragging, .channel-category.drop-before, .channel-category.drop-after')
     .forEach(el => el.classList.remove('dragging', 'drop-before', 'drop-after', 'drop-into'));
 }
 
@@ -2561,7 +2562,7 @@ function wireChannelDrag(row, c) {
 
 function wireCategoryDrop(el, catId) {
   el.addEventListener('dragover', (e) => {
-    if (!dragChannelId) return;
+    if (!dragChannelId || dragCategoryId) return;
     e.preventDefault();
     e.stopPropagation();
     e.dataTransfer.dropEffect = 'move';
@@ -2575,6 +2576,72 @@ function wireCategoryDrop(el, catId) {
     if (!dragChannelId) return;
     applyChannelMove(dragChannelId, catId || null, null, false);
   });
+}
+
+/* ---------- Category drag & drop (reorder the category headers) ---------- */
+let dragCategoryId = null;
+
+function wireCategoryDrag(header, cat) {
+  header.classList.add('draggable-cat');
+  header.draggable = true;
+  header.addEventListener('dragstart', (e) => {
+    dragCategoryId = cat.id;
+    header.classList.add('dragging');
+    try { e.dataTransfer.setData('text/plain', cat.id); e.dataTransfer.effectAllowed = 'move'; } catch (err) { /* ignore */ }
+  });
+  header.addEventListener('dragend', () => { dragCategoryId = null; clearDropMarks(); });
+  header.addEventListener('dragover', (e) => {
+    if (!dragCategoryId || dragCategoryId === cat.id) return;
+    e.preventDefault();
+    e.stopPropagation();
+    e.dataTransfer.dropEffect = 'move';
+    const rect = header.getBoundingClientRect();
+    const after = e.clientY > rect.top + rect.height / 2;
+    header.classList.toggle('drop-after', after);
+    header.classList.toggle('drop-before', !after);
+  });
+  header.addEventListener('dragleave', () => header.classList.remove('drop-before', 'drop-after'));
+  header.addEventListener('drop', (e) => {
+    if (!dragCategoryId || dragCategoryId === cat.id) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const after = header.classList.contains('drop-after');
+    header.classList.remove('drop-before', 'drop-after');
+    applyCategoryMove(dragCategoryId, cat.id, after);
+  });
+}
+
+/* Move a category to a new position and persist the full order. */
+async function applyCategoryMove(dragId, targetId, after) {
+  if (!state.server) return;
+  let ordered = (state.categories || []).slice().sort((a, b) => (a.position || 0) - (b.position || 0));
+  const dragged = ordered.find(c => c.id === dragId);
+  if (!dragged) return;
+  ordered = ordered.filter(c => c.id !== dragId);
+  let insertAt;
+  if (targetId) {
+    const ti = ordered.findIndex(c => c.id === targetId);
+    insertAt = ti < 0 ? ordered.length : (after ? ti + 1 : ti);
+  } else {
+    insertAt = ordered.length;
+  }
+  ordered.splice(insertAt, 0, dragged);
+  ordered.forEach((c, i) => { c.position = i; });
+  state.categories = ordered;
+  renderChannelList();
+  try {
+    await api('/api/servers/' + state.server.id + '/categories/order', {
+      method: 'PATCH', body: JSON.stringify({ order: ordered.map(c => c.id) })
+    });
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+async function moveCategoryBy(cat, dir) {
+  const ordered = (state.categories || []).slice().sort((a, b) => (a.position || 0) - (b.position || 0));
+  const idx = ordered.findIndex(c => c.id === cat.id);
+  const j = idx + dir;
+  if (j < 0 || j >= ordered.length) return;
+  await applyCategoryMove(cat.id, ordered[j].id, dir > 0);
 }
 
 /* Move a channel to a new category and/or position, optimistically updating the
@@ -2636,9 +2703,11 @@ async function openChannel(cid) {
   state.messages = messages;
   renderMessages();
   $('composer').classList.remove('hidden');
-  $('message-input').placeholder = 'Message #' + c.name + '\u2026';
-  $('composer-hint').textContent = '';
-  $('message-input').focus();
+  const locked = !!c.read_only && !can('manage_channels') && !can('manage_messages');
+  $('message-input').disabled = locked;
+  $('message-input').placeholder = locked ? 'This channel is locked \u2014 only staff can send messages' : ('Message #' + c.name + '\u2026');
+  $('composer-hint').textContent = locked ? 'You can read this channel but cannot post.' : '';
+  if (!locked) $('message-input').focus();
   saveLastLocation({ serverId: state.server ? state.server.id : null, channelId: cid, dmId: null });
 }
 
@@ -4847,15 +4916,40 @@ function renderPinsList(pins) {
 /* ============================================================
    MODALS
    ============================================================ */
+let modalAnimTimer = null;
 function openModal(html, opts = {}) {
+  clearTimeout(modalAnimTimer);
   const overlay = $('modal-overlay');
   const modal = $('modal');
   modal.className = opts.modalClass ? opts.modalClass : ('modal' + (opts.wide ? ' wide' : ''));
   modal.innerHTML = html;
-  overlay.classList.remove('hidden');
+  overlay.classList.remove('hidden', 'closing');
+  modal.classList.remove('closing');
+  /* Restart the entrance animation every time the dialog opens. */
+  modal.classList.remove('modal-in');
+  void modal.offsetWidth;
+  modal.classList.add('modal-in');
   hydrateIcons(modal);
 }
-function closeModal() { modalCloseGuard = null; $('modal-overlay').classList.add('hidden'); $('modal').innerHTML = ''; $('modal').className = 'modal'; ['--accent','--accent-ink','--accent-ink-2','--accent-edge'].forEach(v => $('modal').style.removeProperty(v)); }
+function closeModal() {
+  modalCloseGuard = null;
+  const overlay = $('modal-overlay');
+  const modal = $('modal');
+  const clearVars = () => ['--accent','--accent-ink','--accent-ink-2','--accent-edge','--accent-shade'].forEach(v => modal.style.removeProperty(v));
+  if (overlay.classList.contains('hidden')) { modal.innerHTML = ''; modal.className = 'modal'; clearVars(); return; }
+  overlay.classList.add('closing');
+  modal.classList.remove('modal-in');
+  modal.classList.add('closing');
+  clearTimeout(modalAnimTimer);
+  modalAnimTimer = setTimeout(() => {
+    overlay.classList.add('hidden');
+    overlay.classList.remove('closing');
+    modal.classList.remove('closing');
+    modal.innerHTML = '';
+    modal.className = 'modal';
+    clearVars();
+  }, 170);
+}
 
 let modalCloseGuard = null;
 function requestCloseModal() {
@@ -5299,6 +5393,9 @@ function openCategoryContextMenu(x, y, catId) {
   if (amIAdmin()) {
     items.push({ label: 'Create Channel Here', icon: 'plus', onClick: () => openCreateChannel('text', cat.id) });
     items.push({ sep: true });
+    items.push({ label: 'Move Up', icon: 'chevron-up', onClick: () => moveCategoryBy(cat, -1) });
+    items.push({ label: 'Move Down', icon: 'chevron-down', onClick: () => moveCategoryBy(cat, 1) });
+    items.push({ sep: true });
     items.push({ label: 'Rename Category', icon: 'pencil', onClick: () => renameCategory(cat) });
     items.push({ label: 'Delete Category', icon: 'trash', danger: true, onClick: () => deleteCategory(cat) });
   } else {
@@ -5314,9 +5411,15 @@ function openEditChannel(c) {
   const catOpts = `<option value="">No category</option>` +
     cats.map(k => `<option value="${k.id}"${(c.category_id || '') === k.id ? ' selected' : ''}>${escapeHtml(k.name)}</option>`).join('');
   const slow = c.slow_mode || 0;
+  const isVoice = c.type === 'voice';
+  const toggleRow = (id, checked, title, desc) => `
+    <label class="ec-toggle" for="${id}">
+      <span class="ec-toggle-text"><span class="ec-toggle-title">${title}</span><span class="ec-toggle-desc">${desc}</span></span>
+      <span class="re-switch"><input type="checkbox" id="${id}"${checked ? ' checked' : ''}><span class="re-switch-track"></span></span>
+    </label>`;
   openModal(`
     <h3>Edit Channel</h3>
-    <p class="msub">#${escapeHtml(c.name)} \u00b7 ${c.type === 'voice' ? 'Voice' : 'Text'} channel</p>
+    <p class="msub">#${escapeHtml(c.name)} \u00b7 ${isVoice ? 'Voice' : 'Text'} channel</p>
     <div class="field"><label>Channel Name <span class="req">*</span></label>
       <input id="ec-name" value="${escapeHtml(c.name)}" maxlength="40"></div>
     <div class="field"><label>Topic</label>
@@ -5325,12 +5428,24 @@ function openEditChannel(c) {
       <select id="ec-cat">${catOpts}</select></div>
     <div class="field"><label>Slow Mode (seconds between messages)</label>
       <input id="ec-slow" type="number" min="0" max="21600" value="${slow}">
-      <div class="hint">0 = off. Members must wait this long between messages.</div></div>
-    <div class="modal-actions">
+      <div class="hint">0 = off. Members must wait this long between messages. Staff are exempt.</div></div>
+    ${isVoice ? `<div class="field"><label>Voice User Limit</label>
+      <input id="ec-userlimit" type="number" min="0" max="99" value="${c.user_limit || 0}">
+      <div class="hint">0 = unlimited. Maximum number of people who can join at once.</div></div>` : ''}
+    <div class="ec-toggles">
+      ${toggleRow('ec-readonly', !!c.read_only, 'Lock channel', 'Members can read this channel but cannot send messages. Staff can still post.')}
+      ${toggleRow('ec-nsfw', !!c.nsfw, 'Age-restricted channel', 'Marks the channel as NSFW. Members see a warning before opening it.')}
+    </div>
+    <div class="modal-actions ec-actions">
+      <button class="btn secondary" id="ec-up" title="Move up">${icon('chevron-up')} Up</button>
+      <button class="btn secondary" id="ec-down" title="Move down">${icon('chevron-down')} Down</button>
+      <span style="flex:1"></span>
       <button class="btn secondary" id="ec-cancel">Cancel</button>
       <button class="btn" id="ec-save">${icon('check')} Save Changes</button>
     </div>`);
   $('ec-cancel').addEventListener('click', closeModal);
+  $('ec-up').addEventListener('click', async () => { await moveChannelBy(c, -1); closeModal(); });
+  $('ec-down').addEventListener('click', async () => { await moveChannelBy(c, 1); closeModal(); });
   $('ec-save').addEventListener('click', async () => {
     const name = $('ec-name').value.trim().toLowerCase().replace(/\s+/g, '-');
     if (!name) { toast('Channel name required', 'error'); return; }
@@ -5338,8 +5453,11 @@ function openEditChannel(c) {
       name,
       topic: $('ec-topic').value.trim(),
       category_id: $('ec-cat').value || null,
-      slow_mode: Math.max(0, Math.min(21600, parseInt($('ec-slow').value, 10) || 0))
+      slow_mode: Math.max(0, Math.min(21600, parseInt($('ec-slow').value, 10) || 0)),
+      read_only: !!($('ec-readonly') && $('ec-readonly').checked),
+      nsfw: !!($('ec-nsfw') && $('ec-nsfw').checked)
     };
+    if (isVoice) payload.user_limit = Math.max(0, Math.min(99, parseInt($('ec-userlimit').value, 10) || 0));
     try {
       await api('/api/servers/' + state.server.id + '/channels/' + c.id, { method: 'PATCH', body: JSON.stringify(payload) });
       closeModal();
@@ -5460,7 +5578,7 @@ function renderOwnProfile(user) {
           <button class="hero-edit" id="pf-banner">${icon('image')} Change Banner</button>
         </div>
         <div class="profile-idcard">
-          <div class="pic-avatar">${avatarHTML(user, 116, user.status || 'offline')}</div>
+          <div class="pic-avatar">${avatarHTML(user, 96, user.status || 'offline')}</div>
           <div class="pic-name">${escapeHtml(displayName)}${badgeChips(user)}</div>
           <div class="pic-tag">${escapeHtml(fullTag(user))}</div>
           ${serverRolePills(user)}
@@ -5551,7 +5669,7 @@ function renderOtherProfile(user, ctx) {
     <div class="oprofile-banner" style="${bannerStyle}"></div>
     <div class="dp-body">
       <div class="dp-head">
-        <div class="dp-avatar">${avatarHTML(user, 124, user.status || 'offline')}</div>
+        <div class="dp-avatar">${avatarHTML(user, 104, user.status || 'offline')}</div>
         <div class="dp-identity">
           <div class="dp-name">${escapeHtml(displayName)}${badgeChips(user)}</div>
           <div class="dp-handle">${escapeHtml(fullTag(user))}${user.pronouns ? ` <span class="dp-pronoun">\u00b7 ${escapeHtml(user.pronouns)}</span>` : ''}</div>
@@ -5940,8 +6058,10 @@ async function wireTwoFactor() {
         <div class="twofa-code-hint">Refreshes in <span id="twofa-secs">${codeInfo ? codeInfo.seconds : 30}</span>s \u00b7 use this code on any device when signing in</div>
       </div>
       <div class="twofa-actions">
+        <button class="btn secondary" id="twofa-reset">Reset code</button>
         <button class="btn secondary" id="twofa-disable">Turn off two-step login</button>
-      </div>`;
+      </div>
+      <div class="twofa-trust-note">Signed in with a trusted device? You can trust this browser for 30 days the next time you enter a code at sign-in.</div>`;
     const refresh = async () => {
       try {
         const c = await api('/api/2fa/code');
@@ -5953,6 +6073,16 @@ async function wireTwoFactor() {
     stopTimer();
     refresh();
     codeTimer = setInterval(refresh, 5000);
+    $('twofa-reset').addEventListener('click', async () => {
+      const pw = await promptDialog({ title: 'Reset two-step code', body: 'This creates a brand-new code and turns two-step login off until you confirm the new one. Enter your password to continue.', input: 'password', placeholder: 'Password', confirmText: 'Reset code' });
+      if (pw == null) return;
+      try {
+        const d = await api('/api/2fa/reset', { method: 'POST', body: JSON.stringify({ password: pw }) });
+        stopTimer();
+        showSetup(d);
+        toast('New two-step code generated', 'success');
+      } catch (e) { toast(e.message, 'error'); }
+    });
     $('twofa-disable').addEventListener('click', async () => {
       const pw = await promptDialog({ title: 'Turn off two-step login', body: 'Enter your password to confirm.', input: 'password', placeholder: 'Password', confirmText: 'Turn off' });
       if (pw == null) return;
@@ -8963,12 +9093,37 @@ async function setMemberRole(s, uid, role) {
 /* ============================================================
    CHANNEL MANAGEMENT (owner / admins)
    ============================================================ */
+/* The set of permissions the signed-in user holds in the current server,
+   mirroring the server-side memberPermissions() logic. */
+function myPerms() {
+  const s = state.server;
+  const perms = new Set();
+  if (!s || !me) return perms;
+  if (s.owner_id === me.id) { perms.add('*'); return perms; }
+  const m = (state.members || []).find(x => x.id === me.id);
+  if (!m) return perms;
+  if (m.role === 'owner' || m.role === 'admin') perms.add('*');
+  if (m.custom_role_id) {
+    const r = (state.roles || []).find(x => x.id === m.custom_role_id);
+    if (r) { const p = parseRolePerms(r); for (const k of Object.keys(p)) if (p[k]) perms.add(k); }
+  }
+  return perms;
+}
+function can(perm) {
+  const p = myPerms();
+  return p.has('*') || p.has('administrator') || p.has(perm);
+}
 function amIAdmin() {
   const s = state.server;
   if (!s) return false;
   if (s.owner_id === me.id) return true;
   const m = state.members.find(x => x.id === me.id);
-  return !!(m && (m.role === 'owner' || m.role === 'admin'));
+  if (m && (m.role === 'owner' || m.role === 'admin')) return true;
+  /* A custom role that grants any management permission also unlocks the
+     management UI (the server still enforces each specific permission). */
+  return can('administrator') || can('manage_channels') || can('manage_roles') ||
+    can('manage_members') || can('manage_server') || can('manage_messages') ||
+    can('kick_members') || can('ban_members');
 }
 
 /* Platform administrator = the account named "keep" (or whatever the server
@@ -9125,7 +9280,11 @@ function positionMiniProfile(wrap) {
 
 function closeMiniProfile() {
   const el = $('mini-profile');
-  if (el) el.remove();
+  if (!el) return;
+  if (el.dataset.closing) return;
+  el.dataset.closing = '1';
+  el.classList.add('mini-out');
+  setTimeout(() => { if (el.parentNode) el.remove(); }, 150);
 }
 
 function updateMiniProfileDom(u) {
