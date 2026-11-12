@@ -38,3 +38,9 @@ Goal: stop the Render free instance from sleeping, so visitors never hit the
 - [x] App still boots normally with the new `api()` signature
 - [x] Commit + push to main
 - [x] Render deploy + verify live, data preserved
+
+## Round 11b — observable keep-alive stats
+- [x] Add `keepAliveStats` counters to `server.js`
+- [x] Expose `keepAlive` object on `/health` (enabled, intervalSeconds, selfPings, selfPingFails, lastSelfPingAt, lastSelfPingStatus)
+- [x] Verify locally: `selfPings: 1`, `lastSelfPingStatus: 200`
+- [x] Commit, push, redeploy to Render, verify in production

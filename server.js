@@ -61,6 +61,9 @@ app.use(express.static(path.join(__dirname, 'public')));
    A GitHub Actions cron (.github/workflows/keepalive.yml) also pings /health
    from outside, so the service can be woken even if it already fell asleep. */
 const bootedAt = Date.now();
+/* Keep-alive bookkeeping, surfaced on /health so the warm-up can be verified
+   from a browser or a monitor without digging through logs. */
+const keepAliveStats = { selfPings: 0, selfPingFails: 0, lastSelfPingAt: 0, lastSelfPingStatus: 0 };
 
 app.get('/health', (req, res) => {
   res.set('Cache-Control', 'no-store, max-age=0');
@@ -68,6 +71,14 @@ app.get('/health', (req, res) => {
     ok: true,
     service: 'crossroads',
     uptime: Math.round((Date.now() - bootedAt) / 1000),
+    keepAlive: {
+      enabled: !!KEEPALIVE_URL && process.env.KEEPALIVE_DISABLED !== '1',
+      intervalSeconds: Math.round(KEEPALIVE_MS / 1000),
+      selfPings: keepAliveStats.selfPings,
+      selfPingFails: keepAliveStats.selfPingFails,
+      lastSelfPingAt: keepAliveStats.lastSelfPingAt,
+      lastSelfPingStatus: keepAliveStats.lastSelfPingStatus
+    },
     ts: Date.now()
   });
 });
@@ -91,8 +102,13 @@ function startKeepAlive() {
       const timer = setTimeout(() => ctrl.abort(), 20000);
       const r = await fetch(url, { signal: ctrl.signal, headers: { 'User-Agent': 'crossroads-keepalive' } });
       clearTimeout(timer);
+      keepAliveStats.selfPings++;
+      keepAliveStats.lastSelfPingAt = Date.now();
+      keepAliveStats.lastSelfPingStatus = r.status;
       if (!r.ok) console.log(`[keepalive] unexpected ${r.status} from ${url}`);
     } catch (e) {
+      keepAliveStats.selfPingFails++;
+      keepAliveStats.lastSelfPingAt = Date.now();
       console.log('[keepalive] self-ping failed:', e.message);
     }
   };
