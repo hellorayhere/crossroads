@@ -365,11 +365,18 @@ button:active, .rail-item:active, .channel:active, .dm-item:active, .member:acti
 .reply-bar .rb-text b { color: var(--text-normal); }
 .reply-bar button { color: var(--text-muted); font-size: 15px; }
 .reply-bar button:hover { color: var(--text-header); }
-.attach-preview { display: flex; align-items: center; gap: 12px; background: var(--card); border-radius: var(--radius) var(--radius) 0 0; padding: 10px 16px; border-bottom: 1px solid var(--divider); }
-.attach-preview img { width: 48px; height: 48px; border-radius: var(--radius-sm); object-fit: cover; }
-.attach-preview .ap-name { flex: 1; font-size: 14px; color: var(--text-normal); }
-.attach-preview button { color: var(--text-muted); font-size: 16px; }
-.attach-preview button:hover { color: var(--text-header); }
+.attach-preview { display: flex; align-items: center; gap: 14px; background: var(--card); border-radius: var(--radius) var(--radius) 0 0; padding: 12px 16px; border-bottom: 1px solid var(--divider); }
+.attach-preview img { width: 72px; height: 72px; border-radius: 8px; object-fit: cover; flex: 0 0 auto; background: var(--input-bg); }
+.attach-preview video { width: 72px; height: 72px; border-radius: 8px; object-fit: cover; flex: 0 0 auto; background: #000; }
+.attach-preview .ap-thumb { position: relative; flex: 0 0 auto; }
+.attach-preview .ap-thumb .ap-badge { position: absolute; bottom: 4px; left: 4px; font-size: 9px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: #fff; background: rgba(0,0,0,.6); padding: 1px 5px; border-radius: 4px; }
+.attach-preview .ap-file { width: 72px; height: 72px; border-radius: 8px; background: var(--brand); display: grid; place-items: center; color: #fff; flex: 0 0 auto; }
+.attach-preview .ap-file .ic { width: 30px; height: 30px; }
+.attach-preview .ap-meta { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.attach-preview .ap-name { font-size: 14px; font-weight: 600; color: var(--text-header); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.attach-preview .ap-sub { font-size: 12px; color: var(--text-muted); }
+.attach-preview button { color: var(--text-muted); font-size: 16px; width: 30px; height: 30px; border-radius: 6px; display: grid; place-items: center; flex: 0 0 auto; }
+.attach-preview button:hover { color: var(--text-header); background: var(--hover); }
 .composer-box { display: flex; align-items: flex-end; gap: 8px; background: var(--input-bg); border-radius: var(--radius); padding: 0 16px; }
 .composer-box.attached, .composer-box.replying { border-radius: 0 0 var(--radius) var(--radius); }
 .composer-box textarea { flex: 1; background: none; border: none; outline: none; resize: none; color: var(--text-normal); font-size: 16px; line-height: 1.375; padding: 11px 0; max-height: 50vh; }
@@ -543,7 +550,8 @@ button:active, .rail-item:active, .channel:active, .dm-item:active, .member:acti
 }
 .dp-icon-btn:hover { background: rgba(0,0,0,.78); }
 
-.dp-body { position: relative; padding: 0 22px 22px; overflow-y: auto; overflow-x: hidden; }
+.dp-body { position: relative; padding: 0 22px 22px; display: flex; flex-direction: column; min-height: 0; overflow: visible; }
+.dp-scroll { overflow-y: auto; overflow-x: hidden; min-height: 0; padding-bottom: 4px; }
 
 /* Avatar straddles the banner, then the name sits beside it with the action
    buttons pushed to the far right so nothing overlaps. */
@@ -869,9 +877,16 @@ button:active, .rail-item:active, .channel:active, .dm-item:active, .member:acti
 .empty-state h2 { font-size: 24px; color: var(--text-header); margin-bottom: 10px; font-weight: 700; }
 .empty-state p { color: var(--text-muted); font-size: 15px; margin-bottom: 20px; line-height: 1.5; }
 
-.lightbox { position: fixed; inset: 0; background: rgba(0,0,0,.9); z-index: 500; display: grid; place-items: center; animation: fade .15s ease; }
-.lightbox img, .lightbox video { max-width: 90vw; max-height: 90vh; border-radius: var(--radius); }
-.lightbox .close { position: absolute; top: 20px; right: 28px; font-size: 30px; color: #fff; }
+.lightbox { position: fixed; inset: 0; background: rgba(0,0,0,.88); z-index: 500; display: flex; flex-direction: column; animation: fade .15s ease; backdrop-filter: blur(2px); }
+.lb-bar { display: flex; align-items: center; gap: 14px; padding: 14px 18px; color: #fff; background: linear-gradient(180deg, rgba(0,0,0,.55), rgba(0,0,0,0)); flex: 0 0 auto; }
+.lb-name { flex: 1; min-width: 0; font-size: 14px; font-weight: 500; color: #f2f3f5; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lb-dl, .lb-close { display: inline-flex; align-items: center; justify-content: center; width: 34px; height: 34px; border-radius: 6px; color: #dbdee1; background: rgba(255,255,255,.08); transition: background .12s ease, color .12s ease; }
+.lb-dl:hover, .lb-close:hover { background: rgba(255,255,255,.18); color: #fff; }
+.lb-dl .ic, .lb-close .ic { width: 20px; height: 20px; }
+.lb-stage { flex: 1 1 auto; min-height: 0; display: grid; place-items: center; padding: 0 24px 24px; overflow: auto; }
+.lb-stage img, .lb-stage video { max-width: 92vw; max-height: 100%; border-radius: 8px; box-shadow: 0 8px 40px rgba(0,0,0,.6); }
+.lb-stage img { cursor: zoom-out; }
+@media (max-width: 640px) { .lb-bar { padding: 10px 12px; } .lb-stage { padding: 0 8px 12px; } }
 
 /* ============ NOTIFICATIONS PANEL ============ */
 .notif-panel {
@@ -1092,6 +1107,8 @@ input:focus::placeholder, textarea:focus::placeholder { color: color-mix(in srgb
 .ir-btn { width: 32px; height: 32px; border-radius: 8px; display: grid; place-items: center; color: var(--text-muted); flex: 0 0 auto; }
 .ir-btn:hover { background: var(--hover); color: var(--text-normal); }
 .ir-revoke:hover { color: var(--red); background: color-mix(in srgb, var(--red) 14%, transparent); }
+.ir-locked { color: var(--text-faint); cursor: not-allowed; opacity: .7; }
+.ir-locked:hover { background: transparent; color: var(--text-faint); }
 
 /* ============ SERVER SETTINGS MODAL ============ */
 .ss-modal { max-width: 1000px; width: 100%; padding: 0; overflow: hidden; background: var(--chat-bg); border-radius: var(--radius-lg); display: flex; flex-direction: column; max-height: 92vh; min-height: min(660px, 90vh); }

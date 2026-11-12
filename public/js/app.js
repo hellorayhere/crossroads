@@ -779,7 +779,8 @@ async function init() {
   /* Load everything in parallel so the first paint is not blocked by a chain
      of sequential round-trips. */
   await Promise.all([loadServers(), loadFriends(), loadDMs(), loadNotifications()]);
-  showHome();
+  const restored = await restoreLastLocation();
+  if (!restored) showHome();
   bindGlobalEvents();
   applyLanguage();
   revealApp();
@@ -1068,6 +1069,47 @@ function renderRail() {
 /* ============================================================
    HOME / DMs
    ============================================================ */
+/* Remember where the user was so a refresh (or tabbing away and coming back)
+   returns them to the same server/channel or DM instead of the DM landing page. */
+const LAST_LOCATION_KEY = 'cr_last_location';
+function saveLastLocation(extra) {
+  try {
+    const loc = Object.assign({ serverId: null, channelId: null, dmId: null }, extra || {});
+    localStorage.setItem(LAST_LOCATION_KEY, JSON.stringify(loc));
+  } catch (e) { /* private mode / quota - ignore */ }
+}
+function readLastLocation() {
+  try {
+    const raw = localStorage.getItem(LAST_LOCATION_KEY);
+    if (!raw) return null;
+    const loc = JSON.parse(raw);
+    return (loc && (loc.serverId || loc.dmId)) ? loc : null;
+  } catch (e) { return null; }
+}
+/* Restore the saved view once the sidebar data has loaded. Falls back to the
+   DM landing page if the server/DM no longer exists (kicked, left, deleted). */
+async function restoreLastLocation() {
+  const loc = readLastLocation();
+  if (!loc) return false;
+  if (loc.serverId) {
+    const srv = (state.servers || []).find(s => s.id === loc.serverId);
+    if (!srv) { saveLastLocation(); return false; }
+    try {
+      await openServer(loc.serverId, loc.channelId || null);
+      return true;
+    } catch (e) { saveLastLocation(); return false; }
+  }
+  if (loc.dmId) {
+    const dm = (state.dms || []).find(d => d.id === loc.dmId);
+    if (!dm) { saveLastLocation(); return false; }
+    try {
+      await openDM(dm);
+      return true;
+    } catch (e) { saveLastLocation(); return false; }
+  }
+  return false;
+}
+
 function showHome() {
   state.server = null; state.channel = null; state.dm = null; state.view = 'home';
   setReplyTo(null);
@@ -1083,6 +1125,7 @@ function showHome() {
   renderDMList();
   renderEmptyChat();
   animateView();
+  saveLastLocation();
 }
 
 async function loadDMs() {
@@ -1193,6 +1236,7 @@ async function openDM(d) {
   $('message-input').placeholder = 'Write a direct message to @' + d.user.username + '\u2026';
   $('composer-hint').textContent = '';
   $('message-input').focus();
+  saveLastLocation({ serverId: null, channelId: null, dmId: d.id });
 }
 
 /* Right-click menu for a direct message in the sidebar. */
@@ -1530,7 +1574,7 @@ async function friendAction(act, uid) {
 /* ============================================================
    SERVERS
    ============================================================ */
-async function openServer(id) {
+async function openServer(id, preferredChannelId) {
   const data = await api('/api/servers/' + id);
   state.view = 'home';
   state.server = data.server;
@@ -1550,7 +1594,9 @@ async function openServer(id) {
   // Automatically reveal the member list when a server is opened.
   state.showMembers = true;
   renderMembers();
-  const firstText = state.channels.find(c => c.type === 'text');
+  /* Re-open the channel the user was last on, if it still exists. */
+  const wanted = preferredChannelId && state.channels.find(c => c.id === preferredChannelId && c.type === 'text');
+  const firstText = wanted || state.channels.find(c => c.type === 'text');
   if (firstText) openChannel(firstText.id);
   else { state.channel = null; renderEmptyChat('No text channels yet'); $('composer').classList.add('hidden'); }
   animateView();
@@ -1808,6 +1854,7 @@ async function openChannel(cid) {
   $('message-input').placeholder = 'Message #' + c.name + '\u2026';
   $('composer-hint').textContent = '';
   $('message-input').focus();
+  saveLastLocation({ serverId: state.server ? state.server.id : null, channelId: cid, dmId: null });
 }
 
 /* ============================================================
@@ -2485,7 +2532,7 @@ function attachmentNode(m) {
     wrap.classList.add('media');
     if (isGif) wrap.classList.add('gif');
     wrap.innerHTML = `<img src="${escapeHtml(url)}" alt="${escapeHtml(m.attachment_name || '')}" loading="lazy" decoding="async">`;
-    wrap.querySelector('img').addEventListener('click', () => lightbox(url, 'image'));
+    wrap.querySelector('img').addEventListener('click', () => lightbox(url, 'image', m.attachment_name || ''));
     if (sizeText) wrap.insertAdjacentHTML('beforeend', `<span class="att-size">${sizeText}</span>`);
   } else if (t.startsWith('video/')) {
     /* Videos show a poster frame with a centred play button; pressing play
@@ -2634,11 +2681,24 @@ function flashMessage(mid) {
   setTimeout(() => node.classList.remove('flash'), 1500);
 }
 
-function lightbox(url, type) {
+function lightbox(url, type, name) {
   const lb = document.createElement('div');
   lb.className = 'lightbox';
-  lb.innerHTML = `<span class="close">&times;</span>` + (type === 'image' ? `<img src="${escapeHtml(url)}">` : `<video src="${escapeHtml(url)}" controls autoplay></video>`);
-  lb.addEventListener('click', () => lb.remove());
+  const media = type === 'image'
+    ? `<img src="${escapeHtml(url)}" alt="${escapeHtml(name || '')}">`
+    : `<video src="${escapeHtml(url)}" controls autoplay></video>`;
+  lb.innerHTML = `<div class="lb-bar">
+      <span class="lb-name">${escapeHtml(name || '')}</span>
+      <a class="lb-dl" href="${escapeHtml(url)}" download="${escapeHtml(name || '')}" title="Download">${icon('download')}</a>
+      <button class="lb-close" title="Close (Esc)">${icon('xmark')}</button>
+    </div>
+    <div class="lb-stage">${media}</div>`;
+  hydrateIcons(lb);
+  const close = () => { document.removeEventListener('keydown', onKey); lb.remove(); };
+  const onKey = (e) => { if (e.key === 'Escape') close(); };
+  document.addEventListener('keydown', onKey);
+  lb.addEventListener('click', (e) => { if (!e.target.closest('.lb-stage img, .lb-stage video, .lb-bar')) close(); });
+  lb.querySelector('.lb-close').addEventListener('click', close);
   document.body.appendChild(lb);
 }
 
@@ -2825,8 +2885,21 @@ function renderAttachmentPreview() {
   if (!a) { p.classList.add('hidden'); $('composer-box').classList.remove('attached'); return; }
   p.classList.remove('hidden');
   $('composer-box').classList.add('attached');
-  const thumb = (a.type || '').startsWith('image/') ? `<img src="${escapeHtml(a.url)}">` : `<div class="fi" style="width:48px;height:48px;border-radius:6px;background:#5865f2;display:grid;place-items:center;color:#fff">${icon('file')}</div>`;
-  p.innerHTML = `${thumb}<span class="ap-name">${escapeHtml(a.name)}</span><button id="ap-remove">${icon('xmark')}</button>`;
+  const type = (a.type || '').toLowerCase();
+  const isGif = type === 'image/gif' || /\.gif(\?|$)/i.test(a.url || '');
+  const isImage = type.startsWith('image/');
+  const isVideo = type.startsWith('video/');
+  let thumb;
+  if (isImage) {
+    thumb = `<div class="ap-thumb"><img src="${escapeHtml(a.url)}" alt="${escapeHtml(a.name || '')}">${isGif ? '<span class="ap-badge">GIF</span>' : ''}</div>`;
+  } else if (isVideo) {
+    thumb = `<div class="ap-thumb"><video src="${escapeHtml(a.url)}" muted playsinline preload="metadata"></video><span class="ap-badge">VIDEO</span></div>`;
+  } else {
+    thumb = `<div class="ap-file">${icon('file')}</div>`;
+  }
+  const sizeText = fmtBytes(a.size);
+  const sub = [sizeText, isGif ? 'GIF' : (isImage ? 'Image' : (isVideo ? 'Video' : 'File'))].filter(Boolean).join(' \u2022 ');
+  p.innerHTML = `${thumb}<div class="ap-meta"><span class="ap-name">${escapeHtml(a.name || 'file')}</span>${sub ? `<span class="ap-sub">${escapeHtml(sub)}</span>` : ''}</div><button id="ap-remove" title="Remove">${icon('xmark')}</button>`;
   $('ap-remove').addEventListener('click', clearAttachment);
 }
 function clearAttachment() {
@@ -3955,7 +4028,7 @@ function renderOwnProfile(user) {
           <button class="hero-edit" id="pf-banner">${icon('image')} Change Banner</button>
         </div>
         <div class="profile-idcard">
-          <div class="pic-avatar">${avatarHTML(user, 96, user.status || 'offline')}</div>
+          <div class="pic-avatar">${avatarHTML(user, 116, user.status || 'offline')}</div>
           <div class="pic-name">${escapeHtml(displayName)}</div>
           <div class="pic-tag">${escapeHtml(fullTag(user))}</div>
           <div class="pic-status"><span class="dot ${user.status || 'online'}"></span>${escapeHtml(user.custom_status || statusLabel(user.status))}</div>
@@ -4062,6 +4135,7 @@ function renderOtherProfile(user, ctx) {
           <button class="dp-more" id="pf-more-2" title="More Options">${icon('ellipsis-vertical')}</button>
         </div>
       </div>
+      <div class="dp-scroll">
       <div class="dp-divider"></div>
       <div class="dp-grid">
         <div class="dp-col">
@@ -4085,6 +4159,7 @@ function renderOtherProfile(user, ctx) {
           ${mutualServersHTML || `<div class="dp-section"><div class="dp-label">Mutual Servers</div><div class="dp-value dp-dim">No servers in common</div></div>`}
           ${mutualFriendsHTML || `<div class="dp-section"><div class="dp-label">Mutual Friends</div><div class="dp-value dp-dim">No friends in common</div></div>`}
         </div>
+      </div>
       </div>
     </div>`, { modalClass: 'oprofile-modal' });
 
@@ -4952,6 +5027,17 @@ function showInviteResult(invite) {
   });
 }
 
+/* Can the signed-in user revoke this invite? Only its creator, or a server
+   owner/admin. Mirrors the check enforced by DELETE /api/invites/:code. */
+function canRevokeInvite(inv, s) {
+  if (!inv || !s) return false;
+  if (inv.creator_id === me.id) return true;
+  if (s.owner_id === me.id) return true;
+  const mine = (state.members || []).find(m => m.id === me.id);
+  const role = mine && (mine.member_role || mine.role);
+  return role === 'owner' || role === 'admin';
+}
+
 async function loadInviteList(s) {
   const list = $('inv-list');
   if (!list) return;
@@ -4959,7 +5045,7 @@ async function loadInviteList(s) {
     const { invites } = await api('/api/servers/' + s.id + '/invites');
     const active = invites.filter(i => i.valid).length;
     const countEl = $('inv-count');
-    if (countEl) countEl.textContent = active + ' active';
+    if (countEl) countEl.textContent = active + ' / 5 active';
     if (!invites.length) { list.innerHTML = `<div class="inv-empty">No invites yet \u2014 generate one above to get started.</div>`; return; }
     list.innerHTML = invites.map(inv => `
       <div class="invite-row${inv.valid ? '' : ' inactive'}">
@@ -4969,7 +5055,7 @@ async function loadInviteList(s) {
           <div class="ir-meta">${escapeHtml(inviteExpiryLabel(inv))} \u00b7 ${inv.max_uses ? `${inv.uses}/${inv.max_uses} uses` : `${inv.uses} use${inv.uses === 1 ? '' : 's'}`}</div>
         </div>
         <button class="ir-btn ir-copy" data-copy="${escapeHtml(inv.code)}" title="Copy link">${icon('copy')}</button>
-        <button class="ir-btn ir-revoke" data-revoke="${escapeHtml(inv.code)}" title="Revoke">${icon('trash')}</button>
+        ${canRevokeInvite(inv, s) ? `<button class="ir-btn ir-revoke" data-revoke="${escapeHtml(inv.code)}" title="Revoke">${icon('trash')}</button>` : `<button class="ir-btn ir-locked" disabled title="Only the invite creator or a server admin can revoke this">${icon('lock')}</button>`}
       </div>`).join('');
     hydrateIcons(list);
     list.querySelectorAll('[data-copy]').forEach(b => b.addEventListener('click', async () => {

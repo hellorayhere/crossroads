@@ -1396,6 +1396,9 @@ app.delete('/api/servers/:id/roles/:rid', auth, (req, res) => {
 
 /* ---------------- Server invites ---------------- */
 
+/* How many live invite links a single server may hold at once. */
+const MAX_ACTIVE_INVITES = 5;
+
 /* Create an invite. Body: { expires_in: minutes|'never', max_uses: number|null } */
 app.post('/api/servers/:id/invites', auth, (req, res) => {
   const srv = getServerForUser(req.params.id, req.user.id);
@@ -1413,6 +1416,16 @@ app.post('/api/servers/:id/invites', auth, (req, res) => {
   if (max_uses !== undefined && max_uses !== null && max_uses !== '' && max_uses !== 'unlimited') {
     const mu = parseInt(max_uses, 10);
     if (isFinite(mu) && mu > 0) maxUses = mu;
+  }
+  /* A server may only hold MAX_ACTIVE_INVITES live links at a time. Expired or
+     fully-used links do not count, so revoking/letting one lapse frees a slot. */
+  const now0 = Date.now();
+  const active = db.prepare('SELECT * FROM invites WHERE server_id = ?').all(srv.id)
+    .filter(r => !(r.expires_at && now0 > r.expires_at) && !(r.max_uses && r.uses >= r.max_uses));
+  if (active.length >= MAX_ACTIVE_INVITES) {
+    return res.status(400).json({
+      error: `This server already has ${MAX_ACTIVE_INVITES} active invites. Revoke one before creating another.`
+    });
   }
   let code = newInviteCode();
   // Extremely unlikely collision, but guard anyway.
@@ -1432,13 +1445,16 @@ app.get('/api/servers/:id/invites', auth, (req, res) => {
   res.json({ invites: rows.map(invitePublic) });
 });
 
-/* Revoke an invite (creator or server owner). */
+/* Revoke an invite. Allowed for the person who created it, or a server
+   owner/admin. A plain member can never revoke somebody else's link. */
 app.delete('/api/invites/:code', auth, (req, res) => {
   const row = db.prepare('SELECT * FROM invites WHERE code = ?').get(req.params.code);
   if (!row) return res.status(404).json({ error: 'Invite not found' });
   const srv = db.prepare('SELECT * FROM servers WHERE id = ?').get(row.server_id);
-  if (row.creator_id !== req.user.id && (!srv || srv.owner_id !== req.user.id)) {
-    return res.status(403).json({ error: 'You cannot revoke this invite' });
+  if (!srv) return res.status(404).json({ error: 'Invite not found' });
+  const isCreator = row.creator_id === req.user.id;
+  if (!isCreator && !isServerAdmin(srv, req.user.id)) {
+    return res.status(403).json({ error: 'Only the invite creator or a server admin can revoke this invite' });
   }
   db.prepare('DELETE FROM invites WHERE code = ?').run(row.code);
   res.json({ ok: true });
