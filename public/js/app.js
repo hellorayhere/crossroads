@@ -482,15 +482,36 @@ function saveSetting(key, value) {
   }, 250);
 }
 
-/* ---------------- API ---------------- */
+/* ---------------- API ----------------
+   Render's free plan stops the service when it has been idle, so the very first
+   request after a quiet spell can fail with a network error or a 502/503 while
+   the instance boots. Boot-time calls pass `retries` so they wait out the cold
+   start instead of showing an error to the visitor. */
 async function api(path, opts = {}) {
   const headers = Object.assign({ 'Authorization': 'Bearer ' + token }, opts.headers || {});
   if (opts.body && !(opts.body instanceof FormData)) headers['Content-Type'] = 'application/json';
-  const res = await fetch(API + path, Object.assign({}, opts, { headers }));
-  if (res.status === 401) { logout(); throw new Error('Session expired'); }
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.error || 'Request failed');
-  return data;
+  const init = Object.assign({}, opts, { headers });
+  const tries = Number.isFinite(opts.retries) ? opts.retries : 0;
+  delete init.retries;
+  let lastErr = null;
+  for (let i = 0; i <= tries; i++) {
+    try {
+      const res = await fetch(API + path, init);
+      if (res.status === 401) { logout(); throw new Error('Session expired'); }
+      if ((res.status === 502 || res.status === 503 || res.status === 504) && i < tries) {
+        await new Promise(r => setTimeout(r, 1200 * (i + 1)));
+        continue;
+      }
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'Request failed');
+      return data;
+    } catch (e) {
+      lastErr = e;
+      if (e.message === 'Session expired' || i >= tries) throw e;
+      await new Promise(r => setTimeout(r, 1200 * (i + 1)));
+    }
+  }
+  throw lastErr || new Error('Request failed');
 }
 
 function logout() {
@@ -707,22 +728,47 @@ function setChosenStatus(status) {
   pushPresence(true);
 }
 
+/* The free Render plan stops the service when it is idle, so the first request
+   can take up to a minute. Tell the visitor what is happening instead of
+   leaving a generic spinner, and keep retrying until the instance answers. */
+let wakeHintTimer = null;
+function showWakeHint() {
+  const sub = document.querySelector('#boot-gate .bg-sub');
+  if (sub) sub.textContent = 'Waking up the server\u2026 this can take up to a minute.';
+  const gate = document.getElementById('boot-gate');
+  if (gate) gate.classList.add('waking');
+}
+function clearWakeHint() {
+  if (wakeHintTimer) { clearTimeout(wakeHintTimer); wakeHintTimer = null; }
+  const gate = document.getElementById('boot-gate');
+  if (gate) gate.classList.remove('waking');
+}
+
 async function init() {
   if (!token) { window.location.href = '/'; return; }
+  /* After 4 seconds without a response, assume a cold start is in progress. */
+  wakeHintTimer = setTimeout(showWakeHint, 4000);
+  let meData = null;
   try {
-    const { user } = await api('/api/me');
-    me = user;
-    myChosenStatus = me.status || 'online';
-    localStorage.setItem('cr_user', JSON.stringify(me));
+    meData = await api('/api/me', { retries: 8 });
   } catch (e) {
-    /* Invalid / expired session: clear it and send the visitor to the landing
-       page instead of leaving them on a half-loaded app. */
-    try { localStorage.removeItem('cr_token'); localStorage.removeItem('cr_user'); } catch (err) {}
-    window.location.replace('/');
+    /* A real 401 logs the user out via api(); a network failure means the
+       instance never woke up, so show a retry instead of bouncing to login. */
+    if (e.message !== 'Session expired') {
+      clearWakeHint();
+      const sub = document.querySelector('#boot-gate .bg-sub');
+      if (sub) sub.textContent = 'The server is taking too long to respond. Reloading\u2026';
+      setTimeout(() => location.reload(), 2500);
+      return;
+    }
     return;
   }
+  clearWakeHint();
+  me = meData.user;
+  myChosenStatus = me.status || 'online';
+  try { localStorage.setItem('cr_user', JSON.stringify(me)); } catch (err) { /* ignore */ }
   try {
-    const { settings } = await api('/api/settings');
+    const { settings } = await api('/api/settings', { retries: 4 });
     state.settings = settings || {};
   } catch (e) { state.settings = {}; }
   applyTheme();
@@ -996,7 +1042,7 @@ function beep() {
    SERVERS RAIL
    ============================================================ */
 async function loadServers() {
-  const { servers } = await api('/api/servers');
+  const { servers } = await api('/api/servers', { retries: 3 });
   state.servers = servers;
   renderRail();
 }
@@ -1041,7 +1087,7 @@ function showHome() {
 }
 
 async function loadDMs() {
-  const { dms } = await api('/api/dms');
+  const { dms } = await api('/api/dms', { retries: 3 });
   state.dms = dms;
   for (const d of dms) if (d.user) state.usersCache[d.user.id] = d.user;
   if (!state.server && state.view !== 'friends') renderDMList();
@@ -1190,7 +1236,7 @@ async function closeDM(d) {
    ============================================================ */
 async function loadFriends() {
   try {
-    const data = await api('/api/relationships');
+    const data = await api('/api/relationships', { retries: 3 });
     state.friends = {
       friends: data.friends || [],
       incoming: data.incoming || [],
@@ -2991,7 +3037,7 @@ async function togglePin(m) {
    ============================================================ */
 async function loadNotifications() {
   try {
-    const { notifications, unread } = await api('/api/notifications');
+    const { notifications, unread } = await api('/api/notifications', { retries: 3 });
     state.notifications = notifications || [];
     state.unread = unread || 0;
     renderNotifBadge();

@@ -9,6 +9,16 @@
     return;
   }
 
+  /* Warm the server up as soon as the landing page loads. Render's free plan
+     sleeps after ~15 minutes idle, so without this the first login attempt
+     would sit through the whole cold start. Firing /health now means the
+     instance is usually awake by the time the visitor submits the form. */
+  (function warmUp() {
+    try {
+      fetch('/health', { cache: 'no-store' }).catch(function () {});
+    } catch (e) { /* ignore */ }
+  })();
+
   /* ---------------- Disable native right-click context menu ---------------- */
   document.addEventListener('contextmenu', (e) => e.preventDefault());
   document.addEventListener('dragstart', (e) => {

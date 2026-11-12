@@ -33,6 +33,9 @@
     @keyframes bgspin { to { transform: rotate(360deg); } }
     .boot-gate .bg-brand { font-weight: 800; letter-spacing: .02em; font-size: 15px; }
     .boot-gate .bg-sub { font-size: 12.5px; color: var(--text-muted, #949ba4); }
+    /* Shown when the free Render instance is waking from sleep. */
+    .boot-gate.waking .bg-spinner { animation-duration: 1.4s; opacity: .8; }
+    .boot-gate.waking .bg-sub { color: var(--text-normal, #dbdee1); }
   </style>
 </head>
 <body data-theme="dark" data-bg="graphite">

@@ -1,0 +1,68 @@
+# ---------------------------------------------------------------------------
+# OPTIONAL EXTERNAL KEEP-ALIVE
+#
+# The server already keeps itself awake: it pings its own public URL every
+# 10 minutes (see startKeepAlive() in server.js), and Render counts those
+# requests as inbound traffic. This file is a belt-and-braces backup for the
+# case where the instance is already asleep and cannot ping itself.
+#
+# To enable it, copy this file to .github/workflows/keepalive.yml and push with
+# a token that has the `workflow` scope:
+#
+#   cp ops/github-keepalive.yml .github/workflows/keepalive.yml
+#   git add .github/workflows/keepalive.yml && git commit -m "Enable keepalive"
+#   git push
+#
+# Any free external monitor works just as well, for example cron-job.org or
+# UptimeRobot, pointed at https://crossroadsv2.onrender.com/health every
+# 5-10 minutes. GitHub's scheduler can drift a few minutes; the idle window is
+# 15 minutes, so a 10 minute interval is safe.
+# ---------------------------------------------------------------------------
+name: keepalive
+
+# Render's free plan stops a web service after ~15 minutes without inbound HTTP
+# traffic. This workflow pings the public /health endpoint every 10 minutes so
+# the instance never idles out, and so a sleeping instance is woken quickly.
+#
+# Notes:
+#   * GitHub's scheduler can be delayed a few minutes under load, which is fine
+#     because the idle window is 15 minutes.
+#   * Scheduled workflows are disabled after 60 days of repository inactivity;
+#     any commit re-enables them.
+#   * You can also run it by hand from the Actions tab (workflow_dispatch).
+
+on:
+  schedule:
+    - cron: '*/10 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: keepalive
+  cancel-in-progress: false
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Ping Crossroads /health
+        env:
+          TARGET: https://crossroadsv2.onrender.com/health
+        run: |
+          set -u
+          for attempt in 1 2 3 4 5; do
+            code=$(curl -sS -o /tmp/health.txt -w '%{http_code}' --max-time 90 "$TARGET" || echo "000")
+            echo "attempt $attempt -> HTTP $code"
+            if [ "$code" = "200" ]; then
+              cat /tmp/health.txt
+              echo
+              echo "Service is awake."
+              exit 0
+            fi
+            sleep 25
+          done
+          echo "Health check did not return 200 after 5 attempts."
+          exit 1

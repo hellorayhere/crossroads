@@ -47,6 +47,62 @@ app.use(express.urlencoded({ extended: true }));
 app.use('/uploads', express.static(UPLOAD_DIR));
 app.use(express.static(path.join(__dirname, 'public')));
 
+/* ---------------- Health check + keep-alive ----------------
+   Render's free plan stops a web service after ~15 minutes with no inbound HTTP
+   traffic. The next visitor then pays a ~50 second cold start ("incoming HTTP
+   request" only shows up once something finally hits the service).
+
+   Two layers keep the instance warm:
+     1. /health is a tiny endpoint that touches no database and needs no auth,
+        so it is cheap enough to poll every few minutes.
+     2. An in-process self-ping hits the service's own public URL on a schedule.
+        Requests that arrive through Render's proxy count as inbound traffic,
+        which resets the idle timer.
+   A GitHub Actions cron (.github/workflows/keepalive.yml) also pings /health
+   from outside, so the service can be woken even if it already fell asleep. */
+const bootedAt = Date.now();
+
+app.get('/health', (req, res) => {
+  res.set('Cache-Control', 'no-store, max-age=0');
+  res.json({
+    ok: true,
+    service: 'crossroads',
+    uptime: Math.round((Date.now() - bootedAt) / 1000),
+    ts: Date.now()
+  });
+});
+
+app.get('/ping', (req, res) => {
+  res.set('Cache-Control', 'no-store, max-age=0');
+  res.type('text/plain').send('pong');
+});
+
+/* Self-ping scheduler. KEEPALIVE_URL overrides the detected public URL;
+   KEEPALIVE_DISABLED=1 turns it off (useful for local development). */
+const KEEPALIVE_MS = Math.max(60 * 1000, parseInt(process.env.KEEPALIVE_INTERVAL_MS, 10) || 10 * 60 * 1000);
+const KEEPALIVE_URL = (process.env.KEEPALIVE_URL || process.env.RENDER_EXTERNAL_URL || '').replace(/\/+$/, '');
+
+function startKeepAlive() {
+  if (process.env.KEEPALIVE_DISABLED === '1' || !KEEPALIVE_URL) return;
+  const url = KEEPALIVE_URL + '/health';
+  const tick = async () => {
+    try {
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 20000);
+      const r = await fetch(url, { signal: ctrl.signal, headers: { 'User-Agent': 'crossroads-keepalive' } });
+      clearTimeout(timer);
+      if (!r.ok) console.log(`[keepalive] unexpected ${r.status} from ${url}`);
+    } catch (e) {
+      console.log('[keepalive] self-ping failed:', e.message);
+    }
+  };
+  /* Warm up shortly after boot, then on a steady interval. */
+  setTimeout(tick, 8000).unref?.();
+  const iv = setInterval(tick, KEEPALIVE_MS);
+  if (iv.unref) iv.unref();
+  console.log(`[keepalive] self-ping every ${Math.round(KEEPALIVE_MS / 60000)} min -> ${url}`);
+}
+
 /* ---------------- Uploads ---------------- */
 const storage = multer.diskStorage({
   destination: (req, file, cb) => cb(null, UPLOAD_DIR),
@@ -1931,4 +1987,5 @@ server.listen(PORT, () => {
   } else {
     console.log('[persist] durable storage disabled (no GH_DATA_REPO set)');
   }
+  startKeepAlive();
 });
