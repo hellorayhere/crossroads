@@ -178,7 +178,7 @@ button:active, .rail-item:active, .channel:active, .dm-item:active, .member:acti
 .sidebar-banner {
   flex: 0 0 auto;
   width: calc(100% - 16px);
-  height: 116px;
+  height: 148px;
   margin: 6px 8px 8px;
   border-radius: 8px;
   background-size: cover;

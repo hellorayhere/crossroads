@@ -206,6 +206,9 @@ const REL_LABEL = {
 /* ---------------- Icon set (inline SVG, clean line style) ---------------- */
 const ICONS = {
   'message-circle': '<path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/>',
+  /* Direct Messages: rounded speech bubble with a typing indicator. Reads
+     much more clearly at 19px than the old plain outline bubble. */
+  'message-dots': '<path d="M20.5 11.6c0 1.2-.3 2.3-.9 3.3a8 8 0 0 1-7.1 4.2c-1.2 0-2.4-.3-3.4-.8L3.5 20.5l1.8-5.3a7.9 7.9 0 0 1-.8-3.6 8 8 0 0 1 4.2-7.1c1-.6 2.1-.9 3.3-.9h.5a8 8 0 0 1 8 8v.5z"/><circle cx="8.9" cy="11.6" r="1.05" fill="currentColor" stroke="none"/><circle cx="12.3" cy="11.6" r="1.05" fill="currentColor" stroke="none"/><circle cx="15.7" cy="11.6" r="1.05" fill="currentColor" stroke="none"/>',
   'plus': '<line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>',
   'minus': '<line x1="5" y1="12" x2="19" y2="12"/>',
   'compass': '<circle cx="12" cy="12" r="10"/><polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76"/>',
@@ -1667,7 +1670,7 @@ function renderDMList() {
 
   const cat = document.createElement('div');
   cat.className = 'channel-category dm-cat';
-  cat.innerHTML = `<span class="cat-caret">${icon('caret-down')}</span><span class="cat-ic">${icon('message-circle')}</span><span class="cat-name">${t('Direct Messages')}</span><button class="cat-add" id="dm-cat-add" title="${t('Start a conversation')}">${icon('plus')}</button>`;
+  cat.innerHTML = `<span class="cat-caret">${icon('caret-down')}</span><span class="cat-ic">${icon('message-dots')}</span><span class="cat-name">${t('Direct Messages')}</span><button class="cat-add" id="dm-cat-add" title="${t('Start a conversation')}">${icon('plus')}</button>`;
   cat.querySelector('#dm-cat-add').addEventListener('click', (e) => { e.stopPropagation(); openNewDM(); });
   list.appendChild(cat);
 
