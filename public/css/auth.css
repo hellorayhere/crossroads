@@ -59,12 +59,65 @@ body {
   position: relative;
   z-index: 1;
   width: 100%;
-  max-width: 1060px;
+  max-width: 1200px;
   display: grid;
   grid-template-columns: 1fr;
   gap: 0;
   align-items: center;
 }
+
+/* Auth card + Discord invite sit side by side; they wrap on narrow screens. */
+.auth-right {
+  display: flex;
+  gap: 24px;
+  align-items: flex-start;
+  justify-content: center;
+  flex-wrap: wrap;
+  width: 100%;
+}
+
+/* ---------------- Discord invite box ---------------- */
+.discord-card {
+  width: 260px;
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 13px;
+  padding: 16px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+  text-decoration: none;
+  color: inherit;
+  transition: border-color 0.18s var(--ease), background 0.18s var(--ease), transform 0.18s var(--ease);
+  animation: card-in 0.6s var(--ease-out) both;
+  animation-delay: 0.12s;
+}
+.discord-card:hover {
+  border-color: var(--border-strong);
+  background: var(--bg-2);
+  transform: translateY(-2px);
+}
+.discord-card .dc-media {
+  display: block;
+  width: 100%;
+  border-radius: 10px;
+  overflow: hidden;
+  background: var(--input);
+  border: 1px solid var(--border);
+}
+.discord-card .dc-media img { display: block; width: 100%; height: auto; }
+.discord-card .dc-title { font-size: 15px; font-weight: 700; color: var(--header); letter-spacing: -0.2px; }
+.discord-card .dc-sub { font-size: 13px; line-height: 1.45; color: var(--muted); }
+.discord-card .dc-btn {
+  display: flex; align-items: center; justify-content: center;
+  height: 40px; border-radius: var(--radius-sm);
+  background: var(--brand); color: #fff;
+  font-size: 14px; font-weight: 600;
+  transition: background 0.15s var(--ease);
+}
+.discord-card:hover .dc-btn { background: var(--brand-hover); }
 
 /* ---------------- Info panel ---------------- */
 .info-panel {
@@ -367,13 +420,15 @@ form.swap-in { animation: rise 0.32s var(--ease-out) both; }
 
 /* ---------------- Responsive ---------------- */
 @media (min-width: 960px) {
-  .auth-shell { grid-template-columns: 1.1fr 1fr; }
-  .info-panel { display: block; }
-  .auth-card { margin: 0; justify-self: end; }
+  .auth-shell { grid-template-columns: minmax(0, 1fr) auto; }
+  .info-panel { display: block; padding-right: 48px; }
+  .auth-right { justify-content: flex-end; }
+  .auth-card { margin: 0; }
 }
 @media (max-width: 959px) {
   body { padding: 26px 18px; }
   .auth-card { max-width: 430px; }
+  .discord-card { width: 100%; max-width: 430px; }
 }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 0.001ms !important; animation-iteration-count: 1 !important; transition-duration: 0.001ms !important; }

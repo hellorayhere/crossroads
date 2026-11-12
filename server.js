@@ -13,6 +13,12 @@ const { newId, newInviteCode, randomColor, randomDiscriminator } = require('./ut
 
 const PORT = process.env.PORT || 3000;
 const JWT_SECRET = process.env.JWT_SECRET || 'crossroads-dev-secret-change-me';
+/* Stable identifier for the code that is currently running. Render injects
+   RENDER_GIT_COMMIT (the deployed commit SHA) automatically, so this changes
+   on every deploy. The client polls /api/version and shows a "refresh for the
+   new update" prompt when the value it sees no longer matches the one the page
+   was loaded with. BUILD_ID lets a non-Render host supply its own value. */
+const BUILD_ID = process.env.RENDER_GIT_COMMIT || process.env.BUILD_ID || 'dev';
 /* Platform administrators. Defaults to the account named "keep"; can be
    extended with a comma-separated ADMIN_USERNAMES environment variable.
    Accounts explicitly whitelisted by the owner are also treated as admins
@@ -140,6 +146,15 @@ app.get('/health', (req, res) => {
 app.get('/ping', (req, res) => {
   res.set('Cache-Control', 'no-store, max-age=0');
   res.type('text/plain').send('pong');
+});
+
+/* Version probe used by the client's soft-update watcher. `build` changes on
+   every deploy (Render sets RENDER_GIT_COMMIT), so the client can tell when the
+   running server is newer than the page the visitor is looking at. Never cached
+   so a fresh deploy is detected immediately. */
+app.get('/api/version', (req, res) => {
+  res.set('Cache-Control', 'no-store, max-age=0');
+  res.json({ build: BUILD_ID, ts: Date.now() });
 });
 
 /* Self-ping scheduler. KEEPALIVE_URL overrides the detected public URL;

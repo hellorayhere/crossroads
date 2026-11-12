@@ -518,7 +518,11 @@ function avatarHTML(user, size = 40, status = null) {
     ? `<img src="${escapeHtml(user.avatar_url)}" alt="" loading="lazy" decoding="async">`
     : (user.avatar ? escapeHtml(user.avatar) : escapeHtml((user.username || '?')[0].toUpperCase()));
   const dot = status ? `<span class="status-dot ${status}"></span>` : '';
-  return `<div class="avatar" style="width:${size}px;height:${size}px;font-size:${Math.round(size * 0.42)}px;background:${bg}">${inner}${dot}</div>`;
+  /* Use background-color (not the `background` shorthand) so the stylesheet's
+     `background-clip: padding-box` is not reset. That clip is what keeps the
+     avatar's colour from bleeding under a transparent border and forming a
+     coloured ring around the profile picture. */
+  return `<div class="avatar" style="width:${size}px;height:${size}px;font-size:${Math.round(size * 0.42)}px;background-color:${bg};background-clip:padding-box">${inner}${dot}</div>`;
 }
 
 /* ---------------- Settings helpers ---------------- */
@@ -1143,6 +1147,8 @@ async function init() {
   bindGlobalEvents();
   applyLanguage();
   revealApp();
+  /* Watch for a newer deploy and offer a soft refresh. */
+  startUpdateWatcher();
 }
 
 /* Remove the boot gate once the app has real data to show. */
@@ -8070,7 +8076,6 @@ async function deleteChannel(c) {
       else { state.messages = []; renderEmptyChat('This server has no channels yet.'); }
     }
     renderChannelList();
-    toast('Channel deleted', 'success');
   } catch (e) { toast(e.message, 'error'); }
 }
 
@@ -8394,3 +8399,76 @@ async function handleInviteParam() {
 
 /* ---------------- Start ---------------- */
 init().then(handleInviteParam).catch(err => { console.error(err); toast(err.message, 'error'); });
+
+/* ============================================================
+   SOFT UPDATE (deploy watcher)
+   ------------------------------------------------------------
+   Polls /api/version, which returns the build id of the running server
+   (Render's RENDER_GIT_COMMIT, so it changes on every deploy). The id the page
+   was loaded with is captured on the first poll; if a later poll reports a
+   different id, a new build has been deployed and we show a centred prompt that
+   counts down from 20 seconds and then reloads automatically. */
+let updateBaseline = null;
+let updateTimer = null;
+let updateShown = false;
+
+async function startUpdateWatcher() {
+  try {
+    const v = await api('/api/version', { retries: 1 });
+    if (v && v.build) updateBaseline = v.build;
+  } catch (e) { /* version probe is best-effort */ }
+  /* Poll every 30s. Skip while the tab is hidden so background tabs stay quiet;
+     check immediately when the tab becomes visible again. */
+  updateTimer = setInterval(checkForUpdate, 30000);
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) checkForUpdate();
+  });
+}
+
+async function checkForUpdate() {
+  if (updateShown || document.hidden) return;
+  try {
+    const v = await api('/api/version', { retries: 1 });
+    if (!v || !v.build) return;
+    if (updateBaseline === null) { updateBaseline = v.build; return; }
+    if (v.build !== updateBaseline) {
+      updateBaseline = v.build;
+      showUpdatePrompt();
+    }
+  } catch (e) { /* ignore transient errors */ }
+}
+
+function showUpdatePrompt() {
+  if (updateShown) return;
+  updateShown = true;
+  if (updateTimer) { clearInterval(updateTimer); updateTimer = null; }
+
+  let remaining = 20;
+  const overlay = document.createElement('div');
+  overlay.className = 'update-overlay';
+  overlay.innerHTML = `
+    <div class="update-card" role="dialog" aria-modal="true" aria-labelledby="update-title">
+      <div class="update-badge">${icon('refresh')}</div>
+      <h2 class="update-title" id="update-title">Update available</h2>
+      <p class="update-text">A new version of Crossroads has been deployed. Refresh to load the latest update.</p>
+      <div class="update-count">Refreshing automatically in <span class="update-secs">20</span>s</div>
+      <div class="update-actions">
+        <button type="button" class="update-btn primary" id="update-refresh">Refresh now</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+  hydrateIcons(overlay);
+
+  const secsEl = overlay.querySelector('.update-secs');
+  const refresh = () => { try { location.reload(); } catch (e) {} };
+  overlay.querySelector('#update-refresh').addEventListener('click', refresh);
+
+  const tick = setInterval(() => {
+    remaining -= 1;
+    if (secsEl) secsEl.textContent = String(Math.max(0, remaining));
+    if (remaining <= 0) {
+      clearInterval(tick);
+      refresh();
+    }
+  }, 1000);
+}
