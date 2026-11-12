@@ -682,6 +682,201 @@ function logout() {
   window.location.href = '/';
 }
 
+/* ============================================================
+   END-TO-END ENCRYPTION
+   ------------------------------------------------------------
+   Every device generates its own ECDH P-256 keypair. The public half is
+   registered with the server; the private half never leaves this browser.
+   A message is encrypted once with a random AES-256-GCM key, and that key is
+   then wrapped (ECIES: ephemeral ECDH + AES-GCM) for every recipient device.
+   The server stores only ciphertext and wrapped keys, so it can never read a
+   message. Legacy plaintext messages still render normally.
+   ============================================================ */
+const E2E_PREFIX = '\u0001E2E1:';
+const e2e = { ready: null, priv: null, pub: null, keyId: null, config: null };
+
+function e2eB64e(buf) {
+  const bytes = new Uint8Array(buf);
+  let s = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+  return btoa(s);
+}
+function e2eB64d(str) {
+  const bin = atob(str);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+function e2eStorageKey() { return 'cr_e2e_' + (me && me.id ? me.id : 'anon'); }
+function e2eSupported() { return !!(window.crypto && window.crypto.subtle && window.isSecureContext !== false); }
+
+async function e2eInit() {
+  if (e2e.ready) return e2e.ready;
+  e2e.ready = (async () => {
+    if (!e2eSupported() || !me) { e2e.ready = null; return false; }
+    let saved = null;
+    try { saved = JSON.parse(localStorage.getItem(e2eStorageKey()) || 'null'); } catch (e) { saved = null; }
+    try {
+      if (saved && saved.priv && saved.pub && saved.keyId) {
+        e2e.priv = await crypto.subtle.importKey('jwk', saved.priv, { name: 'ECDH', namedCurve: 'P-256' }, false, ['deriveBits']);
+        e2e.pub = saved.pub;
+        e2e.keyId = saved.keyId;
+      } else {
+        const kp = await crypto.subtle.generateKey({ name: 'ECDH', namedCurve: 'P-256' }, true, ['deriveBits']);
+        const privJwk = await crypto.subtle.exportKey('jwk', kp.privateKey);
+        const pubJwk = await crypto.subtle.exportKey('jwk', kp.publicKey);
+        e2e.keyId = 'k_' + Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
+        e2e.priv = kp.privateKey;
+        e2e.pub = pubJwk;
+        localStorage.setItem(e2eStorageKey(), JSON.stringify({ priv: privJwk, pub: pubJwk, keyId: e2e.keyId }));
+      }
+      /* Register (or refresh) this device's public key. */
+      await api('/api/e2e/keys', { method: 'POST', body: JSON.stringify({ key_id: e2e.keyId, public_jwk: JSON.stringify(e2e.pub) }) });
+      return true;
+    } catch (err) {
+      console.warn('[e2e] init failed', err);
+      e2e.ready = null;   /* allow a later retry */
+      return false;
+    }
+  })();
+  return e2e.ready;
+}
+
+async function e2eConfig() {
+  if (e2e.config) return e2e.config;
+  try { e2e.config = await api('/api/e2e/config'); } catch (e) { e2e.config = { enabled: false, explicit_terms: [] }; }
+  return e2e.config;
+}
+
+/* Wrap a raw 32-byte AES key for one recipient public key. */
+async function e2eWrapKey(pubJwk, rawKey) {
+  const pub = await crypto.subtle.importKey('jwk', pubJwk, { name: 'ECDH', namedCurve: 'P-256' }, false, []);
+  const eph = await crypto.subtle.generateKey({ name: 'ECDH', namedCurve: 'P-256' }, true, ['deriveBits']);
+  const bits = await crypto.subtle.deriveBits({ name: 'ECDH', public: pub }, eph.privateKey, 256);
+  const kek = await crypto.subtle.importKey('raw', bits, { name: 'AES-GCM' }, false, ['encrypt']);
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const wrapped = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, kek, rawKey);
+  const ephPub = await crypto.subtle.exportKey('jwk', eph.publicKey);
+  return { e: ephPub, i: e2eB64e(iv), k: e2eB64e(wrapped) };
+}
+
+async function e2eFetchKeys(ids) {
+  const unique = [...new Set(ids.filter(Boolean))];
+  if (!unique.length) return [];
+  const data = await api('/api/e2e/keys?ids=' + encodeURIComponent(unique.join(',')));
+  return data.keys || [];
+}
+
+/* Encrypt a message for the given recipients. Returns { content, encrypted }.
+   If any recipient has no registered key we fall back to plaintext so nobody
+   is ever locked out of a conversation. */
+async function e2eEncrypt(content, recipientIds) {
+  if (!content) return { content, encrypted: false };
+  const ok = await e2eInit();
+  if (!ok) return { content, encrypted: false };
+  const ids = [...new Set((recipientIds || []).filter(Boolean))];
+  if (!ids.includes(me.id)) ids.push(me.id);
+  let keys;
+  try { keys = await e2eFetchKeys(ids); } catch (e) { return { content, encrypted: false }; }
+  const byUser = {};
+  for (const k of keys) (byUser[k.user_id] = byUser[k.user_id] || []).push(k);
+  for (const id of ids) if (!byUser[id] || !byUser[id].length) return { content, encrypted: false };
+  try {
+    const raw = crypto.getRandomValues(new Uint8Array(32));
+    const key = await crypto.subtle.importKey('raw', raw, { name: 'AES-GCM' }, false, ['encrypt']);
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    const ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, new TextEncoder().encode(content));
+    const wrapped = {};
+    for (const k of keys) wrapped[k.key_id] = await e2eWrapKey(JSON.parse(k.public_jwk), raw);
+    const env = { v: 1, iv: e2eB64e(iv), ct: e2eB64e(ct), keys: wrapped };
+    return { content: E2E_PREFIX + JSON.stringify(env), encrypted: true };
+  } catch (e) {
+    console.warn('[e2e] encrypt failed', e);
+    return { content, encrypted: false };
+  }
+}
+
+async function e2eDecrypt(content) {
+  if (typeof content !== 'string' || !content.startsWith(E2E_PREFIX)) return content;
+  const ok = await e2eInit();
+  if (!ok) return null;
+  try {
+    const env = JSON.parse(content.slice(E2E_PREFIX.length));
+    const entry = env.keys && env.keys[e2e.keyId];
+    if (!entry) return null;
+    const ephPub = await crypto.subtle.importKey('jwk', entry.e, { name: 'ECDH', namedCurve: 'P-256' }, false, []);
+    const bits = await crypto.subtle.deriveBits({ name: 'ECDH', public: ephPub }, e2e.priv, 256);
+    const kek = await crypto.subtle.importKey('raw', bits, { name: 'AES-GCM' }, false, ['decrypt']);
+    const raw = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: e2eB64d(entry.i) }, kek, e2eB64d(entry.k));
+    const key = await crypto.subtle.importKey('raw', raw, { name: 'AES-GCM' }, false, ['decrypt']);
+    const pt = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: e2eB64d(env.iv) }, key, e2eB64d(env.ct));
+    return new TextDecoder().decode(pt);
+  } catch (e) {
+    return null;
+  }
+}
+
+/* Decrypt in place so every downstream render path sees plaintext. */
+async function e2eDecryptMessage(m) {
+  if (!m) return m;
+  if (typeof m.content === 'string' && m.content.startsWith(E2E_PREFIX)) {
+    m.encrypted = true;
+    const pt = await e2eDecrypt(m.content);
+    if (pt == null) { m.content = ''; m.decrypt_failed = true; }
+    else m.content = pt;
+  }
+  if (m.reply_to) await e2eDecryptMessage(m.reply_to);
+  return m;
+}
+async function e2eDecryptAll(list) {
+  if (!Array.isArray(list)) return list;
+  for (const m of list) await e2eDecryptMessage(m);
+  return list;
+}
+
+/* Recipient ids for the conversation currently open. */
+function e2eRecipients() {
+  if (state.channel) return (state.members || []).map(x => x.id);
+  if (state.dm && state.dm.user) return [me.id, state.dm.user.id];
+  return [me.id];
+}
+
+/* Mention ids / broadcast ping computed locally (the server cannot parse
+   ciphertext). Mirrors the server's @username and @everyone/@here rules. */
+function e2eMentionIds(text) {
+  if (!text) return [];
+  const cands = mentionCandidates();
+  const ids = new Set();
+  const re = /@([a-zA-Z0-9._]+)/g;
+  let mm;
+  while ((mm = re.exec(text)) !== null) {
+    const name = mm[1].toLowerCase();
+    if (name === 'everyone' || name === 'here') continue;
+    const u = cands.find(x => (x.username || '').toLowerCase() === name);
+    if (u && u.id !== me.id) ids.add(u.id);
+  }
+  return [...ids];
+}
+function e2eBroadcast(text) {
+  if (!text) return null;
+  if (/@everyone\b/i.test(text)) return 'everyone';
+  if (/@here\b/i.test(text)) return 'here';
+  return null;
+}
+
+/* Client-side equivalent of the server's explicit-content filter, used only
+   for encrypted bodies (the server cannot scan ciphertext). */
+async function e2eExplicitCheck(text) {
+  if (!text) return null;
+  if (!state.serverSettings || !state.serverSettings.explicit_filter) return null;
+  const cfg = await e2eConfig();
+  const low = text.toLowerCase();
+  for (const term of (cfg.explicit_terms || [])) {
+    if (term && low.includes(String(term).toLowerCase())) return 'this message contains explicit language';
+  }
+  return null;
+}
+
 /* ---------------- Notices (removed) ----------------
    The grey notification strip at the bottom of the chat column has been
    removed entirely. `toast()` is kept as a no-op so the many call sites that
@@ -925,6 +1120,8 @@ async function init() {
   }
   clearWakeHint();
   me = meData.user;
+  /* Spin up end-to-end encryption for this device (non-blocking). */
+  e2eInit().catch(() => {});
   myChosenStatus = me.status || 'online';
   try { localStorage.setItem('cr_user', JSON.stringify(me)); } catch (err) { /* ignore */ }
   try {
@@ -1048,20 +1245,23 @@ function connectSocket() {
     lastPushedStatus = null;
     pushPresence(true);
   });
-  socket.on('message', (m) => {
+  socket.on('message', async (m) => {
+    await e2eDecryptMessage(m);
     if (state.channel && m.channel_id === state.channel.id) {
       state.messages.push(m); appendMessage(m);
     }
   });
-  socket.on('dm_message', (m) => {
+  socket.on('dm_message', async (m) => {
+    await e2eDecryptMessage(m);
     if (state.dm && m.dm_id === state.dm.id) { state.messages.push(m); appendMessage(m); }
     loadDMs();
   });
-  socket.on('dm_notify', (data) => {
+  socket.on('dm_notify', async (data) => {
     loadDMs();
     if (!state.dm || state.dm.id !== data.dm_id) {
       const who = fullTag(data.message.author);
       bumpDmUnread(data.dm_id);
+      await e2eDecryptMessage(data.message);
       maybeDesktopNotify('New message from ' + who, data.message.content || '');
       if (setting('notifSounds') !== false) playPing();
     }
@@ -1071,7 +1271,8 @@ function connectSocket() {
     if (node) node.remove();
     state.messages = state.messages.filter(x => x.id !== data.id);
   });
-  socket.on('message_updated', (m) => {
+  socket.on('message_updated', async (m) => {
+    await e2eDecryptMessage(m);
     const idx = state.messages.findIndex(x => x.id === m.id);
     if (idx >= 0) state.messages[idx] = m;
     updateMessageNode(m);
@@ -1516,6 +1717,7 @@ async function openDM(d) {
   closeMembersPanel();
   socket.emit('join_dm', d.id);
   const { messages } = await api('/api/dms/' + d.id + '/messages');
+  await e2eDecryptAll(messages);
   state.messages = messages;
   renderMessages();
   $('composer').classList.remove('hidden');
@@ -2185,6 +2387,7 @@ async function openChannel(cid) {
   $('chat-title').onclick = null;
   $('chat-topic').textContent = c.topic || '';
   const { messages } = await api('/api/channels/' + cid + '/messages');
+  await e2eDecryptAll(messages);
   state.messages = messages;
   renderMessages();
   $('composer').classList.remove('hidden');
@@ -2783,15 +2986,16 @@ function messageNode(m, grouped, animate) {
       <button data-act="more" title="More">${icon('ellipsis-vertical')}</button>
     </div>`;
   /* A message that is nothing but a GIF link should show only the GIF. */
-  const bodyText = isEmbeddableMediaUrl((extractUrls(m.content || '')[0] || ''))
+  const failed = !!m.decrypt_failed;
+  const bodyText = failed ? '' : (isEmbeddableMediaUrl((extractUrls(m.content || '')[0] || ''))
     ? stripEmbeddableUrls(m.content)
-    : m.content;
+    : m.content);
   /* Discord enlarges messages that are nothing but emoji ("jumbo" emoji). */
   const emojiOnly = isEmojiOnly(bodyText || '');
   const nEmoji = emojiOnly ? emojiCount(bodyText || '') : 0;
   const jumboCls = emojiOnly ? (nEmoji <= 3 ? ' jumbo' : (nEmoji <= 6 ? ' jumbo lg' : '')) : '';
   node.innerHTML = `${toolbar}${gutter}<div class="body">${m.reply_to ? replyRefHTML(m.reply_to) : ''}${head}
-    <div class="text" data-content>${m.pinned ? `<span class="msg-pin" title="Pinned message">${icon('pin')}</span>` : ''}<span class="text-body${jumboCls}">${formatContent(bodyText)}</span>${m.edited_at ? `<span class="msg-edited" title="Edited ${escapeHtml(formatTime(m.edited_at))}">(edited)</span>` : ''}</div>
+    <div class="text" data-content>${m.encrypted ? `<span class="msg-lock" title="End-to-end encrypted">${icon('lock')}</span>` : ''}${m.pinned ? `<span class="msg-pin" title="Pinned message">${icon('pin')}</span>` : ''}${failed ? `<span class="text-body msg-undecryptable">${icon('lock')} Unable to decrypt this message</span>` : `<span class="text-body${jumboCls}">${formatContent(bodyText)}</span>`}${m.edited_at ? `<span class="msg-edited" title="Edited ${escapeHtml(formatTime(m.edited_at))}">(edited)</span>` : ''}</div>
     <div class="attachment-slot"></div>
     <div class="embed-slot"></div>
     <div class="reactions">${reactionsHTML(m.reactions)}</div>
@@ -3508,7 +3712,17 @@ async function sendMessage() {
   const content = input.value.trim();
   if (!content && !state.pendingAttachment) return;
 
-  const payload = { content };
+  const explicitErr = await e2eExplicitCheck(content);
+  if (explicitErr) { toast('Message blocked: ' + explicitErr, 'error'); return; }
+  const enc = await e2eEncrypt(content, e2eRecipients());
+
+  const payload = { content: enc.content };
+  if (enc.encrypted) {
+    /* The server cannot read ciphertext, so mentions and @everyone/@here
+       pings are resolved here and sent alongside the encrypted body. */
+    payload.mentions = e2eMentionIds(content);
+    payload.broadcast = e2eBroadcast(content);
+  }
   if (state.pendingAttachment) {
     payload.attachment_url = state.pendingAttachment.url;
     payload.attachment_name = state.pendingAttachment.name;
@@ -3863,7 +4077,10 @@ function updateMessageNode(m) {
   const node = document.querySelector(`[data-mid="${m.id}"]`);
   if (!node) return;
   const body = node.querySelector('.text-body');
-  if (body) {
+  if (body && m.decrypt_failed) {
+    body.innerHTML = icon('lock') + ' Unable to decrypt this message';
+    body.className = 'text-body msg-undecryptable';
+  } else if (body) {
     body.innerHTML = formatContent(m.content);
     /* Recompute the jumbo-emoji treatment after an edit. */
     const onlyEmoji = isEmojiOnly(m.content || '');
@@ -3911,7 +4128,11 @@ function editMessage(m) {
     if (!val) { toast('Message cannot be empty', 'error'); return; }
     if (val === (m.content || '').trim()) { cancel(); return; }
     try {
-      const { message } = await api('/api/messages/' + m.id, { method: 'PATCH', body: JSON.stringify({ content: val }) });
+      const enc = await e2eEncrypt(val, e2eRecipients());
+      const body = { content: enc.content };
+      if (enc.encrypted) { body.mentions = e2eMentionIds(val); body.broadcast = e2eBroadcast(val); }
+      const { message } = await api('/api/messages/' + m.id, { method: 'PATCH', body: JSON.stringify(body) });
+      await e2eDecryptMessage(message);
       const idx = state.messages.findIndex(x => x.id === m.id);
       if (idx >= 0) state.messages[idx] = message;
       m.content = message.content; m.edited_at = message.edited_at;
@@ -3950,6 +4171,10 @@ async function loadNotifications() {
   try {
     const { notifications, unread } = await api('/api/notifications', { retries: 3 });
     state.notifications = notifications || [];
+    /* Notification payloads can carry an encrypted message preview. */
+    for (const n of state.notifications) {
+      if (n.data && n.data.message) await e2eDecryptMessage(n.data.message);
+    }
     state.unread = unread || 0;
     renderNotifBadge();
   } catch (e) { /* ignore */ }
@@ -4154,6 +4379,7 @@ async function runSearch(q) {
   else if (searchScope === 'dm' && state.dm) params.set('dm_id', state.dm.id);
   try {
     const { results } = await api('/api/search?' + params.toString());
+    await e2eDecryptAll(results || []);
     renderSearchResults(results || [], q);
   } catch (e) {
     box.innerHTML = `<div class="search-empty">${escapeHtml(e.message)}</div>`;
@@ -4240,6 +4466,7 @@ async function loadPins() {
     let pins = [];
     if (state.channel) { const res = await api('/api/channels/' + state.channel.id + '/pins'); pins = res.pins || []; }
     else if (state.dm) { const res = await api('/api/dms/' + state.dm.id + '/pins'); pins = res.pins || []; }
+    await e2eDecryptAll(pins);
     renderPinsList(pins);
   } catch (e) {
     list.innerHTML = `<div class="notif-empty">${escapeHtml(e.message)}</div>`;

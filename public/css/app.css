@@ -633,7 +633,9 @@ button:active, .rail-item:active, .channel:active, .dm-item:active, .member:acti
 .dp-head { display: flex; align-items: flex-start; gap: 18px; margin-top: 0; position: relative; z-index: 5; }
 .dp-avatar { flex: 0 0 auto; position: relative; z-index: 10; margin-top: -64px; }
 .dp-avatar .avatar {
-  border: 7px solid var(--pf-bg); box-sizing: content-box; box-shadow: none;
+  /* No accent ring around the profile picture: the border stays 7px wide so
+     the avatar's size and position are unchanged, but it is transparent. */
+  border: 7px solid transparent; box-sizing: content-box; box-shadow: none;
   position: relative; z-index: 10; border-radius: 50%;
 }
 .dp-avatar .avatar .status-dot { z-index: 11; }
@@ -1114,6 +1116,11 @@ button:active, .rail-item:active, .channel:active, .dm-item:active, .member:acti
 /* Pinned badge shown inline on a pinned message */
 .msg-pin { display: inline-flex; align-items: center; vertical-align: -2px; margin-right: 6px; color: var(--yellow); font-size: 13px; }
 .msg-pin i { display: inline-flex; }
+/* End-to-end encryption indicators */
+.msg-lock { display: inline-flex; align-items: center; vertical-align: -2px; margin-right: 6px; color: var(--green, #3ba55d); font-size: 12px; opacity: .85; }
+.msg-lock i, .msg-lock svg { display: inline-flex; width: 12px; height: 12px; }
+.msg-undecryptable { display: inline-flex; align-items: center; gap: 5px; color: var(--text-faint); font-style: italic; font-size: 13px; }
+.msg-undecryptable svg { width: 12px; height: 12px; }
 
 /* ============ CUSTOM CONFIRM / PROMPT ============ */
 .confirm-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.6); z-index: 600; display: grid; place-items: center; padding: 20px; }
@@ -1816,7 +1823,7 @@ body[data-theme="light"] .bio-link { color: #0066cc; }
 .profile-modal .pnav-meta { color: var(--accent-ink-2); }
 .profile-modal .pnav-swatch.sel { border-color: var(--accent-ink); }
 .profile-modal .pnav-item:hover { background: var(--accent-edge); }
-.profile-modal .profile-idcard .pic-avatar { border-color: var(--accent); }
+.profile-modal .profile-idcard .pic-avatar { border-color: transparent; }
 .profile-modal .profile-idcard .pic-name { color: var(--accent-ink); }
 .profile-modal .profile-idcard .pic-tag, .profile-modal .profile-idcard .pic-date { color: var(--accent-ink-2); }
 .profile-modal .profile-idcard .pic-status { color: var(--accent-ink); }
@@ -2158,7 +2165,7 @@ body[data-theme="light"] .dp-handle,
 body[data-theme="light"] .dp-bio,
 body[data-theme="light"] .dp-value,
 body[data-theme="light"] .dp-note-text { color: #313338; }
-body[data-theme="light"] .dp-avatar .avatar { border-color: var(--pf-bg); }
+body[data-theme="light"] .dp-avatar .avatar { border-color: transparent; }
 body[data-theme="light"] .dp-divider { background: rgba(0,0,0,.08); }
 body[data-theme="light"] .dp-icon-btn { background: rgba(0,0,0,.4); }
 body[data-theme="light"] .dp-btn,

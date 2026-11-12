@@ -378,6 +378,19 @@ function migrate() {
     )`);
   } catch (e) {}
 
+  // End-to-end encryption public keys. One row per device: the private half
+  // never leaves the browser, so the server can only ever store public keys.
+  // Purely additive.
+  try {
+    db.exec(`CREATE TABLE IF NOT EXISTS e2e_keys (
+      key_id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      public_jwk TEXT NOT NULL,
+      created_at INTEGER NOT NULL
+    )`);
+  } catch (e) {}
+  try { db.exec('CREATE INDEX IF NOT EXISTS idx_e2e_keys_user ON e2e_keys(user_id)'); } catch (e) {}
+
   // Private staff notes attached to an account (never shown to the user).
   try {
     db.exec(`CREATE TABLE IF NOT EXISTS admin_notes (

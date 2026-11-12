@@ -697,6 +697,24 @@ function parseMentionIds(content) {
   return ids;
 }
 
+/* End-to-end encrypted message bodies are opaque to the server, so the client
+   sends the mention list and any @everyone/@here ping it detected alongside
+   the ciphertext. Plaintext messages keep the old server-side parsing. */
+const E2E_PREFIX = '\u0001E2E1:';
+function isEncryptedContent(content) {
+  return typeof content === 'string' && content.startsWith(E2E_PREFIX);
+}
+function resolveMentionIds(content, mentionsIn, selfId) {
+  if (Array.isArray(mentionsIn)) {
+    return [...new Set(mentionsIn.filter(x => typeof x === 'string' && x && x !== selfId))];
+  }
+  return parseMentionIds(content).filter(uid => uid !== selfId);
+}
+function resolveBroadcast(content, broadcastIn) {
+  if (broadcastIn === 'everyone' || broadcastIn === 'here') return broadcastIn;
+  return parseBroadcastPing(content);
+}
+
 function createNotification(userId, type, data) {
   if (!userId) return null;
   const id = newId();
@@ -1681,23 +1699,25 @@ app.post('/api/channels/:id/messages', auth, (req, res) => {
   const srv = getServerForUser(ch.server_id, req.user.id);
   if (!srv) return res.status(403).json({ error: 'Not a member of this server' });
   if (req.user.muted) return res.status(403).json({ error: 'You are muted by a platform administrator.' });
-  const { content, attachment_url, attachment_name, attachment_type, attachment_size, reply_to_id } = req.body || {};
+  const { content, attachment_url, attachment_name, attachment_type, attachment_size, reply_to_id, mentions: mentionsIn, broadcast: broadcastIn } = req.body || {};
   if ((!content || !content.trim()) && !attachment_url) return res.status(400).json({ error: 'Message cannot be empty' });
 
   const sSettings = getServerSettings(srv.id);
+  const encryptedBody = isEncryptedContent(content);
 
   /* Explicit Content Filter: when the server owner turns it on, messages that
      contain explicit language or an explicit-looking attachment are rejected
      before they are stored. Nothing is deleted — the message simply never
-     enters the channel. */
-  if (sSettings.explicit_filter) {
+     enters the channel. Encrypted bodies are filtered client-side (the server
+     cannot read ciphertext), so they skip the server-side text scan. */
+  if (sSettings.explicit_filter && !encryptedBody) {
     const bad = explicitContentReason(content, attachment_type, attachment_name);
     if (bad) return res.status(400).json({ error: 'Blocked by the Explicit Content Filter: ' + bad });
   }
 
   const id = newId();
   const now = Date.now();
-  const mentionIds = parseMentionIds(content).filter(uid => uid !== req.user.id);
+  const mentionIds = resolveMentionIds(content, mentionsIn, req.user.id);
   db.prepare(`INSERT INTO messages (id, channel_id, user_id, content, attachment_url, attachment_name, attachment_type, attachment_size, created_at, reply_to_id, mentions)
               VALUES (?,?,?,?,?,?,?,?,?,?,?)`)
     .run(id, ch.id, req.user.id, (content || '').trim(), attachment_url || null, attachment_name || null, attachment_type || null, Number.isFinite(attachment_size) ? attachment_size : null, now, reply_to_id || null, JSON.stringify(mentionIds));
@@ -1714,7 +1734,7 @@ app.post('/api/channels/:id/messages', auth, (req, res) => {
   /* @everyone / @here. Gated by the server's "Allow @everyone / @here" setting,
      and only the owner + admins may use it (so a random member cannot spam the
      whole server). @here only reaches people who are currently online. */
-  const ping = parseBroadcastPing(content);
+  const ping = resolveBroadcast(content, broadcastIn);
   if (ping) {
     const privileged = srv.owner_id === req.user.id || isServerAdmin(srv, req.user.id);
     if (!sSettings.allow_everyone) {
@@ -1755,7 +1775,7 @@ app.patch('/api/messages/:id', auth, (req, res) => {
   const content = (req.body && req.body.content != null) ? String(req.body.content).trim() : '';
   if (!content && !m.attachment_url) return res.status(400).json({ error: 'Message cannot be empty' });
   const now = Date.now();
-  const mentionIds = parseMentionIds(content).filter(uid => uid !== req.user.id);
+  const mentionIds = resolveMentionIds(content, req.body && req.body.mentions, req.user.id);
   db.prepare('UPDATE messages SET content = ?, edited_at = ?, mentions = ? WHERE id = ?')
     .run(content, now, JSON.stringify(mentionIds), m.id);
   const updated = db.prepare('SELECT * FROM messages WHERE id = ?').get(m.id);
@@ -1898,11 +1918,11 @@ app.post('/api/dms/:id/messages', auth, (req, res) => {
   const dm = db.prepare('SELECT * FROM dm_channels WHERE id = ?').get(req.params.id);
   if (!dm || (dm.user1_id !== req.user.id && dm.user2_id !== req.user.id)) return res.status(404).json({ error: 'DM not found' });
   if (req.user.muted) return res.status(403).json({ error: 'You are muted by a platform administrator.' });
-  const { content, attachment_url, attachment_name, attachment_type, attachment_size, reply_to_id } = req.body || {};
+  const { content, attachment_url, attachment_name, attachment_type, attachment_size, reply_to_id, mentions: mentionsIn } = req.body || {};
   if ((!content || !content.trim()) && !attachment_url) return res.status(400).json({ error: 'Message cannot be empty' });
   const id = newId();
   const now = Date.now();
-  const mentionIds = parseMentionIds(content).filter(uid => uid !== req.user.id);
+  const mentionIds = resolveMentionIds(content, mentionsIn, req.user.id);
   db.prepare(`INSERT INTO messages (id, dm_id, user_id, content, attachment_url, attachment_name, attachment_type, attachment_size, created_at, reply_to_id, mentions)
               VALUES (?,?,?,?,?,?,?,?,?,?,?)`)
     .run(id, dm.id, req.user.id, (content || '').trim(), attachment_url || null, attachment_name || null, attachment_type || null, Number.isFinite(attachment_size) ? attachment_size : null, now, reply_to_id || null, JSON.stringify(mentionIds));
@@ -1920,6 +1940,46 @@ app.post('/api/dms/:id/messages', auth, (req, res) => {
     if (orig && orig.user_id !== req.user.id) createNotification(orig.user_id, 'reply', Object.assign({ message: full }, ctx));
   }
   res.json({ message: full });
+});
+
+/* ---------------- End-to-end encryption ---------------- */
+/* The server only ever sees public keys and ciphertext. Clients generate an
+   ECDH P-256 keypair per device, register the public half here, and wrap each
+   message's random AES-256 key for every recipient device. Decryption happens
+   entirely in the browser. */
+
+app.post('/api/e2e/keys', auth, (req, res) => {
+  const { key_id, public_jwk } = req.body || {};
+  if (!key_id || typeof key_id !== 'string' || key_id.length > 120) return res.status(400).json({ error: 'Invalid key id' });
+  if (!public_jwk || typeof public_jwk !== 'string' || public_jwk.length > 4000) return res.status(400).json({ error: 'Invalid public key' });
+  let parsed;
+  try { parsed = JSON.parse(public_jwk); } catch (e) { return res.status(400).json({ error: 'Invalid public key' }); }
+  if (!parsed || parsed.kty !== 'EC' || parsed.crv !== 'P-256' || !parsed.x || !parsed.y) {
+    return res.status(400).json({ error: 'Only P-256 ECDH public keys are accepted' });
+  }
+  /* A key id belongs to exactly one account; refuse to let another account
+     hijack an existing id. */
+  const existing = db.prepare('SELECT user_id FROM e2e_keys WHERE key_id = ?').get(key_id);
+  if (existing && existing.user_id !== req.user.id) return res.status(409).json({ error: 'Key id already registered' });
+  db.prepare(`INSERT INTO e2e_keys (key_id, user_id, public_jwk, created_at) VALUES (?,?,?,?)
+              ON CONFLICT(key_id) DO UPDATE SET public_jwk = excluded.public_jwk`)
+    .run(key_id, req.user.id, public_jwk, Date.now());
+  res.json({ ok: true });
+});
+
+app.get('/api/e2e/keys', auth, (req, res) => {
+  const ids = String(req.query.ids || '').split(',').map(s => s.trim()).filter(Boolean).slice(0, 200);
+  if (!ids.length) return res.json({ keys: [] });
+  const ph = ids.map(() => '?').join(',');
+  const rows = db.prepare(`SELECT key_id, user_id, public_jwk FROM e2e_keys WHERE user_id IN (${ph})`).all(...ids);
+  res.json({ keys: rows.map(r => ({ key_id: r.key_id, user_id: r.user_id, public_jwk: r.public_jwk })) });
+});
+
+/* The explicit-content word list is not sensitive, and handing it to the
+   browser lets the client run the same filter before encrypting (the server
+   can no longer inspect ciphertext). */
+app.get('/api/e2e/config', auth, (req, res) => {
+  res.json({ enabled: true, explicit_terms: EXPLICIT_TERMS });
 });
 
 /* ---------------- Search ---------------- */
