@@ -7505,6 +7505,10 @@ function admBadgeDialog(badge) {
         <input type="file" id="ab-file" accept="image/*" hidden>
       </div>
     </div>
+    <div class="field"><label>Give to user <span class="opt">username or tag</span></label>
+      <input id="ab-user" placeholder="e.g. alex or alex#1234" autocomplete="off">
+      <div class="ab-user-hint" id="ab-user-hint"></div>
+    </div>
     <div class="confirm-actions"><button class="btn ghost" id="ab-cancel">Cancel</button><button class="btn" id="ab-save">${badge ? 'Save Changes' : 'Create Badge'}</button></div>
   </div>`;
   document.body.appendChild(wrap);
@@ -7523,6 +7527,34 @@ function admBadgeDialog(badge) {
     catch (err) { toast(err.message, 'error'); }
     e.target.value = '';
   });
+  /* Optional: give this badge to a user by username / tag. */
+  const userInput = wrap.querySelector('#ab-user');
+  const userHint = wrap.querySelector('#ab-user-hint');
+  let resolvedUser = null;
+  let lookupTimer = null;
+  const lookupUser = async () => {
+    const q = userInput.value.trim().replace(/^@/, '');
+    resolvedUser = null;
+    if (!q) { userHint.textContent = ''; userHint.className = 'ab-user-hint'; return; }
+    try {
+      const d = await api('/api/admin/users?q=' + encodeURIComponent(q) + '&limit=10');
+      const users = d.users || [];
+      const norm = q.toLowerCase();
+      const exact = users.find(u => (u.tag || '').toLowerCase() === norm || (u.username || '').toLowerCase() === norm || u.id === q);
+      resolvedUser = exact || (users.length === 1 ? users[0] : null);
+      if (resolvedUser) {
+        userHint.textContent = 'Will give to ' + (resolvedUser.tag || resolvedUser.username);
+        userHint.className = 'ab-user-hint ok';
+      } else if (users.length) {
+        userHint.textContent = 'Multiple matches \u2014 type the full tag (name#1234).';
+        userHint.className = 'ab-user-hint warn';
+      } else {
+        userHint.textContent = 'No user found with that username.';
+        userHint.className = 'ab-user-hint bad';
+      }
+    } catch (e) { userHint.textContent = e.message; userHint.className = 'ab-user-hint bad'; }
+  };
+  userInput.addEventListener('input', () => { clearTimeout(lookupTimer); lookupTimer = setTimeout(lookupUser, 350); });
   const done = () => wrap.remove();
   wrap.querySelector('#ab-cancel').addEventListener('click', done);
   wrap.addEventListener('click', (e) => { if (e.target === wrap) done(); });
@@ -7530,11 +7562,23 @@ function admBadgeDialog(badge) {
     const name = wrap.querySelector('#ab-name').value.trim();
     if (!name) { toast('Badge name required', 'error'); return; }
     if (!iconUrl) { toast('Badge image required', 'error'); return; }
+    const wantedUser = userInput.value.trim();
+    if (wantedUser && !resolvedUser) { await lookupUser(); }
+    if (wantedUser && !resolvedUser) { toast('User not found \u2014 check the username or tag', 'error'); return; }
     try {
-      if (badge) await api('/api/admin/badges/' + badge.id, { method: 'PATCH', body: JSON.stringify({ name, icon_url: iconUrl }) });
-      else await api('/api/admin/badges', { method: 'POST', body: JSON.stringify({ name, icon_url: iconUrl }) });
+      let savedBadge = badge;
+      if (badge) {
+        const r = await api('/api/admin/badges/' + badge.id, { method: 'PATCH', body: JSON.stringify({ name, icon_url: iconUrl }) });
+        savedBadge = (r && r.badge) || badge;
+      } else {
+        const r = await api('/api/admin/badges', { method: 'POST', body: JSON.stringify({ name, icon_url: iconUrl }) });
+        savedBadge = r && r.badge;
+      }
+      if (resolvedUser && savedBadge) {
+        await api('/api/admin/users/' + resolvedUser.id + '/badges', { method: 'POST', body: JSON.stringify({ badge_id: savedBadge.id, assigned: true }) });
+      }
       done();
-      toast(badge ? 'Badge updated' : 'Badge created', 'success');
+      toast(resolvedUser ? 'Badge saved and given to ' + (resolvedUser.username || 'user') : (badge ? 'Badge updated' : 'Badge created'), 'success');
       renderAdminTab('badges');
     } catch (e) { toast(e.message, 'error'); }
   });
@@ -8572,6 +8616,11 @@ function openRoleEditor(s, role) {
         ${ROLE_PERMISSIONS.map(([key, label, desc]) => `<label class="re-perm"><input type="checkbox" data-perm="${key}" ${perms[key] ? 'checked' : ''}><div class="re-perm-text"><b>${label}</b><span>${desc}</span></div></label>`).join('')}
       </div>
     </div>
+    ${role && amIAdmin() ? `<div class="field re-assign-field">
+      <div class="re-perms-head"><label>Assigned Members</label><span class="re-perm-count" id="re-assign-count"></span></div>
+      <div class="ra-search">${icon('search')}<input id="re-assign-search" placeholder="Search members\u2026"></div>
+      <div class="ra-list re-assign-list" id="re-assign-list"></div>
+    </div>` : ''}
     <div class="confirm-actions"><button class="btn ghost" id="role-cancel">Cancel</button><button class="btn" id="role-save">${role ? 'Save Changes' : 'Create Role'}</button></div>
   </div>`;
   document.body.appendChild(wrap);
@@ -8623,6 +8672,49 @@ function openRoleEditor(s, role) {
   refreshPreview();
   setIconPreview();
   updatePermCount();
+  /* Inline member assignment for an existing role (owner + admins). */
+  const assignList = wrap.querySelector('#re-assign-list');
+  if (assignList) {
+    const members = state.members || [];
+    const assignCount = wrap.querySelector('#re-assign-count');
+    const renderAssign = (q = '') => {
+      const needle = q.toLowerCase();
+      const filtered = members.filter(m => !needle ||
+        (m.display_name || m.username || '').toLowerCase().includes(needle) ||
+        (m.username || '').toLowerCase().includes(needle));
+      assignList.innerHTML = filtered.map(m => {
+        const isOwnerRow = m.id === s.owner_id;
+        const checked = m.custom_role_id === role.id;
+        return `<label class="ra-row">
+          ${avatarHTML(m, 32, m.status || 'offline')}
+          <div class="ra-name"><b>${escapeHtml(m.display_name || m.username)}</b><span>${escapeHtml(fullTag(m))}</span></div>
+          ${isOwnerRow
+            ? `<span class="ra-owner-tag">${icon('crown')} Owner</span>`
+            : `<input type="checkbox" data-ruid="${m.id}" ${checked ? 'checked' : ''}>`}
+        </label>`;
+      }).join('') || '<div class="inv-empty">No members found.</div>';
+      hydrateIcons(assignList);
+      if (assignCount) {
+        const n = members.filter(m => m.custom_role_id === role.id).length;
+        assignCount.textContent = n + ' assigned';
+      }
+      assignList.querySelectorAll('input[data-ruid]').forEach(cb => cb.addEventListener('change', async () => {
+        const uid = cb.dataset.ruid;
+        cb.disabled = true;
+        try {
+          await api('/api/servers/' + s.id + '/members/' + uid, { method: 'PATCH', body: JSON.stringify({ custom_role_id: cb.checked ? role.id : null }) });
+          const m = members.find(x => x.id === uid);
+          if (m) m.custom_role_id = cb.checked ? role.id : null;
+          if (assignCount) assignCount.textContent = members.filter(x => x.custom_role_id === role.id).length + ' assigned';
+          renderMembers();
+        } catch (e) { cb.checked = !cb.checked; toast(e.message, 'error'); }
+        cb.disabled = false;
+      }));
+    };
+    renderAssign();
+    const rsearch = wrap.querySelector('#re-assign-search');
+    if (rsearch) rsearch.addEventListener('input', e => renderAssign(e.target.value.trim()));
+  }
   const done = () => wrap.remove();
   wrap.querySelector('#role-cancel').addEventListener('click', done);
   wrap.addEventListener('click', (e) => { if (e.target === wrap) done(); });
