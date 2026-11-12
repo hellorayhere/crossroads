@@ -78,12 +78,13 @@ body {
 
 /* ---------------- Discord invite box ---------------- */
 .discord-card {
-  width: 260px;
+  width: 264px;
   flex: 0 0 auto;
   display: flex;
   flex-direction: column;
-  gap: 13px;
-  padding: 16px;
+  gap: 0;
+  padding: 0;
+  overflow: hidden;
   background: var(--card);
   border: 1px solid var(--border);
   border-radius: var(--radius);
@@ -99,20 +100,46 @@ body {
   background: var(--bg-2);
   transform: translateY(-2px);
 }
+/* Full-bleed banner: image fills the top of the card edge to edge. */
 .discord-card .dc-media {
+  position: relative;
   display: block;
   width: 100%;
-  border-radius: 10px;
+  aspect-ratio: 245 / 210;
   overflow: hidden;
-  background: var(--input);
-  border: 1px solid var(--border);
+  background: #0d0f14;
 }
-.discord-card .dc-media img { display: block; width: 100%; height: auto; }
+.discord-card .dc-media img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center;
+}
+/* Crisp, scalable Discord mark replacing the old baked-in icon. */
+.discord-card .dc-logo {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 62px;
+  height: auto;
+  transform: translate(-50%, -50%);
+  color: #fff;
+  filter: drop-shadow(0 4px 14px rgba(0, 0, 0, 0.55));
+  transition: transform 0.25s var(--ease-out);
+}
+.discord-card:hover .dc-logo { transform: translate(-50%, -50%) scale(1.06); }
+.discord-card .dc-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px 16px 16px;
+}
 .discord-card .dc-title { font-size: 15px; font-weight: 700; color: var(--header); letter-spacing: -0.2px; }
 .discord-card .dc-sub { font-size: 13px; line-height: 1.45; color: var(--muted); }
 .discord-card .dc-btn {
   display: flex; align-items: center; justify-content: center;
-  height: 40px; border-radius: var(--radius-sm);
+  height: 40px; margin-top: 2px; border-radius: var(--radius-sm);
   background: var(--brand); color: #fff;
   font-size: 14px; font-weight: 600;
   transition: background 0.15s var(--ease);
