@@ -1861,11 +1861,52 @@ function metaPick(html, prop) {
   const m = html.match(re1) || html.match(re2);
   return m ? m[1] : null;
 }
+/* Giphy / Tenor page links can be resolved to the real media file through the
+   provider's oEmbed endpoint. This is what lets a pasted GIF link render as an
+   actual looping GIF instead of a link card. */
+const OEMBED_PROVIDERS = [
+  { test: /(^|\.)giphy\.com$/i, endpoint: 'https://giphy.com/services/oembed?url=' },
+  { test: /(^|\.)tenor\.com$/i, endpoint: 'https://tenor.com/oembed?url=' }
+];
+
+function pickMediaUrl(obj) {
+  if (!obj || typeof obj !== 'object') return null;
+  const candidates = [obj.url, obj.gif, obj.mp4, obj.webm, obj.image, obj.thumbnail_url];
+  for (const c of candidates) {
+    if (typeof c === 'string' && /^https?:\/\//i.test(c) && /\.(gif|webp|mp4|webm|jpe?g|png)(\?|$)/i.test(c)) {
+      const type = /\.(mp4|webm)(\?|$)/i.test(c) ? 'video' : 'image';
+      return { url: c, type };
+    }
+  }
+  return null;
+}
+
+async function resolveOembed(url, hostname) {
+  const provider = OEMBED_PROVIDERS.find(p => p.test.test(hostname));
+  if (!provider) return null;
+  try {
+    const r = await fetch(provider.endpoint + encodeURIComponent(url), {
+      headers: { 'User-Agent': 'Mozilla/5.0 (compatible; CrossroadsBot/1.0)', 'Accept': 'application/json' },
+      signal: AbortSignal.timeout(6000)
+    });
+    if (!r.ok) return null;
+    const data = await r.json();
+    return pickMediaUrl(data);
+  } catch (e) { return null; }
+}
+
 app.get('/api/embed', auth, async (req, res) => {
   const url = req.query.url;
   if (!url || !/^https?:\/\//i.test(url)) return res.status(400).json({ error: 'Invalid URL' });
   let hostname = '';
   try { hostname = new URL(url).hostname; } catch (e) { return res.status(400).json({ error: 'Invalid URL' }); }
+
+  /* Fast path: known GIF providers resolve straight to the media file. */
+  const media = await resolveOembed(url, hostname);
+  if (media) {
+    return res.json({ url, site: hostname.replace(/^www\./i, ''), title: null, description: null, image: null, media });
+  }
+
   try {
     const r = await fetch(url, {
       headers: { 'User-Agent': 'Mozilla/5.0 (compatible; CrossroadsBot/1.0; +https://crossroads.onrender.com)', 'Accept': 'text/html' },

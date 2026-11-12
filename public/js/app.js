@@ -124,7 +124,8 @@ const SETTINGS_DEFAULTS = {
   theme: 'dark', bg: 'graphite', compact: false, showMembers: true,
   friendRequests: true, safeMode: true, dmFromMembers: true, dataPersonalisation: false, readReceipts: true,
   notifDesktop: true, notifSounds: true, notifBadge: false,
-  echoCancel: true, noiseSuppress: true, inputVolume: 70,
+  echoCancel: true, noiseSuppress: true, autoGain: true, inputVolume: 70,
+  outputVolume: 100, micDeviceId: '', speakerDeviceId: '', voiceLowLatency: true,
   language: 'English, US'
 };
 
@@ -676,17 +677,21 @@ function logout() {
    removed entirely. `toast()` is kept as a no-op so the many call sites that
    report success/failure keep working without spamming the interface. */
 let _toastEl = null, _toastTimer = 0;
+/* A single, quiet toast that matches the rest of the surface: no bright
+   colours, no bounce. Errors are the only thing worth interrupting for, and
+   they are marked by a small muted dot rather than a loud red bar. */
 function toast(msg, kind) {
-  /* Success chatter stays silent (the UI already reflects it), but errors must
-     be visible - a silent failure is indistinguishable from "nothing works". */
-  if (kind !== 'error' || !msg) return;
+  if (!msg) return;
+  if (kind !== 'error' && kind !== 'alert') return;
   try {
     if (!_toastEl) {
       _toastEl = document.createElement('div');
-      _toastEl.className = 'err-toast';
+      _toastEl.className = 'toast';
+      _toastEl.innerHTML = '<span class="toast-dot"></span><span class="toast-msg"></span>';
       document.body.appendChild(_toastEl);
     }
-    _toastEl.textContent = String(msg);
+    _toastEl.classList.toggle('is-alert', kind === 'alert');
+    _toastEl.querySelector('.toast-msg').textContent = String(msg);
     _toastEl.classList.add('show');
     clearTimeout(_toastTimer);
     _toastTimer = setTimeout(() => _toastEl && _toastEl.classList.remove('show'), 4200);
@@ -925,6 +930,7 @@ async function init() {
   await Promise.all([loadServers(), loadFriends(), loadDMs(), loadNotifications()]);
   const restored = await restoreLastLocation();
   if (!restored) showHome();
+  updateTitle();
   bindGlobalEvents();
   applyLanguage();
   revealApp();
@@ -1089,6 +1095,7 @@ function connectSocket() {
     if (state.server && state.server.id === s.id) {
       state.server = Object.assign({}, state.server, s);
       const sn = $('sidebar-name'); if (sn) sn.textContent = s.name;
+      updateTitle();
     }
     renderRail();
     const activeTab = document.querySelector('.ss-tab.active');
@@ -1308,6 +1315,7 @@ function showHome() {
   $('composer').classList.add('hidden');
   renderDMList();
   renderEmptyChat();
+  updateTitle();
   animateView();
   saveLastLocation();
 }
@@ -1414,6 +1422,20 @@ function renderDMList() {
      + button in the "Direct Messages" header is the way to start one. */
 }
 
+/* ------------------------------------------------------------
+   Window title: "crossroads - <server>" in a server, and
+   "crossroads - direct messages" in DMs.
+   ------------------------------------------------------------ */
+const APP_TITLE = 'crossroads';
+function updateTitle() {
+  let suffix = '';
+  if (state.server && state.server.name) suffix = state.server.name;
+  else if (state.dm) suffix = 'direct messages';
+  else if (state.view === 'friends') suffix = 'friends';
+  else if (state.view === 'home') suffix = 'direct messages';
+  document.title = suffix ? APP_TITLE + ' - ' + suffix : APP_TITLE;
+}
+
 async function openDM(d) {
   state.server = null; state.channel = null; state.view = 'home';
   setReplyTo(null);
@@ -1440,6 +1462,7 @@ async function openDM(d) {
   $('message-input').placeholder = 'Write a direct message to @' + d.user.username + '\u2026';
   $('composer-hint').textContent = '';
   $('message-input').focus();
+  updateTitle();
   saveLastLocation({ serverId: null, channelId: null, dmId: d.id });
 }
 
@@ -1512,6 +1535,7 @@ async function openFriends() {
   await loadFriends();
   renderDMList();
   renderFriendsView();
+  updateTitle();
   animateView();
 }
 
@@ -1848,6 +1872,7 @@ async function openServer(id, preferredChannelId) {
   const firstText = wanted || state.channels.find(c => c.type === 'text');
   if (firstText) openChannel(firstText.id);
   else { state.channel = null; renderEmptyChat('No text channels yet'); $('composer').classList.add('hidden'); }
+  updateTitle();
   animateView();
   /* Seed current voice occupancy in the background so opening a server never
      waits on a second round-trip before the channel list appears. */
@@ -2112,24 +2137,82 @@ async function openChannel(cid) {
 const voice = {
   channel: null,
   joining: false,
-  localStream: null,
-  peers: {},        /* uid -> { pc, audioEl } */
-  states: {},       /* channelId -> [ { user_id, muted, deafened, speaking } ] */
+  localStream: null,   /* processed stream actually sent to peers */
+  rawStream: null,     /* raw microphone stream (stopped on leave) */
+  peers: {},           /* uid -> { pc, audioEl, pendingIce, remoteSet, ... } */
+  states: {},          /* channelId -> [ { user_id, muted, deafened, speaking } ] */
   muted: false,
   deafened: false,
   speaking: false,
   mutedBeforeDeafen: false,
   audioCtx: null,
   analyser: null,
-  rafId: null
+  rafId: null,
+  gain: null,
+  micTest: null
 };
 
+/* Public STUN + TURN. TURN matters: without a relay, two peers behind
+   symmetric NAT (mobile hotspots, corporate wifi) can never connect, which is
+   exactly the "I joined but hear nobody" symptom. */
+const ICE_SERVERS = [
+  { urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302', 'stun:stun2.l.google.com:19302'] },
+  { urls: 'turn:openrelay.metered.ca:80', username: 'openrelayproject', credential: 'openrelayproject' },
+  { urls: 'turn:openrelay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject' },
+  { urls: 'turn:openrelay.metered.ca:443?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' }
+];
+
+/* Audio elements live off-screen instead of inside a display:none wrapper -
+   some browsers refuse to play media whose container is not rendered. */
 function ensureVoiceAudioContainer() {
-  if (!$('voice-audio')) {
-    const d = document.createElement('div');
+  let d = $('voice-audio');
+  if (!d) {
+    d = document.createElement('div');
     d.id = 'voice-audio';
-    d.style.display = 'none';
     document.body.appendChild(d);
+  }
+  return d;
+}
+
+function voiceConstraints() {
+  return {
+    audio: {
+      deviceId: setting('micDeviceId') ? { exact: setting('micDeviceId') } : undefined,
+      echoCancellation: setting('echoCancel') !== false,
+      noiseSuppression: setting('noiseSuppress') !== false,
+      autoGainControl: setting('autoGain') !== false,
+      channelCount: 1,
+      sampleRate: 48000
+    },
+    video: false
+  };
+}
+
+/* Route the raw microphone through a gain node so the Input Volume slider and
+   the speaking meter both work on the exact same signal we transmit. */
+function buildProcessedMic(raw) {
+  const Ctx = window.AudioContext || window.webkitAudioContext;
+  if (!Ctx) return { stream: raw };
+  try {
+    if (!voice.audioCtx || voice.audioCtx.state === 'closed') voice.audioCtx = new Ctx();
+    const ctx = voice.audioCtx;
+    if (ctx.state === 'suspended') ctx.resume().catch(() => {});
+    const src = ctx.createMediaStreamSource(raw);
+    const gain = ctx.createGain();
+    const vol = Number(setting('inputVolume'));
+    gain.gain.value = isFinite(vol) ? Math.max(0, Math.min(2, vol / 100)) : 0.7;
+    const analyser = ctx.createAnalyser();
+    analyser.fftSize = 512;
+    analyser.smoothingTimeConstant = 0.55;
+    const dest = ctx.createMediaStreamDestination();
+    src.connect(gain);
+    gain.connect(dest);
+    gain.connect(analyser);
+    voice.gain = gain;
+    voice.analyser = analyser;
+    return { stream: dest.stream };
+  } catch (e) {
+    return { stream: raw };
   }
 }
 
@@ -2142,11 +2225,14 @@ async function joinVoiceChannel(cid) {
   voice.joining = true;
   try {
     if (voice.channel) leaveVoiceChannel();
-    const stream = await navigator.mediaDevices.getUserMedia({
-      audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
-      video: false
-    });
-    voice.localStream = stream;
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      toast('This browser does not support voice channels', 'error');
+      return;
+    }
+    const raw = await navigator.mediaDevices.getUserMedia(voiceConstraints());
+    voice.rawStream = raw;
+    const built = buildProcessedMic(raw);
+    voice.localStream = built.stream;
     voice.channel = c;
     voice.muted = false;
     voice.deafened = false;
@@ -2159,7 +2245,10 @@ async function joinVoiceChannel(cid) {
     renderChannelList();
     toast('Connected to ' + c.name, 'success');
   } catch (e) {
-    toast('Microphone access is required for voice channels', 'error');
+    const msg = (e && e.name === 'NotAllowedError')
+      ? 'Microphone permission was blocked - allow it in your browser to join voice'
+      : 'Microphone access is required for voice channels';
+    toast(msg, 'error');
   } finally {
     voice.joining = false;
   }
@@ -2170,8 +2259,13 @@ function leaveVoiceChannel() {
   if (cid) socket.emit('voice_leave', { channel_id: cid });
   Object.keys(voice.peers).forEach(uid => destroyVoicePeer(uid));
   voice.peers = {};
-  if (voice.localStream) { try { voice.localStream.getTracks().forEach(t => t.stop()); } catch (e) {} voice.localStream = null; }
   stopSpeakingDetection();
+  if (voice.rawStream) { try { voice.rawStream.getTracks().forEach(t => t.stop()); } catch (e) {} }
+  if (voice.localStream && voice.localStream !== voice.rawStream) {
+    try { voice.localStream.getTracks().forEach(t => t.stop()); } catch (e) {}
+  }
+  voice.rawStream = null;
+  voice.localStream = null;
   voice.channel = null;
   voice.muted = false;
   voice.deafened = false;
@@ -2180,37 +2274,144 @@ function leaveVoiceChannel() {
   if (state.server) renderChannelList();
 }
 
+function applyOutputDevice(el) {
+  if (!el || typeof el.setSinkId !== 'function') return;
+  const id = setting('speakerDeviceId');
+  if (!id) return;
+  el.setSinkId(id).catch(() => {});
+}
+
+/* Push low-latency Opus settings onto every audio sender. */
+function tuneAudioSenders(pc) {
+  try {
+    pc.getSenders().forEach(s => {
+      if (!s.track || s.track.kind !== 'audio') return;
+      try {
+        const p = s.getParameters();
+        if (!p.encodings || !p.encodings.length) p.encodings = [{}];
+        p.encodings[0].maxBitrate = 96000;
+        p.encodings[0].networkPriority = 'high';
+        p.encodings[0].priority = 'high';
+        p.degradationPreference = 'maintain-fidelity';
+        const pr = s.setParameters(p);
+        if (pr && pr.catch) pr.catch(() => {});
+      } catch (e) { /* older browsers ignore these */ }
+    });
+  } catch (e) { /* ignore */ }
+}
+
 function createVoicePeer(uid, initiator) {
   if (voice.peers[uid]) return voice.peers[uid];
   const pc = new RTCPeerConnection({
-    iceServers: [{ urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] }]
+    iceServers: ICE_SERVERS,
+    bundlePolicy: 'max-bundle',
+    rtcpMuxPolicy: 'require',
+    iceCandidatePoolSize: 4
   });
   ensureVoiceAudioContainer();
   const audioEl = document.createElement('audio');
   audioEl.autoplay = true;
+  audioEl.setAttribute('playsinline', '');
   audioEl.dataset.uid = uid;
   $('voice-audio').appendChild(audioEl);
-  const peer = { pc, audioEl };
+
+  const peer = {
+    pc, audioEl,
+    pendingIce: [],
+    remoteSet: false,
+    makingOffer: false,
+    ignoreOffer: false,
+    /* Deterministic, symmetric politeness so glare resolves the same way on
+       both sides. */
+    polite: String((me && me.id) || '') < String(uid),
+    restartTimer: 0
+  };
   voice.peers[uid] = peer;
-  if (voice.localStream) voice.localStream.getTracks().forEach(t => pc.addTrack(t, voice.localStream));
+
+  if (voice.localStream) {
+    voice.localStream.getTracks().forEach(t => {
+      try { pc.addTrack(t, voice.localStream); } catch (e) {}
+    });
+  }
+
   pc.onicecandidate = (e) => {
     if (e.candidate) socket.emit('voice_signal', { to: uid, data: { type: 'ice', candidate: e.candidate } });
   };
+
   pc.ontrack = (e) => {
-    audioEl.srcObject = e.streams[0];
+    const stream = (e.streams && e.streams[0]) || new MediaStream([e.track]);
+    peer.remoteStream = stream;
+    if (audioEl.srcObject !== stream) audioEl.srcObject = stream;
     audioEl.muted = voice.deafened;
-    audioEl.play().catch(() => {});
+    applyOutputDevice(audioEl);
+    const tryPlay = () => {
+      const p = audioEl.play();
+      if (p && p.catch) p.catch(() => { peer.playTimer = setTimeout(tryPlay, 400); });
+    };
+    tryPlay();
+    try {
+      e.track.onunmute = () => { if (audioEl.paused) tryPlay(); };
+    } catch (err) {}
+  };
+
+  /* Modern negotiation: let the browser tell us when an offer is needed. This
+     covers the case where the mic track is added after the peer exists. */
+  pc.onnegotiationneeded = async () => {
+    if (peer.ignoreOffer) return;
+    try {
+      peer.makingOffer = true;
+      await pc.setLocalDescription();
+      if (pc.localDescription) {
+        socket.emit('voice_signal', { to: uid, data: { type: pc.localDescription.type, sdp: pc.localDescription } });
+      }
+    } catch (e) { /* ignore */ } finally { peer.makingOffer = false; }
+  };
+
+  const recover = () => {
+    if (peer.restartTimer) return;
+    peer.restartTimer = setTimeout(() => {
+      peer.restartTimer = 0;
+      if (!voice.peers[uid]) return;
+      try {
+        if (typeof pc.restartIce === 'function') pc.restartIce();
+        else if (peer.polite) pc.createOffer({ iceRestart: true }).then(o => pc.setLocalDescription(o)).then(() => {
+          socket.emit('voice_signal', { to: uid, data: { type: pc.localDescription.type, sdp: pc.localDescription } });
+        }).catch(() => {});
+      } catch (e) { /* ignore */ }
+    }, 1500);
+  };
+
+  pc.oniceconnectionstatechange = () => {
+    const st = pc.iceConnectionState;
+    if (st === 'failed') recover();
+    else if (st === 'disconnected') recover();
+    else if (st === 'connected' || st === 'completed') { tuneAudioSenders(pc); }
   };
   pc.onconnectionstatechange = () => {
-    if (pc.connectionState === 'failed' || pc.connectionState === 'closed') destroyVoicePeer(uid);
+    if (pc.connectionState === 'failed') recover();
+    else if (pc.connectionState === 'closed') destroyVoicePeer(uid);
+    else if (pc.connectionState === 'connected') tuneAudioSenders(pc);
   };
+
   if (initiator) {
-    pc.createOffer()
-      .then(o => pc.setLocalDescription(o))
-      .then(() => socket.emit('voice_signal', { to: uid, data: { type: 'offer', sdp: pc.localDescription } }))
-      .catch(() => {});
+    /* Kick off immediately for the joining side; onnegotiationneeded would do
+       it anyway, but this removes a round-trip of latency. */
+    (async () => {
+      try {
+        peer.makingOffer = true;
+        await pc.setLocalDescription();
+        if (pc.localDescription) {
+          socket.emit('voice_signal', { to: uid, data: { type: pc.localDescription.type, sdp: pc.localDescription } });
+        }
+      } catch (e) { /* ignore */ } finally { peer.makingOffer = false; }
+    })();
   }
   return peer;
+}
+
+function flushIce(peer) {
+  const q = peer.pendingIce.splice(0);
+  q.forEach(c => { peer.pc.addIceCandidate(new RTCIceCandidate(c)).catch(() => {}); });
 }
 
 async function handleVoiceSignal(from, data) {
@@ -2219,24 +2420,43 @@ async function handleVoiceSignal(from, data) {
   if (!peer) peer = createVoicePeer(from, false);
   const pc = peer.pc;
   try {
-    if (data.type === 'offer') {
-      await pc.setRemoteDescription(new RTCSessionDescription(data.sdp));
-      const answer = await pc.createAnswer();
-      await pc.setLocalDescription(answer);
-      socket.emit('voice_signal', { to: from, data: { type: 'answer', sdp: pc.localDescription } });
-    } else if (data.type === 'answer') {
-      await pc.setRemoteDescription(new RTCSessionDescription(data.sdp));
+    if (data.type === 'offer' || data.type === 'answer') {
+      const desc = new RTCSessionDescription(data.sdp);
+      const collision = desc.type === 'offer' && (peer.makingOffer || pc.signalingState !== 'stable');
+      peer.ignoreOffer = !peer.polite && collision;
+      if (peer.ignoreOffer) return;
+      if (collision) {
+        /* Polite peer rolls back and accepts the remote offer. */
+        await Promise.all([
+          pc.setLocalDescription({ type: 'rollback' }).catch(() => {}),
+          pc.setRemoteDescription(desc)
+        ]);
+      } else {
+        await pc.setRemoteDescription(desc);
+      }
+      peer.remoteSet = true;
+      flushIce(peer);
+      if (desc.type === 'offer') {
+        await pc.setLocalDescription();
+        if (pc.localDescription) {
+          socket.emit('voice_signal', { to: from, data: { type: 'answer', sdp: pc.localDescription } });
+        }
+      }
+      tuneAudioSenders(pc);
     } else if (data.type === 'ice' && data.candidate) {
-      await pc.addIceCandidate(new RTCIceCandidate(data.candidate));
+      if (!peer.remoteSet) { peer.pendingIce.push(data.candidate); return; }
+      try { await pc.addIceCandidate(new RTCIceCandidate(data.candidate)); } catch (e) { /* stale */ }
     }
-  } catch (e) { /* ignore transient signaling errors */ }
+  } catch (e) { /* transient signaling errors are expected during glare */ }
 }
 
 function destroyVoicePeer(uid) {
   const peer = voice.peers[uid];
   if (!peer) return;
+  if (peer.restartTimer) clearTimeout(peer.restartTimer);
+  if (peer.playTimer) clearTimeout(peer.playTimer);
   try { peer.pc.close(); } catch (e) {}
-  if (peer.audioEl) peer.audioEl.remove();
+  if (peer.audioEl) { try { peer.audioEl.srcObject = null; } catch (e) {} peer.audioEl.remove(); }
   delete voice.peers[uid];
 }
 
@@ -2245,13 +2465,16 @@ function startSpeakingDetection() {
     if (!voice.localStream) return;
     const Ctx = window.AudioContext || window.webkitAudioContext;
     if (!Ctx) return;
-    voice.audioCtx = new Ctx();
-    const src = voice.audioCtx.createMediaStreamSource(voice.localStream);
-    const analyser = voice.audioCtx.createAnalyser();
-    analyser.fftSize = 512;
-    analyser.smoothingTimeConstant = 0.55;
-    src.connect(analyser);
-    voice.analyser = analyser;
+    if (!voice.audioCtx || voice.audioCtx.state === 'closed') voice.audioCtx = new Ctx();
+    if (!voice.analyser) {
+      const src = voice.audioCtx.createMediaStreamSource(voice.localStream);
+      const analyser = voice.audioCtx.createAnalyser();
+      analyser.fftSize = 512;
+      analyser.smoothingTimeConstant = 0.55;
+      src.connect(analyser);
+      voice.analyser = analyser;
+    }
+    const analyser = voice.analyser;
     const buf = new Uint8Array(analyser.frequencyBinCount);
     const tick = () => {
       if (!voice.analyser) return;
@@ -2259,7 +2482,7 @@ function startSpeakingDetection() {
       let sum = 0;
       for (let i = 0; i < buf.length; i++) sum += buf[i];
       const avg = sum / buf.length;
-      const speaking = avg > 16 && !voice.muted;
+      const speaking = avg > 14 && !voice.muted;
       if (speaking !== voice.speaking) {
         voice.speaking = speaking;
         if (voice.channel) socket.emit('voice_update', { channel_id: voice.channel.id, speaking });
@@ -2275,13 +2498,32 @@ function stopSpeakingDetection() {
   if (voice.rafId) cancelAnimationFrame(voice.rafId);
   voice.rafId = null;
   voice.analyser = null;
+  voice.gain = null;
   if (voice.audioCtx) { try { voice.audioCtx.close(); } catch (e) {} voice.audioCtx = null; }
+}
+
+/* Apply the current mute state to the transmitted track *and* the gain node -
+   belt and braces, because some browsers ignore `track.enabled` on the
+   destination stream produced by a MediaStreamAudioDestinationNode. */
+function applyMicState() {
+  const on = !voice.muted;
+  if (voice.localStream) {
+    try { voice.localStream.getAudioTracks().forEach(t => { t.enabled = on; }); } catch (e) {}
+  }
+  if (voice.rawStream) {
+    try { voice.rawStream.getAudioTracks().forEach(t => { t.enabled = on; }); } catch (e) {}
+  }
+  if (voice.gain) {
+    const vol = Number(setting('inputVolume'));
+    const base = isFinite(vol) ? Math.max(0, Math.min(2, vol / 100)) : 0.7;
+    try { voice.gain.gain.value = on ? base : 0; } catch (e) {}
+  }
 }
 
 function toggleVoiceMute() {
   if (!voice.channel) return;
   voice.muted = !voice.muted;
-  if (voice.localStream) voice.localStream.getAudioTracks().forEach(t => t.enabled = !voice.muted);
+  applyMicState();
   if (voice.muted) voice.speaking = false;
   socket.emit('voice_update', { channel_id: voice.channel.id, muted: voice.muted, speaking: voice.speaking });
   renderVoicePanel();
@@ -2297,7 +2539,7 @@ function toggleVoiceDeafen() {
   } else {
     voice.muted = !!voice.mutedBeforeDeafen;
   }
-  if (voice.localStream) voice.localStream.getAudioTracks().forEach(t => t.enabled = !voice.muted);
+  applyMicState();
   Object.values(voice.peers).forEach(p => { if (p.audioEl) p.audioEl.muted = voice.deafened; });
   socket.emit('voice_update', { channel_id: voice.channel.id, muted: voice.muted, deafened: voice.deafened, speaking: voice.speaking });
   renderVoicePanel();
@@ -2477,8 +2719,12 @@ function messageNode(m, grouped, animate) {
       <button data-act="reply" title="Reply">${icon('reply')}</button>
       <button data-act="more" title="More">${icon('ellipsis-vertical')}</button>
     </div>`;
+  /* A message that is nothing but a GIF link should show only the GIF. */
+  const bodyText = isEmbeddableMediaUrl((extractUrls(m.content || '')[0] || ''))
+    ? stripEmbeddableUrls(m.content)
+    : m.content;
   node.innerHTML = `${toolbar}${gutter}<div class="body">${m.reply_to ? replyRefHTML(m.reply_to) : ''}${head}
-    <div class="text" data-content>${m.pinned ? `<span class="msg-pin" title="Pinned message">${icon('pin')}</span>` : ''}<span class="text-body">${formatContent(m.content)}</span>${m.edited_at ? `<span class="msg-edited" title="Edited ${escapeHtml(formatTime(m.edited_at))}">(edited)</span>` : ''}</div>
+    <div class="text" data-content>${m.pinned ? `<span class="msg-pin" title="Pinned message">${icon('pin')}</span>` : ''}<span class="text-body">${formatContent(bodyText)}</span>${m.edited_at ? `<span class="msg-edited" title="Edited ${escapeHtml(formatTime(m.edited_at))}">(edited)</span>` : ''}</div>
     <div class="attachment-slot"></div>
     <div class="embed-slot"></div>
     <div class="reactions">${reactionsHTML(m.reactions)}</div>
@@ -2498,9 +2744,17 @@ function messageNode(m, grouped, animate) {
   if (inviteCodes.length) {
     inviteCodes.slice(0, 1).forEach(c => slot.appendChild(inviteEmbedNode(c)));
   }
-  const urls = extractUrls(m.content).filter(u => !/[?&]invite=/i.test(u));
-  if (urls.length) {
-    urls.slice(0, 2).forEach(u => slot.appendChild(embedNode(u)));
+  const allUrls = extractUrls(m.content).filter(u => !/[?&]invite=/i.test(u));
+  const mediaLinks = allUrls.filter(isEmbeddableMediaUrl);
+  const plainUrls = allUrls.filter(u => !isEmbeddableMediaUrl(u));
+  /* Media links render as the actual GIF/video - never as a bare URL. */
+  mediaLinks.slice(0, 3).forEach(u => {
+    const direct = directMediaFromUrl(u);
+    if (direct && direct.type !== 'defer') slot.appendChild(mediaEmbedNode(direct));
+    else slot.appendChild(embedNode(u));
+  });
+  if (plainUrls.length) {
+    plainUrls.slice(0, 2).forEach(u => slot.appendChild(embedNode(u)));
   }
   node.querySelectorAll('.reaction').forEach(r => r.addEventListener('click', () => toggleReaction(m.id, r.dataset.emoji)));
   node.querySelectorAll('.msg-toolbar button').forEach(btn => {
@@ -2781,7 +3035,7 @@ function attachmentNode(m) {
     wrap.classList.add('media');
     if (isGif) wrap.classList.add('gif');
     wrap.innerHTML = `<img src="${escapeHtml(url)}" alt="${escapeHtml(m.attachment_name || '')}" loading="lazy" decoding="async">`;
-    wrap.querySelector('img').addEventListener('click', () => lightbox(url, 'image', m.attachment_name || ''));
+    wrap.querySelector('img').addEventListener('click', () => lightbox(url, 'image', m.attachment_name || '', sizeText));
     if (sizeText) wrap.insertAdjacentHTML('beforeend', `<span class="att-size">${sizeText}</span>`);
   } else if (t.startsWith('video/')) {
     /* Videos show a poster frame with a centred play button; pressing play
@@ -2812,12 +3066,90 @@ function fmtBytes(n) {
   return (n < 10 ? n.toFixed(1) : Math.round(n)) + ' ' + units[i];
 }
 
+/* ------------------------------------------------------------
+   Direct media links (Giphy / Tenor / plain files)
+   ------------------------------------------------------------
+   Pasting a Giphy or Tenor page link used to produce a boring link card.
+   We resolve the underlying GIF/MP4 so the media renders inline, instantly,
+   with no visible URL left in the message. */
+const MEDIA_HOSTS = /(^|\.)(giphy\.com|gph\.is|tenor\.com|media\.tenor\.com|media\.giphy\.com|i\.giphy\.com)$/i;
+
+function directMediaFromUrl(url) {
+  if (!url) return null;
+  let u;
+  try { u = new URL(url, location.origin); } catch (e) { return null; }
+  if (!/^https?:$/i.test(u.protocol)) return null;
+  const host = u.hostname.replace(/^www\./i, '').toLowerCase();
+  const path = u.pathname || '';
+  /* Plain media files. */
+  if (/\.(gif|webp|png|jpe?g|avif)$/i.test(path)) return { type: 'image', url: u.href };
+  if (/\.(mp4|webm|mov|m4v)$/i.test(path)) return { type: 'video', url: u.href };
+  if (host === 'media.giphy.com' || host === 'i.giphy.com') return { type: 'image', url: u.href };
+  if (host === 'media.tenor.com') return { type: 'image', url: u.href };
+  if (host === 'giphy.com') {
+    const m = path.match(/-([A-Za-z0-9]{5,})$/) || path.match(/\/([A-Za-z0-9]{5,})\/?$/);
+    const id = m && m[1];
+    if (id) return { type: 'image', url: 'https://media.giphy.com/media/' + id + '/giphy.gif' };
+  }
+  if (host === 'tenor.com') {
+    /* Tenor's CDN path is not derivable from the page slug, so let the server
+       resolve it through oEmbed (handled in embedNode). */
+    return { type: 'defer', url: u.href };
+  }
+  return null;
+}
+
+function isEmbeddableMediaUrl(url) {
+  try {
+    const u = new URL(url, location.origin);
+    if (!/^https?:$/i.test(u.protocol)) return false;
+    const host = u.hostname.replace(/^www\./i, '').toLowerCase();
+    if (MEDIA_HOSTS.test(host)) return true;
+    return /\.(gif|webp|mp4|webm|mov|m4v)$/i.test(u.pathname || '');
+  } catch (e) { return false; }
+}
+
+/* Remove embedded media URLs from the rendered text so only the media shows. */
+function stripEmbeddableUrls(text) {
+  if (!text) return text;
+  let out = text;
+  extractUrls(text).forEach(u => {
+    if (isEmbeddableMediaUrl(u)) out = out.split(u).join('');
+  });
+  return out.replace(/[ \t]{2,}/g, ' ').replace(/\n{3,}/g, '\n\n').trim();
+}
+
+function mediaEmbedNode(media) {
+  const wrap = document.createElement('div');
+  wrap.className = 'embed-media-wrap';
+  if (media.type === 'video') {
+    wrap.appendChild(videoPlayerNode(media.url, ''));
+    return wrap;
+  }
+  const img = document.createElement('img');
+  img.className = 'embed-media';
+  img.loading = 'lazy';
+  img.decoding = 'async';
+  img.alt = '';
+  img.src = media.url;
+  img.addEventListener('click', () => lightbox(media.url, 'image', '', ''));
+  img.addEventListener('error', () => { wrap.remove(); });
+  wrap.appendChild(img);
+  return wrap;
+}
+
 function embedNode(url) {
   const wrap = document.createElement('div');
   wrap.className = 'embed';
   wrap.innerHTML = `<div class="embed-content"><div class="embed-site">Loading preview\u2026</div></div>`;
   api('/api/embed?url=' + encodeURIComponent(url)).then(data => {
     if (!data) return;
+    /* The server resolved a real GIF/MP4 for us (Giphy/Tenor oEmbed). */
+    if (data.media && data.media.url) {
+      const node = mediaEmbedNode({ type: data.media.type || 'image', url: data.media.url });
+      wrap.replaceWith(node);
+      return;
+    }
     const desc = data.description ? (data.description.length > 200 ? data.description.slice(0, 200) + '\u2026' : data.description) : '';
     wrap.innerHTML = `<div class="embed-content">
         <div class="embed-site">${escapeHtml(data.site || '')}</div>
@@ -2930,25 +3262,121 @@ function flashMessage(mid) {
   setTimeout(() => node.classList.remove('flash'), 1500);
 }
 
-function lightbox(url, type, name) {
+/* Full-screen media viewer.
+   Images: click once to open, click the image again to zoom in, click again to
+   zoom back out. The wheel zooms around the cursor and dragging pans while
+   zoomed. Videos keep native controls. */
+function lightbox(url, type, name, sizeText) {
   const lb = document.createElement('div');
   lb.className = 'lightbox';
-  const media = type === 'image'
-    ? `<img src="${escapeHtml(url)}" alt="${escapeHtml(name || '')}">`
+  const isImage = type === 'image';
+  const media = isImage
+    ? `<img src="${escapeHtml(url)}" alt="${escapeHtml(name || '')}" draggable="false">`
     : `<video src="${escapeHtml(url)}" controls autoplay></video>`;
+  const meta = [name, sizeText].filter(Boolean).join(' \u00b7 ');
   lb.innerHTML = `<div class="lb-bar">
-      <span class="lb-name">${escapeHtml(name || '')}</span>
+      <span class="lb-name">${escapeHtml(meta)}</span>
+      <span class="lb-zoom-val" id="lb-zoom-val">100%</span>
       <a class="lb-dl" href="${escapeHtml(url)}" download="${escapeHtml(name || '')}" title="Download">${icon('download')}</a>
       <button class="lb-close" title="Close (Esc)">${icon('xmark')}</button>
     </div>
-    <div class="lb-stage">${media}</div>`;
+    <div class="lb-stage">${media}</div>
+    ${isImage ? '<div class="lb-hint">Click the image to zoom \u00b7 Scroll to zoom \u00b7 Drag to pan</div>' : ''}`;
   hydrateIcons(lb);
   const close = () => { document.removeEventListener('keydown', onKey); lb.remove(); };
-  const onKey = (e) => { if (e.key === 'Escape') close(); };
+  const onKey = (e) => {
+    if (e.key === 'Escape') close();
+    if (isImage && (e.key === '+' || e.key === '=')) zoomBy(1.35);
+    if (isImage && e.key === '-') zoomBy(1 / 1.35);
+    if (isImage && e.key === '0') resetZoom();
+  };
   document.addEventListener('keydown', onKey);
-  lb.addEventListener('click', (e) => { if (!e.target.closest('.lb-stage img, .lb-stage video, .lb-bar')) close(); });
+  lb.addEventListener('click', (e) => {
+    if (!e.target.closest('.lb-stage img, .lb-stage video, .lb-bar, .lb-hint')) close();
+  });
   lb.querySelector('.lb-close').addEventListener('click', close);
   document.body.appendChild(lb);
+
+  if (!isImage) return;
+  const img = lb.querySelector('.lb-stage img');
+  const stage = lb.querySelector('.lb-stage');
+  const valEl = lb.querySelector('#lb-zoom-val');
+  let scale = 1, tx = 0, ty = 0;
+  const MIN = 1, MAX = 8;
+
+  const paint = () => {
+    img.style.transform = `translate(${tx}px, ${ty}px) scale(${scale})`;
+    img.classList.toggle('zoomed', scale > 1.001);
+    stage.classList.toggle('can-pan', scale > 1.001);
+    if (valEl) valEl.textContent = Math.round(scale * 100) + '%';
+  };
+  const clampPan = () => {
+    if (scale <= 1.001) { tx = 0; ty = 0; return; }
+    const r = img.getBoundingClientRect();
+    const baseW = r.width / scale, baseH = r.height / scale;
+    const maxX = Math.max(0, (baseW * scale - stage.clientWidth) / 2);
+    const maxY = Math.max(0, (baseH * scale - stage.clientHeight) / 2);
+    tx = Math.max(-maxX, Math.min(maxX, tx));
+    ty = Math.max(-maxY, Math.min(maxY, ty));
+  };
+  const resetZoom = () => { scale = 1; tx = 0; ty = 0; paint(); };
+  function zoomBy(factor, cx, cy) {
+    const next = Math.max(MIN, Math.min(MAX, scale * factor));
+    if (Math.abs(next - scale) < 0.001) { paint(); return; }
+    if (cx != null && cy != null) {
+      /* Keep the point under the cursor anchored while zooming. */
+      const r = stage.getBoundingClientRect();
+      const ox = cx - r.left - r.width / 2;
+      const oy = cy - r.top - r.height / 2;
+      const k = next / scale;
+      tx = ox - (ox - tx) * k;
+      ty = oy - (oy - ty) * k;
+    }
+    scale = next;
+    clampPan();
+    paint();
+  }
+
+  img.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (scale > 1.001) resetZoom();
+    else zoomBy(2.2, e.clientX, e.clientY);
+  });
+  img.addEventListener('dblclick', (e) => { e.preventDefault(); e.stopPropagation(); });
+  stage.addEventListener('wheel', (e) => {
+    e.preventDefault();
+    zoomBy(e.deltaY < 0 ? 1.18 : 1 / 1.18, e.clientX, e.clientY);
+  }, { passive: false });
+
+  let dragging = false, sx = 0, sy = 0, stx = 0, sty = 0, moved = false;
+  img.addEventListener('pointerdown', (e) => {
+    if (scale <= 1.001) return;
+    dragging = true; moved = false;
+    sx = e.clientX; sy = e.clientY; stx = tx; sty = ty;
+    img.setPointerCapture && img.setPointerCapture(e.pointerId);
+    stage.classList.add('dragging');
+  });
+  img.addEventListener('pointermove', (e) => {
+    if (!dragging) return;
+    tx = stx + (e.clientX - sx);
+    ty = sty + (e.clientY - sy);
+    if (Math.abs(e.clientX - sx) > 3 || Math.abs(e.clientY - sy) > 3) moved = true;
+    clampPan();
+    paint();
+  });
+  const endDrag = (e) => {
+    if (!dragging) return;
+    dragging = false;
+    stage.classList.remove('dragging');
+    if (img.releasePointerCapture && e && e.pointerId != null) { try { img.releasePointerCapture(e.pointerId); } catch (err) {} }
+  };
+  img.addEventListener('pointerup', endDrag);
+  img.addEventListener('pointercancel', endDrag);
+  img.addEventListener('pointerleave', endDrag);
+  /* A drag should not be interpreted as a zoom click. */
+  img.addEventListener('click', (e) => { if (moved) { e.stopImmediatePropagation(); moved = false; } }, true);
+
+  paint();
 }
 
 /* ============================================================
@@ -4722,6 +5150,7 @@ function renderSettings(section) {
   if (section === 'privacy') wirePrivacyPanel();
   if (section === 'privacy' || section === 'appearance' || section === 'notifications' || section === 'voice') wireToggles();
   if (section === 'appearance') wireAppearance();
+  if (section === 'voice') wireVoicePanel();
   if (section === 'language') wireLanguage();
 }
 
@@ -4986,12 +5415,34 @@ function settingsPanelHTML(section) {
         ${toggleRow('notifBadge', 'Unread badge on app icon', 'Show a badge for unread messages.')}`;
     case 'voice':
       return `
-        <h4>Voice &amp; Video</h4>
-        <div class="field"><label>Input Device</label><select><option>Default</option><option>System Microphone</option></select></div>
-        <div class="field"><label>Output Device</label><select><option>Default</option><option>System Speakers</option></select></div>
-        <div class="field"><label>Input Volume</label><input type="range" id="voice-volume" min="0" max="100" value="${Number(setting('inputVolume')) || 70}" style="padding:0"></div>
-        ${toggleRow('echoCancel', 'Echo cancellation', 'Reduce echo picked up by your microphone.')}
-        ${toggleRow('noiseSuppress', 'Noise suppression', 'Filter background noise during calls.')}`;
+        <h4>Voice & Video</h4>
+        <div class="vs-grid">
+          <div class="vs-block">
+            <div class="vs-label">Input Device</div>
+            <select id="vs-mic" class="vs-select"><option value="">Default microphone</option></select>
+            <div class="vs-label">Input Volume <span class="vs-val" id="vs-vol-val">${Number(setting('inputVolume')) || 70}%</span></div>
+            <input type="range" id="vs-vol" class="vs-range" min="0" max="200" step="1" value="${Number(setting('inputVolume')) || 70}">
+            <div class="vs-meter" id="vs-meter"><div class="vs-meter-fill" id="vs-meter-fill"></div></div>
+            <button class="btn ghost vs-btn" id="vs-test">${icon('mic')} Let's Check</button>
+            <div class="vs-hint" id="vs-hint">Speak while testing to confirm your mic is working.</div>
+          </div>
+          <div class="vs-block">
+            <div class="vs-label">Output Device</div>
+            <select id="vs-spk" class="vs-select"><option value="">Default speakers</option></select>
+            <div class="vs-label">Output Volume <span class="vs-val" id="vs-out-val">${Number(setting('outputVolume')) || 100}%</span></div>
+            <input type="range" id="vs-out" class="vs-range" min="0" max="100" step="1" value="${Number(setting('outputVolume')) || 100}">
+            <button class="btn ghost vs-btn" id="vs-test-out">${icon('volume-high')} Test Output</button>
+            <div class="vs-hint" id="vs-out-hint">Plays a short tone on the selected speaker.</div>
+          </div>
+        </div>
+        <div class="vs-section">
+          ${toggleRow('echoCancel', 'Echo cancellation', 'Reduce echo picked up by your microphone.')}
+          ${toggleRow('noiseSuppress', 'Noise suppression', 'Filter background noise during calls.')}
+          ${toggleRow('autoGain', 'Automatic gain control', 'Keep your volume steady as you move around.')}
+        </div>
+        <div class="vs-section">
+          ${toggleRow('voiceLowLatency', 'Low-latency audio', 'Prioritise speed over quality for voice chat.')}
+        </div>`;
     case 'keybinds':
       return `
         <h4>Keybinds</h4>
@@ -5200,6 +5651,184 @@ function wireToggles() {
       stageSetting(key, val);
     });
   });
+}
+
+/* ============================================================
+   VOICE & VIDEO SETTINGS
+   ------------------------------------------------------------
+   Real device enumeration, a live microphone level meter, an output test
+   tone and settings that are actually applied to the call (constraints,
+   gain, sink id). Everything is staged so Save Changes still works.
+   ============================================================ */
+let vsMeterRaf = 0;
+let vsTestStream = null;
+let vsTestCtx = null;
+
+function stopMicTest() {
+  if (vsMeterRaf) cancelAnimationFrame(vsMeterRaf);
+  vsMeterRaf = 0;
+  if (vsTestStream) { try { vsTestStream.getTracks().forEach(t => t.stop()); } catch (e) {} }
+  vsTestStream = null;
+  if (vsTestCtx) { try { vsTestCtx.close(); } catch (e) {} }
+  vsTestCtx = null;
+  const fill = $('vs-meter-fill');
+  if (fill) fill.style.width = '0%';
+  const btn = $('vs-test');
+  if (btn) btn.classList.remove('testing');
+}
+
+async function refreshVoiceDevices() {
+  const micSel = $('vs-mic');
+  const spkSel = $('vs-spk');
+  if (!micSel || !spkSel) return;
+  if (!navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) return;
+  let devices = [];
+  try { devices = await navigator.mediaDevices.enumerateDevices(); } catch (e) { return; }
+  const mics = devices.filter(d => d.kind === 'audioinput');
+  const spks = devices.filter(d => d.kind === 'audiooutput');
+  const curMic = setting('micDeviceId') || '';
+  const curSpk = setting('speakerDeviceId') || '';
+  micSel.innerHTML = `<option value="">Default microphone</option>` +
+    mics.map((d, i) => `<option value="${escapeHtml(d.deviceId)}">${escapeHtml(d.label || ('Microphone ' + (i + 1)))}</option>`).join('');
+  spkSel.innerHTML = `<option value="">Default speakers</option>` +
+    spks.map((d, i) => `<option value="${escapeHtml(d.deviceId)}">${escapeHtml(d.label || ('Speaker ' + (i + 1)))}</option>`).join('');
+  if (curMic && mics.some(d => d.deviceId === curMic)) micSel.value = curMic;
+  if (curSpk && spks.some(d => d.deviceId === curSpk)) spkSel.value = curSpk;
+  if (!spks.length) {
+    spkSel.innerHTML = `<option value="">Default speakers</option>`;
+    const hint = $('vs-out-hint');
+    if (hint) hint.textContent = 'This browser cannot list output devices - the system default will be used.';
+  }
+}
+
+async function startMicTest() {
+  const btn = $('vs-test');
+  const hint = $('vs-hint');
+  const fill = $('vs-meter-fill');
+  if (!fill) return;
+  if (vsTestStream) { stopMicTest(); if (hint) hint.textContent = 'Test stopped.'; return; }
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia(voiceConstraints());
+    vsTestStream = stream;
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    if (!Ctx) return;
+    vsTestCtx = new Ctx();
+    const src = vsTestCtx.createMediaStreamSource(stream);
+    const an = vsTestCtx.createAnalyser();
+    an.fftSize = 512;
+    an.smoothingTimeConstant = 0.6;
+    src.connect(an);
+    const buf = new Uint8Array(an.frequencyBinCount);
+    const vol = Number(setting('inputVolume'));
+    const mult = isFinite(vol) ? Math.max(0, Math.min(2, vol / 100)) : 0.7;
+    if (btn) btn.classList.add('testing');
+    if (hint) hint.textContent = 'Listening\u2026 speak normally.';
+    const tick = () => {
+      if (!vsTestStream) return;
+      an.getByteFrequencyData(buf);
+      let sum = 0;
+      for (let i = 0; i < buf.length; i++) sum += buf[i];
+      const level = Math.min(100, Math.round((sum / buf.length) * 2.4 * mult));
+      fill.style.width = level + '%';
+      fill.classList.toggle('hot', level > 82);
+      vsMeterRaf = requestAnimationFrame(tick);
+    };
+    tick();
+    /* Auto-stop after 20s so we never hold the mic open silently. */
+    setTimeout(() => { if (vsTestStream) { stopMicTest(); if (hint) hint.textContent = 'Test finished.'; } }, 20000);
+  } catch (e) {
+    if (hint) hint.textContent = (e && e.name === 'NotAllowedError')
+      ? 'Microphone permission was blocked. Allow it in your browser and try again.'
+      : 'Could not open the selected microphone.';
+    stopMicTest();
+  }
+}
+
+function playOutputTest() {
+  const hint = $('vs-out-hint');
+  const Ctx = window.AudioContext || window.webkitAudioContext;
+  if (!Ctx) return;
+  try {
+    const ctx = new Ctx();
+    const dest = ctx.createMediaStreamDestination();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    const vol = Number(setting('outputVolume'));
+    const amp = (isFinite(vol) ? Math.max(0, Math.min(100, vol)) : 100) / 100 * 0.18;
+    osc.type = 'sine';
+    osc.frequency.value = 660;
+    gain.gain.value = 0;
+    osc.connect(gain);
+    gain.connect(dest);
+    /* Two short beeps, like Discord's output test. */
+    const t = ctx.currentTime;
+    gain.gain.setValueAtTime(0, t);
+    gain.gain.linearRampToValueAtTime(amp, t + 0.03);
+    gain.gain.setValueAtTime(amp, t + 0.22);
+    gain.gain.linearRampToValueAtTime(0, t + 0.28);
+    gain.gain.linearRampToValueAtTime(amp, t + 0.42);
+    gain.gain.setValueAtTime(amp, t + 0.62);
+    gain.gain.linearRampToValueAtTime(0, t + 0.7);
+    osc.start(t);
+    osc.stop(t + 0.75);
+    const el = new Audio();
+    el.srcObject = dest.stream;
+    el.autoplay = true;
+    applyOutputDevice(el);
+    el.volume = 1;
+    el.play().catch(() => {});
+    setTimeout(() => { try { el.pause(); el.srcObject = null; } catch (e) {} try { ctx.close(); } catch (e) {} }, 1200);
+    if (hint) hint.textContent = 'Played a test tone.';
+  } catch (e) {
+    if (hint) hint.textContent = 'Could not play the test tone.';
+  }
+}
+
+function wireVoicePanel() {
+  refreshVoiceDevices();
+  const micSel = $('vs-mic');
+  const spkSel = $('vs-spk');
+  const vol = $('vs-vol');
+  const volVal = $('vs-vol-val');
+  const out = $('vs-out');
+  const outVal = $('vs-out-val');
+
+  if (micSel) micSel.addEventListener('change', () => {
+    stageSetting('micDeviceId', micSel.value || '');
+    if (vsTestStream) { stopMicTest(); startMicTest(); }
+  });
+  if (spkSel) spkSel.addEventListener('change', () => {
+    stageSetting('speakerDeviceId', spkSel.value || '');
+    Object.values(voice.peers).forEach(p => applyOutputDevice(p.audioEl));
+  });
+  if (vol) vol.addEventListener('input', () => {
+    const n = Number(vol.value) || 0;
+    if (volVal) volVal.textContent = n + '%';
+    stageSetting('inputVolume', n);
+    applyMicState();
+  });
+  if (out) out.addEventListener('input', () => {
+    const n = Number(out.value) || 0;
+    if (outVal) outVal.textContent = n + '%';
+    stageSetting('outputVolume', n);
+    Object.values(voice.peers).forEach(p => { if (p.audioEl) p.audioEl.volume = Math.max(0, Math.min(1, n / 100)); });
+  });
+  const testBtn = $('vs-test');
+  if (testBtn) testBtn.addEventListener('click', startMicTest);
+  const testOut = $('vs-test-out');
+  if (testOut) testOut.addEventListener('click', playOutputTest);
+
+  /* Device labels are only exposed after permission, so ask once and refresh. */
+  if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia && !navigator.mediaDevices.__crProbed) {
+    navigator.mediaDevices.__crProbed = true;
+    navigator.mediaDevices.getUserMedia({ audio: true }).then(st => {
+      st.getTracks().forEach(t => t.stop());
+      refreshVoiceDevices();
+    }).catch(() => {});
+  }
+  if (navigator.mediaDevices && navigator.mediaDevices.addEventListener) {
+    navigator.mediaDevices.addEventListener('devicechange', refreshVoiceDevices);
+  }
 }
 
 function wireAppearance() {

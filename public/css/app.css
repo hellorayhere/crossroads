@@ -2272,30 +2272,180 @@ body[data-theme="light"].has-custom-bg {
   --menu-bg: rgba(255, 255, 255, 0.96);
 }
 
-/* Error toast - surfaces failed server actions (category/channel edits etc.)
-   that used to fail silently. */
-.err-toast {
+/* ---------- Toast ----------
+   One quiet surface that matches the app chrome. A small muted dot carries the
+   severity instead of a loud colour bar. */
+.toast {
   position: fixed;
   left: 50%;
-  bottom: 26px;
+  bottom: 24px;
   z-index: 4000;
-  transform: translate(-50%, 14px);
+  display: flex;
+  align-items: center;
+  gap: 10px;
   max-width: min(520px, calc(100vw - 32px));
-  padding: 12px 18px 12px 16px;
+  padding: 11px 16px;
   border-radius: var(--radius);
   background: var(--menu-bg);
-  color: var(--text-header);
+  color: var(--text-normal);
   border: 1px solid var(--divider);
-  border-left: 4px solid var(--red);
-  box-shadow: var(--elevation-lg);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, .28);
   font-size: 13.5px;
   font-weight: 500;
-  line-height: 1.35;
+  line-height: 1.4;
+  opacity: 0;
+  transform: translate(-50%, 8px);
+  pointer-events: none;
+  transition: opacity .16s ease, transform .16s ease;
+}
+.toast.show { opacity: 1; transform: translate(-50%, 0); }
+.toast-dot {
+  flex: 0 0 auto;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--text-faint);
+}
+.toast.is-alert .toast-dot { background: var(--text-muted); }
+.toast-msg { min-width: 0; }
+body[data-theme="light"] .toast { box-shadow: 0 8px 24px rgba(0, 0, 0, .12); }
+
+/* ---------- Inline media embeds (Giphy / Tenor / direct files) ---------- */
+.embed-media-wrap { margin-top: 6px; max-width: min(420px, 100%); }
+.embed-media {
+  display: block;
+  max-width: 100%;
+  max-height: 320px;
+  border-radius: var(--radius);
+  border: 1px solid var(--divider);
+  background: var(--input-bg);
+  cursor: zoom-in;
+  object-fit: contain;
+}
+.embed-media-wrap .video-attachment { margin-top: 0; }
+
+/* ============================================================
+   VOICE & VIDEO SETTINGS
+   ============================================================ */
+/* Remote audio elements are kept in the DOM but off-screen: a display:none
+   wrapper can stop some browsers from playing them. */
+#voice-audio {
+  position: fixed;
+  left: -10000px;
+  top: 0;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
   opacity: 0;
   pointer-events: none;
-  transition: opacity .18s ease, transform .18s ease;
 }
-.err-toast.show {
-  opacity: 1;
-  transform: translate(-50%, 0);
+
+.vs-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; margin: 6px 0 4px; }
+@media (max-width: 720px) { .vs-grid { grid-template-columns: 1fr; } }
+.vs-block {
+  background: var(--card);
+  border: 1px solid var(--divider);
+  border-radius: var(--radius);
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.vs-label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .02em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.vs-val { font-size: 11px; font-weight: 600; color: var(--text-normal); text-transform: none; letter-spacing: 0; }
+.vs-select {
+  width: 100%;
+  background: var(--input-bg);
+  border: 1px solid var(--divider);
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+  color: var(--text-normal);
+  font-size: 13.5px;
+  outline: none;
+}
+.vs-select:focus { border-color: var(--brand); }
+.vs-range { width: 100%; margin: 0; accent-color: var(--brand); }
+.vs-meter {
+  height: 8px;
+  border-radius: 999px;
+  background: var(--input-bg);
+  border: 1px solid var(--divider);
+  overflow: hidden;
+}
+.vs-meter-fill {
+  height: 100%;
+  width: 0%;
+  border-radius: 999px;
+  background: var(--green, #23a55a);
+  transition: width .07s linear;
+}
+.vs-meter-fill.hot { background: var(--red); }
+.vs-btn { align-self: flex-start; display: inline-flex; align-items: center; gap: 7px; padding: 7px 12px; font-size: 13px; }
+.vs-btn .ic { width: 14px; height: 14px; }
+.vs-btn.testing { border-color: var(--brand); color: var(--text-header); }
+.vs-hint { font-size: 12.5px; color: var(--text-muted); line-height: 1.4; min-height: 17px; }
+.vs-section { margin-top: 14px; border-top: 1px solid var(--divider); padding-top: 6px; }
+
+/* ---------- Media size label sits beside the image, not on top of it ---------- */
+.attachment.media,
+.attachment.video-attachment {
+  display: inline-flex;
+  align-items: flex-end;
+  gap: 10px;
+  max-width: 100%;
+}
+.attachment.media .att-size,
+.attachment.video-attachment .att-size {
+  position: static;
+  right: auto;
+  bottom: auto;
+  top: auto;
+  background: none;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  color: var(--text-faint);
+  font-size: 11.5px;
+  font-weight: 500;
+  letter-spacing: .2px;
+  padding: 0 0 2px;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+/* ---------- Lightbox zoom ---------- */
+.lb-zoom-val {
+  font-size: 12px;
+  font-weight: 600;
+  color: #b5bac1;
+  min-width: 42px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.lb-stage { position: relative; }
+.lb-stage img {
+  cursor: zoom-in;
+  transition: transform .14s ease;
+  will-change: transform;
+  touch-action: none;
+  user-select: none;
+}
+.lb-stage img.zoomed { cursor: zoom-out; }
+.lb-stage.can-pan { overflow: hidden; }
+.lb-stage.dragging img { transition: none; cursor: grabbing; }
+.lb-hint {
+  flex: 0 0 auto;
+  text-align: center;
+  padding: 0 16px 14px;
+  font-size: 12px;
+  color: #8a8f98;
+  letter-spacing: .2px;
 }
