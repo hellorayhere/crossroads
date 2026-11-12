@@ -292,6 +292,22 @@ function badgesForUser(userId) {
   } catch (e) { return []; }
 }
 
+/* Custom (server) roles a user holds, surfaced on their profile. */
+function rolesForUser(userId, viewerId) {
+  try {
+    const rows = db.prepare(`SELECT r.id, r.name, r.color, r.color2, r.icon,
+                                    s.id AS server_id, s.name AS server_name
+                             FROM server_members m
+                             JOIN server_roles r ON r.id = m.custom_role_id AND r.server_id = m.server_id
+                             JOIN servers s ON s.id = m.server_id
+                             WHERE m.user_id = ?
+                             ORDER BY s.name COLLATE NOCASE ASC, r.position DESC`).all(userId);
+    /* Roles are public profile flair, so show every role a user holds rather
+       than hiding the ones from servers the viewer has not joined. */
+    return rows;
+  } catch (e) { return []; }
+}
+
 function publicUser(u, opts = {}) {
   if (!u) return null;
   /* Report the *effective* status (which may be a transient "offline" after a
@@ -1142,8 +1158,10 @@ app.get('/api/users/:id', auth, (req, res) => {
   if (!u) return res.status(404).json({ error: 'User not found' });
   const isMe = u.id === req.user.id;
   const noteRow = db.prepare('SELECT content FROM notes WHERE owner_id = ? AND target_id = ?').get(req.user.id, u.id);
+  const pu = publicUser(u);
+  pu.server_roles = rolesForUser(u.id, req.user.id);
   res.json({
-    user: publicUser(u),
+    user: pu,
     relationship: isMe ? 'self' : relationshipBetween(req.user.id, u.id),
     mutual_servers: isMe ? [] : mutualServers(req.user.id, u.id),
     mutual_friends: isMe ? [] : mutualFriends(req.user.id, u.id),
@@ -1552,7 +1570,12 @@ app.patch('/api/servers/:id/members/:uid', auth, (req, res) => {
   if (!srv) return res.status(404).json({ error: 'Server not found' });
   if (!isServerAdmin(srv, req.user.id)) return res.status(403).json({ error: 'Only the owner and admins can manage members' });
   const target = req.params.uid;
-  if (target === srv.owner_id) return res.status(400).json({ error: 'The owner cannot be modified' });
+  const body0 = req.body || {};
+  /* The owner cannot be demoted or timed out, but may still be given custom
+     roles like any other member. */
+  if (target === srv.owner_id && ('role' in body0 || 'timeout_until' in body0)) {
+    return res.status(400).json({ error: 'The owner cannot be modified' });
+  }
   const member = db.prepare('SELECT * FROM server_members WHERE server_id = ? AND user_id = ?').get(srv.id, target);
   if (!member) return res.status(404).json({ error: 'Member not found' });
   const iAmOwner = srv.owner_id === req.user.id;

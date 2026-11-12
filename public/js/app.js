@@ -752,6 +752,12 @@ function badgeChips(user, opts = {}) {
   return `<span class="badge-row">${list.map(b => `<span class="${cls}" title="${escapeHtml(b.name)}"><img src="${escapeHtml(b.icon_url)}" alt="${escapeHtml(b.name)}" loading="lazy"><span class="badge-chip-name">${escapeHtml(b.name)}</span></span>`).join('')}</span>`;
 }
 
+function serverRolePills(user) {
+  const list = (user && user.server_roles) || [];
+  if (!list.length) return '';
+  return `<div class="profile-roles">${list.map(r => `<span class="profile-role-pill" style="color:${escapeHtml(r.color || '#99aab5')};border-color:${escapeHtml(r.color || '#99aab5')}66;background:${escapeHtml(r.color || '#99aab5')}1f" title="${escapeHtml(r.server_name || '')}">${roleIconHTML(r.icon, 'role-tag-ico')}${escapeHtml(r.name)}<span class="prs-srv">${escapeHtml(r.server_name || '')}</span></span>`).join('')}</div>`;
+}
+
 /* ---------------- Settings helpers ---------------- */
 function setting(key) { return state.settings[key] !== undefined ? state.settings[key] : SETTINGS_DEFAULTS[key]; }
 
@@ -3208,7 +3214,7 @@ function renderMembers() {
     const roleTag = role === 'admin' ? '<span class="member-role-tag admin">ADMIN</span>' : '';
     const crole = (m.custom_role_id && roleById[m.custom_role_id]) || null;
     const croleTag = crole ? `<span class="member-role-tag" style="color:${crole.color};border-color:${crole.color}">${roleIconHTML(crole.icon, 'role-tag-ico')}${escapeHtml(crole.name)}</span>` : '';
-    row.innerHTML = `${avatarHTML(m, 36, m.status || 'offline')}<div class="member-body"><span class="mname">${escapeHtml(m.display_name || m.username)}${crown}${roleTag}${croleTag}</span>${badgeChips(m, { compact: true })}</div>`;
+    row.innerHTML = `${avatarHTML(m, 36, m.status || 'offline')}<div class="member-body"><span class="mname">${escapeHtml(m.display_name || m.username)}${crown}${roleTag}${croleTag}${badgeChips(m, { compact: true })}</span></div>`;
     row.addEventListener('click', () => openProfile(m));
     return row;
   };
@@ -5426,8 +5432,7 @@ function renderOwnProfile(user) {
             <div class="pnav-avatar">${avatarHTML(user, 40, user.status || 'online')}</div>
             <div class="pnav-text">
               <div class="n1">${escapeHtml(displayName)}</div>
-              <div class="n2">${escapeHtml(fullTag(user))}</div>
-              ${badgeChips(user)}
+              <div class="n2">${escapeHtml(fullTag(user))}${badgeChips(user)}</div>
             </div>
           </div>
         </div>
@@ -5452,9 +5457,9 @@ function renderOwnProfile(user) {
         </div>
         <div class="profile-idcard">
           <div class="pic-avatar">${avatarHTML(user, 116, user.status || 'offline')}</div>
-          <div class="pic-name">${escapeHtml(displayName)}</div>
+          <div class="pic-name">${escapeHtml(displayName)}${badgeChips(user)}</div>
           <div class="pic-tag">${escapeHtml(fullTag(user))}</div>
-          ${badgeChips(user)}
+          ${serverRolePills(user)}
           <div class="pic-status"><span class="dot ${user.status || 'online'}"></span>${escapeHtml(user.custom_status || statusLabel(user.status))}</div>
           ${user.pronouns ? `<div class="pic-date">${escapeHtml(user.pronouns)}</div>` : ''}
           <div class="pic-date">Member since ${memberSince}</div>
@@ -5544,9 +5549,9 @@ function renderOtherProfile(user, ctx) {
       <div class="dp-head">
         <div class="dp-avatar">${avatarHTML(user, 124, user.status || 'offline')}</div>
         <div class="dp-identity">
-          <div class="dp-name">${escapeHtml(displayName)}</div>
+          <div class="dp-name">${escapeHtml(displayName)}${badgeChips(user)}</div>
           <div class="dp-handle">${escapeHtml(fullTag(user))}${user.pronouns ? ` <span class="dp-pronoun">\u00b7 ${escapeHtml(user.pronouns)}</span>` : ''}</div>
-          ${badgeChips(user)}
+          ${serverRolePills(user)}
           ${user.custom_status ? `<div class="dp-custom">${escapeHtml(user.custom_status)}</div>` : ''}
         </div>
         <div class="dp-actions">
@@ -7272,8 +7277,8 @@ async function admRenderUsers(body) {
         <tbody>${data.users.map(u => `
           <tr>
             <td><div class="adm-user-cell">${avatarHTML({ id: u.id, username: u.username, avatar_url: u.avatar_url, discriminator: u.discriminator, display_name: u.display_name }, 30, u.status)}
-              <div><div class="adm-user-name">${escapeHtml(u.display_name || u.username)}${u.verified ? '<span class="adm-badge verified">✓</span>' : ''}${u.platform_admin ? '<span class="adm-badge admin">ADMIN</span>' : ''}</div>
-              <div class="adm-user-tag">${escapeHtml(u.tag)}</div>${badgeChips(u, { compact: true })}</div></div></td>
+              <div><div class="adm-user-name">${escapeHtml(u.display_name || u.username)}${u.verified ? '<span class="adm-badge verified">✓</span>' : ''}${u.platform_admin ? '<span class="adm-badge admin">ADMIN</span>' : ''}${badgeChips(u, { compact: true })}</div>
+              <div class="adm-user-tag">${escapeHtml(u.tag)}</div></div></div></td>
             <td><span class="adm-dot ${u.status}"></span>${escapeHtml(u.status)}</td>
             <td>${u.servers}</td><td>${u.messages}</td>
             <td><div class="adm-flags">${u.banned ? '<span class="adm-badge red">BANNED</span>' : ''}${u.muted ? '<span class="adm-badge amber">MUTED</span>' : ''}${u.disabled ? '<span class="adm-badge red">DISABLED</span>' : ''}</div></td>
@@ -8373,17 +8378,18 @@ function parseRolePerms(r) {
   try { const p = JSON.parse((r && r.permissions) || '{}'); return (p && typeof p === 'object') ? p : {}; } catch (e) { return {}; }
 }
 const ROLE_PERMISSIONS = [
-  ['administrator', 'Administrator', 'Grants every permission below and bypasses channel overrides.'],
-  ['manage_server', 'Manage Server', 'Change the server name, icon, banner and description.'],
-  ['manage_roles', 'Manage Roles', 'Create, edit and delete roles below their own rank.'],
-  ['manage_channels', 'Manage Channels', 'Create, edit and delete channels and categories.'],
-  ['manage_members', 'Manage Members', 'Promote, demote, time out and move members.'],
-  ['kick_members', 'Kick Members', 'Remove members from the server.'],
-  ['ban_members', 'Ban Members', 'Ban members and manage the ban list.'],
-  ['manage_messages', 'Manage Messages', 'Delete and pin messages from other members.'],
-  ['mention_everyone', 'Mention Everyone', 'Use @everyone and @here in messages.'],
-  ['create_invites', 'Create Invites', 'Generate new invite links for the server.']
+  ['administrator', 'Administrator', 'Grants every permission below and bypasses channel overrides.', 'General', 'shield'],
+  ['manage_server', 'Manage Server', 'Change the server name, icon, banner and description.', 'General', 'settings'],
+  ['manage_roles', 'Manage Roles', 'Create, edit and delete roles below their own rank.', 'General', 'id-badge'],
+  ['manage_channels', 'Manage Channels', 'Create, edit and delete channels and categories.', 'Channels', 'hash'],
+  ['manage_messages', 'Manage Messages', 'Delete and pin messages from other members.', 'Channels', 'trash'],
+  ['create_invites', 'Create Invites', 'Generate new invite links for the server.', 'Channels', 'link'],
+  ['manage_members', 'Manage Members', 'Promote, demote, time out and move members.', 'Members', 'users'],
+  ['kick_members', 'Kick Members', 'Remove members from the server.', 'Members', 'user-minus'],
+  ['ban_members', 'Ban Members', 'Ban members and manage the ban list.', 'Members', 'ban'],
+  ['mention_everyone', 'Mention Everyone', 'Use @everyone and @here in messages.', 'Members', 'at-sign']
 ];
+const PERM_GROUPS = ['General', 'Channels', 'Members'];
 
 function renderRolesTab(body, s) {
   const admin = amIAdmin();
@@ -8488,9 +8494,8 @@ function openRoleAssign(s, roleId) {
       return `<label class="ra-row">
         ${avatarHTML(m, 32, m.status || 'offline')}
         <div class="ra-name"><b>${escapeHtml(m.display_name || m.username)}</b><span>${escapeHtml(fullTag(m))}</span></div>
-        ${isOwner
-          ? `<span class="ra-owner-tag">${icon('crown')} Owner</span>`
-          : `<input type="checkbox" data-uid="${m.id}" ${checked ? 'checked' : ''}>`}
+        ${isOwner ? `<span class="ra-owner-tag">${icon('crown')} Owner</span>` : ''}
+        <input type="checkbox" data-uid="${m.id}" ${checked ? 'checked' : ''}>
       </label>`;
     }).join('') || '<div class="inv-empty">No members found.</div>';
     hydrateIcons(list);
@@ -8611,9 +8616,18 @@ function openRoleEditor(s, role) {
       <label class="re-toggle"><input type="checkbox" id="role-mention" ${!role || role.mentionable ? 'checked' : ''}><div><b>Allow anyone to mention</b><span>Members can @mention this role in messages.</span></div></label>
     </div>
     <div class="field re-perms-field">
-      <div class="re-perms-head"><label>Permissions</label><span class="re-perm-count" id="re-perm-count"></span></div>
+      <div class="re-perms-head"><label>Permissions</label><div class="re-perms-toolbar"><span class="re-perm-count" id="re-perm-count"></span><button type="button" class="re-mini" id="re-perm-all">Select all</button><button type="button" class="re-mini" id="re-perm-none">Clear</button></div></div>
       <div class="re-perms" id="re-perms">
-        ${ROLE_PERMISSIONS.map(([key, label, desc]) => `<label class="re-perm"><input type="checkbox" data-perm="${key}" ${perms[key] ? 'checked' : ''}><div class="re-perm-text"><b>${label}</b><span>${desc}</span></div></label>`).join('')}
+        ${PERM_GROUPS.map(g => {
+          const items = ROLE_PERMISSIONS.filter(p => p[3] === g);
+          const gIcon = items[0][4];
+          return `<div class="re-perm-group">
+            <div class="re-perm-group-head">${icon(gIcon)}<span>${g}</span><span class="rpg-count" data-group="${g}"></span></div>
+            <div class="re-perm-group-body">
+              ${items.map(([key, label, desc]) => `<label class="re-perm"><div class="re-perm-text"><b>${label}</b><span>${desc}</span></div><span class="re-switch"><input type="checkbox" data-perm="${key}" ${perms[key] ? 'checked' : ''}><span class="re-switch-track"></span></span></label>`).join('')}
+            </div>
+          </div>`;
+        }).join('')}
       </div>
     </div>
     ${role && amIAdmin() ? `<div class="field re-assign-field">
@@ -8656,8 +8670,20 @@ function openRoleEditor(s, role) {
     const on = wrap.querySelectorAll('[data-perm]:checked').length;
     const el = wrap.querySelector('#re-perm-count');
     if (el) el.textContent = on + ' of ' + total + ' enabled';
+    wrap.querySelectorAll('.re-perm-group').forEach(grp => {
+      const g = grp.querySelector('.re-perm-group-head .rpg-count');
+      if (!g) return;
+      const all = grp.querySelectorAll('[data-perm]').length;
+      const sel = grp.querySelectorAll('[data-perm]:checked').length;
+      g.textContent = sel + '/' + all;
+      g.classList.toggle('full', sel === all && all > 0);
+    });
   };
   wrap.querySelectorAll('[data-perm]').forEach(cb => cb.addEventListener('change', updatePermCount));
+  const permAll = wrap.querySelector('#re-perm-all');
+  if (permAll) permAll.addEventListener('click', () => { wrap.querySelectorAll('[data-perm]').forEach(cb => cb.checked = true); updatePermCount(); });
+  const permNone = wrap.querySelector('#re-perm-none');
+  if (permNone) permNone.addEventListener('click', () => { wrap.querySelectorAll('[data-perm]').forEach(cb => cb.checked = false); updatePermCount(); });
   wrap.querySelectorAll('#role-color-row .role-swatch').forEach(b => b.addEventListener('click', () => {
     chosen = b.dataset.color;
     wrap.querySelectorAll('#role-color-row .role-swatch').forEach(x => x.classList.toggle('sel', x === b));
@@ -8688,9 +8714,8 @@ function openRoleEditor(s, role) {
         return `<label class="ra-row">
           ${avatarHTML(m, 32, m.status || 'offline')}
           <div class="ra-name"><b>${escapeHtml(m.display_name || m.username)}</b><span>${escapeHtml(fullTag(m))}</span></div>
-          ${isOwnerRow
-            ? `<span class="ra-owner-tag">${icon('crown')} Owner</span>`
-            : `<input type="checkbox" data-ruid="${m.id}" ${checked ? 'checked' : ''}>`}
+          ${isOwnerRow ? `<span class="ra-owner-tag">${icon('crown')} Owner</span>` : ''}
+          <input type="checkbox" data-ruid="${m.id}" ${checked ? 'checked' : ''}>
         </label>`;
       }).join('') || '<div class="inv-empty">No members found.</div>';
       hydrateIcons(assignList);
