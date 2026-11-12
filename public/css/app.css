@@ -514,6 +514,7 @@ button:active, .rail-item:active, .channel:active, .dm-item:active, .member:acti
 
 /* ---------- Other-user profile (with banner on top of avatar) ---------- */
 /* ---------- Other-user profile: Discord's profile popout ---------- */
+/* ---------- Other-user profile: Discord's profile popout ---------- */
 .oprofile-modal {
   --accent: var(--brand);
   --accent-ink: #fff; --accent-ink-2: rgba(255,255,255,.78);
@@ -521,42 +522,47 @@ button:active, .rail-item:active, .channel:active, .dm-item:active, .member:acti
   --pf-bg: #232428;
   --pf-card: #2b2d31;
   --pf-hover: #35373c;
-  width: 100%; max-width: 340px; padding: 0; overflow: hidden;
+  width: 100%; max-width: 620px; padding: 0; overflow: hidden;
   background: var(--pf-bg); color: #dbdee1;
-  border-radius: 8px; border: 1px solid rgba(0,0,0,.4);
-  display: flex; flex-direction: column; max-height: 88vh;
+  border-radius: 10px; border: 1px solid rgba(0,0,0,.4);
+  display: flex; flex-direction: column; max-height: 90vh;
   box-shadow: 0 8px 32px rgba(0,0,0,.55);
 }
 .oprofile-banner {
-  position: relative; height: 105px; flex: 0 0 auto;
+  position: relative; height: 140px; width: 100%; flex: 0 0 auto;
   background: var(--accent); background-size: cover; background-position: center;
 }
 .oprofile-banner::after {
   content: ''; position: absolute; inset: 0; pointer-events: none;
-  background: linear-gradient(180deg, rgba(0,0,0,0) 55%, rgba(0,0,0,.14));
+  background: linear-gradient(180deg, rgba(0,0,0,0) 55%, rgba(0,0,0,.16));
 }
-.dp-topbtns { position: absolute; top: 8px; right: 8px; z-index: 3; display: flex; gap: 6px; }
+.dp-topbtns { position: absolute; top: 10px; right: 10px; z-index: 3; display: flex; gap: 6px; }
 .dp-icon-btn {
-  width: 24px; height: 24px; border-radius: 50%; display: grid; place-items: center;
-  background: rgba(0,0,0,.55); color: #fff; font-size: 12px;
+  width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center;
+  background: rgba(0,0,0,.55); color: #fff; font-size: 13px;
 }
 .dp-icon-btn:hover { background: rgba(0,0,0,.78); }
-.dp-body { position: relative; padding: 0 14px 16px; overflow-y: auto; overflow-x: hidden; }
-.dp-avatar { position: absolute; top: -52px; left: 14px; z-index: 2; }
+
+.dp-body { position: relative; padding: 0 22px 22px; overflow-y: auto; overflow-x: hidden; }
+
+/* Avatar straddles the banner, then the name sits beside it with the action
+   buttons pushed to the far right so nothing overlaps. */
+.dp-head { display: flex; align-items: flex-end; gap: 16px; margin-top: -48px; position: relative; z-index: 2; }
+.dp-avatar { flex: 0 0 auto; }
 .dp-avatar .avatar { border: 6px solid var(--pf-bg); box-sizing: content-box; box-shadow: none; }
-.dp-identity { padding-top: 44px; }
+.dp-identity { flex: 1 1 auto; min-width: 0; padding-bottom: 4px; }
 .dp-name {
-  font-size: 20px; font-weight: 700; line-height: 1.2; color: #f2f3f5;
-  display: flex; align-items: center; gap: 6px; word-break: break-word;
+  font-size: 24px; font-weight: 700; line-height: 1.2; color: #f2f3f5;
+  word-break: break-word; overflow-wrap: anywhere;
 }
-.dp-handle { font-size: 14px; color: #dbdee1; margin-top: 2px; }
+.dp-handle { font-size: 14px; color: #dbdee1; margin-top: 3px; word-break: break-word; }
 .dp-handle .dp-pronoun { color: #949ba4; }
-.dp-actions { display: flex; gap: 8px; margin-top: 14px; }
+.dp-custom { font-size: 13px; color: #b5bac1; margin-top: 6px; word-break: break-word; }
+.dp-actions { flex: 0 0 auto; display: flex; align-items: center; gap: 8px; padding-bottom: 4px; }
 .dp-btn {
-  flex: 1; display: flex; align-items: center; justify-content: center; gap: 6px;
-  height: 32px; padding: 0 10px; border-radius: 3px; min-width: 0;
-  font-size: 13px; font-weight: 500; background: #4e5058; color: #fff;
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  display: flex; align-items: center; justify-content: center; gap: 6px;
+  height: 34px; padding: 0 14px; border-radius: 3px; white-space: nowrap;
+  font-size: 14px; font-weight: 500; background: #4e5058; color: #fff;
 }
 .dp-btn:hover { background: #5d6069; }
 .dp-btn.primary { background: var(--brand); }
@@ -565,39 +571,45 @@ button:active, .rail-item:active, .channel:active, .dm-item:active, .member:acti
 .dp-btn.friends:hover { background: #1a6334; }
 .dp-btn.pending, .dp-btn.blocked { background: #4e5058; opacity: .7; }
 .dp-more {
-  flex: 0 0 32px; width: 32px; height: 32px; display: grid; place-items: center;
-  border-radius: 3px; background: #4e5058; color: #fff; font-size: 14px;
+  flex: 0 0 34px; width: 34px; height: 34px; display: grid; place-items: center;
+  border-radius: 3px; background: #4e5058; color: #fff; font-size: 15px;
 }
 .dp-more:hover { background: #5d6069; }
-.dp-divider { height: 1px; background: rgba(255,255,255,.06); margin: 14px 0; }
-.dp-section { margin-bottom: 14px; }
-.dp-section:last-child { margin-bottom: 0; }
+
+.dp-divider { height: 1px; background: rgba(255,255,255,.06); margin: 18px 0; }
+
+/* Two balanced columns so long bios / long lists never squash the text. */
+.dp-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 28px; align-items: start; }
+.dp-col { min-width: 0; display: flex; flex-direction: column; gap: 18px; }
+.dp-section { min-width: 0; }
 .dp-label {
   font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .02em;
-  color: #f2f3f5; margin-bottom: 6px;
+  color: #f2f3f5; margin-bottom: 7px;
 }
-.dp-bio { font-size: 14px; line-height: 1.35; color: #dbdee1; word-break: break-word; white-space: pre-wrap; }
-.dp-value { font-size: 14px; color: #dbdee1; }
-.dp-note { background: var(--pf-card); border-radius: 4px; padding: 8px 10px; cursor: pointer; }
+.dp-bio { font-size: 14px; line-height: 1.45; color: #dbdee1; word-break: break-word; white-space: pre-wrap; }
+.dp-value { font-size: 14px; color: #dbdee1; line-height: 1.4; }
+.dp-dim { color: #80848e; }
+.dp-note { background: var(--pf-card); border-radius: 4px; padding: 9px 11px; cursor: pointer; }
 .dp-note:hover { background: var(--pf-hover); }
-.dp-note-text { font-size: 14px; color: #dbdee1; line-height: 1.35; word-break: break-word; }
+.dp-note-text { font-size: 14px; color: #dbdee1; line-height: 1.4; word-break: break-word; }
 .dp-note-empty { display: flex; align-items: center; gap: 6px; font-size: 14px; color: #949ba4; }
-.dp-note-hint { font-size: 11px; color: #80848e; margin-top: 4px; }
+.dp-note-hint { font-size: 11px; color: #80848e; margin-top: 5px; }
 .dp-mutual-label {
   font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .02em;
-  color: #f2f3f5; margin-bottom: 6px;
+  color: #f2f3f5; margin-bottom: 8px;
 }
-.dp-mutual { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.dp-mutual { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .dp-server-ico {
-  width: 32px; height: 32px; border-radius: 50%; background: var(--brand); color: #fff;
-  display: grid; place-items: center; font-size: 12px; font-weight: 700;
+  width: 36px; height: 36px; border-radius: 50%; background: var(--brand); color: #fff;
+  display: grid; place-items: center; font-size: 13px; font-weight: 700;
   overflow: hidden; cursor: pointer; flex: 0 0 auto;
 }
 .dp-server-ico:hover { border-radius: 30%; }
 .dp-server-ico img { width: 100%; height: 100%; object-fit: cover; }
-.dp-friend-row { display: flex; align-items: center; gap: 8px; padding: 4px 6px; border-radius: 4px; cursor: pointer; }
+.dp-friend-row { display: flex; align-items: center; gap: 9px; padding: 5px 6px; border-radius: 4px; cursor: pointer; }
 .dp-friend-row:hover { background: var(--pf-hover); }
-.dp-friend-name { font-size: 14px; font-weight: 500; color: #f2f3f5; }
+.dp-friend-name { font-size: 14px; font-weight: 500; color: #f2f3f5; word-break: break-word; }
+.dp-friend-tag { font-size: 12px; color: #949ba4; }
 .dp-friend-tag { font-size: 12px; color: #949ba4; }
 
 /* ============ FRIENDS ============ */
@@ -953,7 +965,17 @@ button:active, .rail-item:active, .channel:active, .dm-item:active, .member:acti
 /* ============ RESPONSIVE ============ */
 @media (max-width: 1100px) { .profile-body-grid { grid-template-columns: 260px 1fr; } }
 @media (max-width: 900px) { .members { display: none; } .profile-body-grid, .settings-body { grid-template-columns: 1fr; } .profile-nav, .settings-nav { display: none; } }
-@media (max-width: 760px) { .oprofile-modal { max-width: 100%; } .oprofile-banner { height: 96px; } }
+@media (max-width: 720px) {
+  .oprofile-modal { max-width: 100%; }
+  .oprofile-banner { height: 104px; }
+  .dp-body { padding: 0 16px 18px; }
+  .dp-head { flex-wrap: wrap; margin-top: -44px; gap: 12px; }
+  .dp-avatar .avatar { width: 76px !important; height: 76px !important; }
+  .dp-identity { flex: 1 1 140px; }
+  .dp-name { font-size: 20px; }
+  .dp-actions { flex: 1 1 100%; padding-bottom: 0; }
+  .dp-grid { grid-template-columns: 1fr; gap: 18px; }
+}
 @media (max-width: 700px) { .sidebar { position: absolute; left: 72px; top: 0; bottom: 0; z-index: 50; transform: translateX(-120%); transition: transform .2s; } .sidebar.open { transform: translateX(0); } }
 
 /* ============ RICHER PLACEHOLDERS ============ */

@@ -4002,9 +4002,16 @@ function renderOtherProfile(user, ctx) {
   const mutualFriends = ctx.mutualFriends || [];
   const note = ctx.note || '';
 
+  /* Discord tints the banner with the profile's accent colour. `banner_color`
+     defaults to blurple for every account, so preferring it here meant the
+     accent never showed - only honour it when it was deliberately changed. */
+  const accent = user.accent_color || '#5865F2';
+  const customBanner = user.banner_color && String(user.banner_color).toLowerCase() !== '#5865f2'
+    ? user.banner_color : null;
+  const tint = customBanner || accent;
   const bannerStyle = user.banner_url
     ? `background-image:url('${escapeHtml(user.banner_url)}')`
-    : `background:${user.banner_color || user.accent_color || '#5865F2'}`;
+    : `background:linear-gradient(180deg, ${escapeHtml(tint)} 0%, color-mix(in srgb, ${escapeHtml(tint)} 70%, #000) 100%)`;
 
   let addBtn;
   if (rel === 'friends') addBtn = `<button class="op-add friends" id="pf-add">${icon('check')} <span>Friends</span></button>`;
@@ -4042,38 +4049,46 @@ function renderOtherProfile(user, ctx) {
       </div>
     </div>
     <div class="dp-body">
-      <div class="dp-avatar">${avatarHTML(user, 80, user.status || 'offline')}</div>
-      <div class="dp-identity">
-        <div class="dp-name">${escapeHtml(displayName)}</div>
-        <div class="dp-handle">${escapeHtml(fullTag(user))}${user.pronouns ? ` <span class="dp-pronoun">\u00b7 ${escapeHtml(user.pronouns)}</span>` : ''}</div>
+      <div class="dp-head">
+        <div class="dp-avatar">${avatarHTML(user, 96, user.status || 'offline')}</div>
+        <div class="dp-identity">
+          <div class="dp-name">${escapeHtml(displayName)}</div>
+          <div class="dp-handle">${escapeHtml(fullTag(user))}${user.pronouns ? ` <span class="dp-pronoun">\u00b7 ${escapeHtml(user.pronouns)}</span>` : ''}</div>
+          ${user.custom_status ? `<div class="dp-custom">${escapeHtml(user.custom_status)}</div>` : ''}
+        </div>
+        <div class="dp-actions">
+          <button class="dp-btn primary" id="pf-dm">${icon('comment')} <span>Message</span></button>
+          ${addBtn.replace('op-add', 'dp-btn')}
+          <button class="dp-more" id="pf-more-2" title="More Options">${icon('ellipsis-vertical')}</button>
+        </div>
       </div>
-      <div class="dp-actions">
-        <button class="dp-btn primary" id="pf-dm">${icon('comment')} <span>Message</span></button>
-        ${addBtn.replace('op-add', 'dp-btn')}
-        <button class="dp-more" id="pf-more-2" title="More Options">${icon('ellipsis-vertical')}</button>
-      </div>
-      ${user.custom_status ? `<div class="dp-section" style="margin-top:14px"><div class="dp-bio">${escapeHtml(user.custom_status)}</div></div>` : ''}
       <div class="dp-divider"></div>
-      ${user.bio ? `<div class="dp-section">
-        <div class="dp-label">About Me</div>
-        <div class="dp-bio">${linkifyBio(user.bio)}</div>
-      </div>` : ''}
-      <div class="dp-section">
-        <div class="dp-label">Member Since</div>
-        <div class="dp-value">${accountCreated}</div>
-      </div>
-      ${mutualServersHTML}
-      ${mutualFriendsHTML}
-      <div class="dp-section">
-        <div class="dp-label">Note</div>
-        <div class="dp-note" id="pf-note">
-          ${note ? `<div class="dp-note-text">${escapeHtml(note)}</div>` : `<div class="dp-note-empty">${icon('plus')} Click to add a note</div>`}
-          <div class="dp-note-hint">Note only visible to you</div>
+      <div class="dp-grid">
+        <div class="dp-col">
+          ${user.bio ? `<div class="dp-section">
+            <div class="dp-label">About Me</div>
+            <div class="dp-bio">${linkifyBio(user.bio)}</div>
+          </div>` : ''}
+          <div class="dp-section">
+            <div class="dp-label">Member Since</div>
+            <div class="dp-value">${accountCreated}</div>
+          </div>
+          <div class="dp-section">
+            <div class="dp-label">Note</div>
+            <div class="dp-note" id="pf-note">
+              ${note ? `<div class="dp-note-text">${escapeHtml(note)}</div>` : `<div class="dp-note-empty">${icon('plus')} Click to add a note</div>`}
+              <div class="dp-note-hint">Note only visible to you</div>
+            </div>
+          </div>
+        </div>
+        <div class="dp-col">
+          ${mutualServersHTML || `<div class="dp-section"><div class="dp-label">Mutual Servers</div><div class="dp-value dp-dim">No servers in common</div></div>`}
+          ${mutualFriendsHTML || `<div class="dp-section"><div class="dp-label">Mutual Friends</div><div class="dp-value dp-dim">No friends in common</div></div>`}
         </div>
       </div>
     </div>`, { modalClass: 'oprofile-modal' });
 
-  applyAccent($('modal'), user.accent_color);
+  applyAccent($('modal'), accent);
 
   document.querySelectorAll('.dp-server-ico').forEach(el => el.addEventListener('click', () => {
     closeModal();
