@@ -586,7 +586,7 @@ button:active, .rail-item:active, .channel:active, .dm-item:active, .member:acti
   --pf-bg: color-mix(in srgb, var(--accent) 38%, var(--pf-base));
   --pf-card: color-mix(in srgb, var(--accent) 50%, var(--pf-base));
   --pf-hover: color-mix(in srgb, var(--accent) 62%, var(--pf-base));
-  width: 100%; max-width: 700px; padding: 0; overflow: hidden;
+  width: 100%; max-width: 780px; padding: 0; overflow: hidden;
   background:
     /* A dark scrim over the lower half keeps body text legible while the top
        of the card stays vividly accent-coloured. */
@@ -609,19 +609,13 @@ button:active, .rail-item:active, .channel:active, .dm-item:active, .member:acti
 }
 .oprofile-modal { position: relative; }
 .oprofile-banner {
-  position: relative; z-index: 0; height: 158px; width: 100%; flex: 0 0 auto;
+  position: relative; z-index: 0; height: 176px; width: 100%; flex: 0 0 auto;
   background: var(--accent); background-size: cover; background-position: center;
 }
 .oprofile-banner::after {
   content: ''; position: absolute; inset: 0; pointer-events: none;
   background: linear-gradient(180deg, rgba(0,0,0,0) 55%, rgba(0,0,0,.16));
 }
-.dp-topbtns { position: absolute; top: 10px; right: 10px; z-index: 3; display: flex; gap: 6px; }
-.dp-icon-btn {
-  width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center;
-  background: rgba(0,0,0,.55); color: #fff; font-size: 13px;
-}
-.dp-icon-btn:hover { background: rgba(0,0,0,.78); }
 
 .dp-body { position: relative; z-index: 1; padding: 0 26px 26px; display: flex; flex-direction: column; min-height: 0; overflow: visible; }
 .dp-scroll { overflow-y: auto; overflow-x: hidden; min-height: 0; padding-bottom: 4px; }
@@ -638,7 +632,7 @@ button:active, .rail-item:active, .channel:active, .dm-item:active, .member:acti
    and the avatar alone is offset upward, so the name, handle and custom status
    always render on clean background below the banner. */
 .dp-head { display: flex; align-items: flex-start; gap: 18px; margin-top: 0; position: relative; z-index: 5; }
-.dp-avatar { flex: 0 0 auto; position: relative; z-index: 10; margin-top: -64px; }
+.dp-avatar { flex: 0 0 auto; position: relative; z-index: 10; margin-top: -68px; }
 .dp-avatar .avatar {
   /* No accent ring around the profile picture: the border stays 7px wide so
      the avatar's size and position are unchanged, but it is transparent. */
@@ -656,21 +650,29 @@ button:active, .rail-item:active, .channel:active, .dm-item:active, .member:acti
 .dp-custom { font-size: 13px; color: #b5bac1; margin-top: 6px; word-break: break-word; }
 .dp-actions { flex: 0 0 auto; display: flex; align-items: center; gap: 8px; padding-top: 8px; }
 .dp-btn {
-  display: flex; align-items: center; justify-content: center; gap: 6px;
-  height: 34px; padding: 0 14px; border-radius: 3px; white-space: nowrap;
-  font-size: 14px; font-weight: 500; background: #4e5058; color: #fff;
+  display: flex; align-items: center; justify-content: center; gap: 7px;
+  height: 36px; padding: 0 16px; border-radius: var(--radius-sm); white-space: nowrap;
+  font-size: 14px; font-weight: 600; color: #fff;
+  background: rgba(255,255,255,.09); border: 1px solid rgba(255,255,255,.10);
+  transition: background .15s var(--ease), border-color .15s var(--ease);
 }
-.dp-btn:hover { background: #5d6069; }
-.dp-btn.primary { background: var(--brand); }
-.dp-btn.primary:hover { background: #4752c4; }
-.dp-btn.friends { background: #248046; }
-.dp-btn.friends:hover { background: #1a6334; }
-.dp-btn.pending, .dp-btn.blocked { background: #4e5058; opacity: .7; }
+.dp-btn:hover { background: rgba(255,255,255,.16); border-color: rgba(255,255,255,.16); }
+.dp-btn.primary { background: var(--brand); border-color: transparent; }
+.dp-btn.primary:hover { background: var(--brand-hover); }
+/* Friends / pending states use the same neutral surface instead of a loud
+   green pill, so the popout reads as part of the app rather than a widget. */
+.dp-btn.friends, .dp-btn.pending, .dp-btn.blocked {
+  background: rgba(255,255,255,.09); border-color: rgba(255,255,255,.10);
+}
+.dp-btn.friends:hover { background: rgba(255,255,255,.16); }
+.dp-btn.pending, .dp-btn.blocked { opacity: .72; }
 .dp-more {
-  flex: 0 0 34px; width: 34px; height: 34px; display: grid; place-items: center;
-  border-radius: 3px; background: #4e5058; color: #fff; font-size: 15px;
+  flex: 0 0 36px; width: 36px; height: 36px; display: grid; place-items: center;
+  border-radius: var(--radius-sm); font-size: 15px; color: #fff;
+  background: rgba(255,255,255,.09); border: 1px solid rgba(255,255,255,.10);
+  transition: background .15s var(--ease), border-color .15s var(--ease);
 }
-.dp-more:hover { background: #5d6069; }
+.dp-more:hover { background: rgba(255,255,255,.16); border-color: rgba(255,255,255,.16); }
 
 .dp-divider { height: 1px; background: rgba(255,255,255,.06); margin: 18px 0; }
 
@@ -1168,7 +1170,7 @@ button:active, .rail-item:active, .channel:active, .dm-item:active, .member:acti
 @media (max-width: 900px) { .members { display: none; } .profile-body-grid, .settings-body { grid-template-columns: 1fr; } .profile-nav, .settings-nav { display: none; } }
 @media (max-width: 720px) {
   .oprofile-modal { max-width: 100%; }
-  .oprofile-banner { height: 104px; }
+  .oprofile-banner { height: 112px; }
   .dp-body { padding: 0 16px 18px; }
   .dp-head { flex-wrap: wrap; margin-top: 0; gap: 12px; }
   .dp-avatar { margin-top: -44px; }
@@ -2201,12 +2203,14 @@ body.has-custom-bg {
   --input-bg: rgba(40, 42, 46, 0.82);
   --menu-bg: rgba(20, 21, 24, 0.94);
 }
+/* No backdrop blur: the chosen artwork should stay crisp behind the
+   translucent panels instead of looking out of focus. */
 body.has-custom-bg .sidebar,
 body.has-custom-bg .chat,
 body.has-custom-bg .members,
 body.has-custom-bg .server-rail {
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
 }
 
 /* Appearance: custom background controls */

@@ -5287,15 +5287,10 @@ function renderOtherProfile(user, ctx) {
     </div>` : '';
 
   openModal(`
-    <div class="oprofile-banner" style="${bannerStyle}">
-      <div class="dp-topbtns">
-        <button class="dp-icon-btn" id="pf-more" title="More Options">${icon('ellipsis-vertical')}</button>
-        <button class="dp-icon-btn" id="pf-x" title="Close">${icon('xmark')}</button>
-      </div>
-    </div>
+    <div class="oprofile-banner" style="${bannerStyle}"></div>
     <div class="dp-body">
       <div class="dp-head">
-        <div class="dp-avatar">${avatarHTML(user, 116, user.status || 'offline')}</div>
+        <div class="dp-avatar">${avatarHTML(user, 124, user.status || 'offline')}</div>
         <div class="dp-identity">
           <div class="dp-name">${escapeHtml(displayName)}</div>
           <div class="dp-handle">${escapeHtml(fullTag(user))}${user.pronouns ? ` <span class="dp-pronoun">\u00b7 ${escapeHtml(user.pronouns)}</span>` : ''}</div>
@@ -5346,7 +5341,11 @@ function renderOtherProfile(user, ctx) {
     if (u) { closeModal(); openProfile(u); }
   }));
 
-  $('pf-x').addEventListener('click', closeModal);
+  /* The top-right 3-dots and close button were removed from this popout; the
+     overlay click / Escape still close it, and "More Options" lives in the
+     action row. Guard the handlers so nothing breaks. */
+  const pfX = $('pf-x');
+  if (pfX) pfX.addEventListener('click', closeModal);
   $('pf-dm').addEventListener('click', () => { closeModal(); startDM(user.id); });
   $('pf-add').addEventListener('click', async () => {
     if (rel === 'friends') { closeModal(); startDM(user.id); return; }
@@ -5370,7 +5369,8 @@ function renderOtherProfile(user, ctx) {
       }
     })));
   };
-  $('pf-more').addEventListener('click', openMoreMenu);
+  const pfMore = $('pf-more');
+  if (pfMore) pfMore.addEventListener('click', openMoreMenu);
   const more2 = $('pf-more-2');
   if (more2) more2.addEventListener('click', openMoreMenu);
   $('pf-note').addEventListener('click', () => openNoteEditor(user, note));
@@ -6369,7 +6369,7 @@ function wireAppearance() {
     const v = (cbUrl && cbUrl.value || '').trim();
     if (!v) { cbMsg('Paste an image or GIF URL first.', 'bad'); return; }
     if (!/^(https?:\/\/|data:image\/)/i.test(v)) { cbMsg('Use a full https:// image or GIF URL.', 'bad'); return; }
-    if (setCustomBg(Object.assign({ url: v }, cbOptions(getCustomBg() || {})))) {
+    if (setCustomBg(Object.assign({ url: v }, cbOptions(getCustomBg() || {}), { blur: 0 }))) {
       cbMsg('Custom background applied.', 'ok');
       if (cbUrl) cbUrl.value = '';
       paintCbPreview();
@@ -6391,9 +6391,9 @@ function wireAppearance() {
       if (!/^image\//.test(f.type)) { cbMsg('Please choose an image or GIF file.', 'bad'); return; }
       if (f.size > MAX_IMAGE_BYTES) { cbMsg('That file is too large (maximum 50 MB).', 'bad'); return; }
       const prevOpts = cbOptions(getCustomBg() || {});
-      /* A freshly uploaded image gets a slight blur by default so the UI
-         stays readable; the Blur slider can dial it up or back to 0. */
-      if (!prevOpts.blur) prevOpts.blur = 6;
+      /* Newly picked images are shown exactly as chosen: no forced blur. The
+         Blur slider is there if the user wants it. */
+      prevOpts.blur = 0;
 
       const applyCfg = (url) => {
         if (setCustomBg(Object.assign({ url }, prevOpts))) {
