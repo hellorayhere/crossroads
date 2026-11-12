@@ -86,6 +86,8 @@
             <input type="text" id="login-code" inputmode="numeric" maxlength="6" placeholder="6-digit code" autocomplete="one-time-code" />
           </div>
           <div class="msg error">Enter the 6-digit code from your authenticator or settings.</div>
+          <button type="button" class="link-btn" id="login-recover">Lost your authenticator? Reset your code</button>
+          <div class="recover-box hidden" id="login-recover-box"></div>
           <label class="trust-device" for="login-trust">
             <input type="checkbox" id="login-trust" />
             <span class="trust-box" aria-hidden="true"></span>

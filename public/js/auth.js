@@ -212,6 +212,44 @@
     }
   });
 
+  /* ---------------- Two-step recovery ----------------
+     Reached from "Lost your authenticator?" on the code screen. Reuses the
+     username and password already typed into the form, so the owner never has
+     to retype anything. The server mints a *new* secret and turns two-step off
+     until it is confirmed — the old secret is never revealed. */
+  const recoverBtn = document.getElementById('login-recover');
+  const recoverBox = document.getElementById('login-recover-box');
+  if (recoverBtn) {
+    recoverBtn.addEventListener('click', async () => {
+      clearError();
+      const identifier = document.getElementById('login-identifier').value.trim();
+      const password = document.getElementById('login-password').value;
+      if (!identifier || !password) {
+        showError('Enter your username and password above, then click reset again.');
+        return;
+      }
+      const sure = window.confirm('Reset your two-step code?\n\nThis turns two-step login off and gives you a brand-new code. Your old authenticator entry will stop working.');
+      if (!sure) return;
+      recoverBtn.disabled = true;
+      recoverBtn.textContent = 'Resetting\u2026';
+      try {
+        const d = await post('/api/2fa/recover', { identifier, password });
+        recoverBox.classList.remove('hidden');
+        recoverBox.innerHTML =
+          '<div class="rb-title">Your new two-step code</div>' +
+          '<div class="rb-sub">Two-step login is now <strong>off</strong>. Sign in with your password, then re-enable it in Settings \u2192 Two-Step Login using the secret below.</div>' +
+          '<div class="rb-secret"><span>Secret</span><code>' + d.secret + '</code></div>' +
+          '<div class="rb-code"><span>Current code</span><strong>' + d.code + '</strong></div>';
+        document.getElementById('login-code').value = d.code;
+        recoverBtn.textContent = 'Code reset \u2014 sign in below';
+      } catch (err) {
+        showError(err.message || 'Could not reset your code.');
+        recoverBtn.disabled = false;
+        recoverBtn.textContent = 'Lost your authenticator? Reset your code';
+      }
+    });
+  }
+
   /* ---------------- Register ---------------- */
   registerForm.addEventListener('submit', async (e) => {
     e.preventDefault();

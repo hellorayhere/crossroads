@@ -1027,6 +1027,42 @@ app.post('/api/login', rateLimit({ windowMs: 60000, max: 15 }), (req, res) => {
   res.json(out);
 });
 
+/* Two-step recovery (unauthenticated, password-gated).
+   Used by the "Lost your authenticator?" link on the sign-in screen. Holding
+   the account password is the proof of ownership here: we mint a brand-new
+   secret, turn two-step off until the owner confirms the new one, and drop any
+   trusted-device tokens so an old device cannot ride along. We deliberately
+   never return the *existing* secret — only the replacement. */
+app.post('/api/2fa/recover', rateLimit({ windowMs: 60000, max: 8 }), (req, res) => {
+  let { identifier, password } = req.body || {};
+  const login = (identifier || '').trim();
+  if (!login || !password) return res.status(400).json({ error: 'Username and password are required' });
+  let user;
+  if (login.includes('#')) {
+    const [uname, disc] = login.split('#');
+    user = db.prepare('SELECT * FROM users WHERE LOWER(username) = LOWER(?) AND discriminator = ?').get(uname, disc);
+  } else {
+    user = db.prepare('SELECT * FROM users WHERE LOWER(username) = LOWER(?) ORDER BY created_at ASC LIMIT 1').get(login);
+  }
+  if (!user || !bcrypt.compareSync(password, user.password_hash)) {
+    return res.status(401).json({ error: 'Invalid username or password' });
+  }
+  if (user.disabled) return res.status(403).json({ error: 'This account has been disabled.' });
+  if (isGloballyBanned(user.id)) return res.status(403).json({ error: 'This account has been banned.' });
+  const secret = newTotpSecret();
+  db.prepare('UPDATE users SET twofa_secret = ?, twofa_enabled = 0 WHERE id = ?').run(secret, user.id);
+  try { db.prepare('DELETE FROM trusted_devices WHERE user_id = ?').run(user.id); } catch (e) {}
+  const now = Date.now() / 1000;
+  const tag = `${user.username}#${user.discriminator}`;
+  res.json({
+    ok: true,
+    secret,
+    code: totpCode(secret, now),
+    seconds: 30 - Math.floor(now % 30),
+    otpauth: `otpauth://totp/Crossroads:${encodeURIComponent(tag)}?secret=${secret}&issuer=Crossroads&period=30&digits=6`
+  });
+});
+
 /* Password reset (unauthenticated). Requires the exact username#tag so a user
    who has forgotten their password can regain access. */
 app.post('/api/password/reset', rateLimit({ windowMs: 60000, max: 8 }), (req, res) => {
