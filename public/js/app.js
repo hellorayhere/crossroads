@@ -47,7 +47,61 @@ const state = {
 try { Object.assign(state.settings, JSON.parse(localStorage.getItem('cr_settings') || '{}')); } catch (e) { /* ignore */ }
 
 /* Emoji set is used only for message content and reactions (a native chat feature). */
-const EMOJIS = ['\u{1F600}','\u{1F602}','\u{1F972}','\u{1F60D}','\u{1F60E}','\u{1F914}','\u{1F634}','\u{1F973}','\u{1F62D}','\u{1F621}','\u{1F44D}','\u{1F44E}','\u{1F44F}','\u{1F64F}','\u{1F525}','\u{1F4AF}','\u{2728}','\u{1F389}','\u{2764}\u{FE0F}','\u{1F49C}','\u{1F499}','\u{1F49A}','\u{1F63A}','\u{1F436}','\u{1F355}','\u{1F354}','\u{2615}','\u{1F3AE}','\u{1F3B5}','\u{1F680}','\u{26A1}','\u{1F31F}','\u{1F440}','\u{1F92F}','\u{1F605}','\u{1F64C}','\u{1F91D}','\u{1F4AA}','\u{1F9E0}','\u{1F984}'];
+const EMOJI_CATEGORIES = [
+  { id: 'smileys', label: 'Smileys & Emotion', icon: '\u{1F600}', emojis: [
+    '\u{1F600}','\u{1F603}','\u{1F604}','\u{1F601}','\u{1F606}','\u{1F605}','\u{1F602}','\u{1F923}',
+    '\u{1F642}','\u{1F643}','\u{1F609}','\u{1F60A}','\u{1F970}','\u{1F60D}','\u{1F929}','\u{1F618}',
+    '\u{1F617}','\u{1F61A}','\u{1F619}','\u{1F60B}','\u{1F61B}','\u{1F61C}','\u{1F92A}','\u{1F928}',
+    '\u{1F9D0}','\u{1F913}','\u{1F60E}','\u{1F973}','\u{1F60F}','\u{1F612}','\u{1F61E}','\u{1F614}',
+    '\u{1F61F}','\u{1F641}','\u{2639}\u{FE0F}','\u{1F623}','\u{1F616}','\u{1F62B}','\u{1F629}','\u{1F97A}',
+    '\u{1F622}','\u{1F62D}','\u{1F624}','\u{1F621}','\u{1F620}','\u{1F92C}','\u{1F92F}','\u{1F631}',
+    '\u{1F630}','\u{1F975}','\u{1F976}','\u{1F628}','\u{1F627}','\u{1F626}','\u{1F625}','\u{1F917}',
+    '\u{1F914}','\u{1F92D}','\u{1F92B}','\u{1F925}','\u{1F610}','\u{1F611}','\u{1F636}','\u{1F644}',
+    '\u{1F62F}','\u{1F626}','\u{1F627}','\u{1F62E}','\u{1F632}','\u{1F971}','\u{1F634}','\u{1F924}',
+    '\u{1F62A}','\u{1F635}','\u{1F910}','\u{1F974}','\u{1F922}','\u{1F92E}','\u{1F927}','\u{1F637}',
+    '\u{1F912}','\u{1F915}'
+  ] },
+  { id: 'people', label: 'People & Hands', icon: '\u{1F44D}', emojis: [
+    '\u{1F44D}','\u{1F44E}','\u{1F44C}','\u{270C}\u{FE0F}','\u{1F91E}','\u{1F91F}','\u{1F918}','\u{1F919}',
+    '\u{1F448}','\u{1F449}','\u{1F446}','\u{1F447}','\u{261D}\u{FE0F}','\u{270B}','\u{1F91A}','\u{1F590}\u{FE0F}',
+    '\u{1F596}','\u{1F44B}','\u{1F91D}','\u{1F64F}','\u{1F4AA}','\u{1F9BE}','\u{1FAF6}','\u{1F44F}',
+    '\u{1F64C}','\u{1F450}','\u{1F932}','\u{1F91C}','\u{1F91B}','\u{270A}','\u{1F44A}','\u{1FAE1}',
+    '\u{1FAE0}','\u{1F9B5}','\u{1F9B6}','\u{1F463}','\u{1F440}','\u{1F441}\u{FE0F}','\u{1F9E0}','\u{1FAC0}'
+  ] },
+  { id: 'nature', label: 'Animals & Nature', icon: '\u{1F436}', emojis: [
+    '\u{1F436}','\u{1F431}','\u{1F42D}','\u{1F439}','\u{1F430}','\u{1F98A}','\u{1F43B}','\u{1F43C}',
+    '\u{1F428}','\u{1F42F}','\u{1F981}','\u{1F42E}','\u{1F437}','\u{1F438}','\u{1F435}','\u{1F414}',
+    '\u{1F427}','\u{1F426}','\u{1F424}','\u{1F984}','\u{1F41D}','\u{1F98B}','\u{1F422}','\u{1F40D}',
+    '\u{1F419}','\u{1F980}','\u{1F42C}','\u{1F433}','\u{1F988}','\u{1F335}','\u{1F332}','\u{1F333}',
+    '\u{1F334}','\u{1F331}','\u{1F33F}','\u{1F340}','\u{1F341}','\u{1F342}','\u{1F338}','\u{1F33C}',
+    '\u{1F33B}','\u{1F31E}','\u{1F31D}','\u{2B50}','\u{1F31F}','\u{2728}','\u{26A1}','\u{1F525}',
+    '\u{1F308}','\u{2600}\u{FE0F}','\u{1F319}','\u{2744}\u{FE0F}'
+  ] },
+  { id: 'food', label: 'Food & Drink', icon: '\u{1F354}', emojis: [
+    '\u{1F34F}','\u{1F34E}','\u{1F350}','\u{1F34A}','\u{1F34B}','\u{1F34C}','\u{1F349}','\u{1F347}',
+    '\u{1F353}','\u{1FAD0}','\u{1F352}','\u{1F351}','\u{1F96D}','\u{1F34D}','\u{1F965}','\u{1F95D}',
+    '\u{1F345}','\u{1F951}','\u{1F966}','\u{1F955}','\u{1F33D}','\u{1F336}\u{FE0F}','\u{1F952}','\u{1F96C}',
+    '\u{1F354}','\u{1F35F}','\u{1F355}','\u{1F32D}','\u{1F96A}','\u{1F32E}','\u{1F32F}','\u{1F35C}',
+    '\u{1F35D}','\u{1F363}','\u{1F364}','\u{1F366}','\u{1F369}','\u{1F36A}','\u{1F382}','\u{1F370}',
+    '\u{1F36B}','\u{1F36C}','\u{1F36D}','\u{2615}','\u{1F375}','\u{1F9CB}','\u{1F37A}','\u{1F37B}','\u{1F942}'
+  ] },
+  { id: 'objects', label: 'Objects & Activities', icon: '\u{1F3AE}', emojis: [
+    '\u{1F3AE}','\u{1F579}\u{FE0F}','\u{1F3A7}','\u{1F3A4}','\u{1F3B8}','\u{1F3B9}','\u{1F941}','\u{1F3BA}',
+    '\u{1F3BB}','\u{1F3AC}','\u{1F4F7}','\u{1F4F8}','\u{1F4F1}','\u{1F4BB}','\u{1F5A5}\u{FE0F}','\u{2328}\u{FE0F}',
+    '\u{1F5B1}\u{FE0F}','\u{1F5A8}\u{FE0F}','\u{1F4BE}','\u{1F4BF}','\u{1F4C0}','\u{1F389}','\u{1F38A}','\u{1F381}',
+    '\u{1F3C6}','\u{1F947}','\u{1F948}','\u{1F949}','\u{26BD}','\u{1F3C0}','\u{1F3C8}','\u{26BE}',
+    '\u{1F3BE}','\u{1F3D0}','\u{1F3B1}','\u{1F3AF}','\u{1F3B2}','\u{1F0CF}','\u{1F004}','\u{1F3A8}','\u{1F58C}\u{FE0F}'
+  ] },
+  { id: 'symbols', label: 'Symbols & Hearts', icon: '\u{2764}\u{FE0F}', emojis: [
+    '\u{2764}\u{FE0F}','\u{1F9E1}','\u{1F49B}','\u{1F49A}','\u{1F499}','\u{1F49C}','\u{1F5A4}','\u{1F90D}',
+    '\u{1F90E}','\u{1F494}','\u{2763}\u{FE0F}','\u{1F495}','\u{1F49E}','\u{1F493}','\u{1F497}','\u{1F496}',
+    '\u{1F498}','\u{1F49D}','\u{1F4AF}','\u{1F4A2}','\u{1F4A5}','\u{1F4AB}','\u{1F4A6}','\u{1F4A8}',
+    '\u{1F4AC}','\u{1F5E8}\u{FE0F}','\u{1F534}','\u{1F7E0}','\u{1F7E1}','\u{1F7E2}','\u{1F535}','\u{1F7E3}',
+    '\u{26AB}','\u{26AA}','\u{1F7E5}','\u{1F7E7}','\u{1F7E8}','\u{1F7E9}','\u{1F7E6}','\u{1F7EA}','\u{2B1B}','\u{2B1C}',
+    '\u{2705}','\u{274C}','\u{2753}','\u{2757}','\u{203C}\u{FE0F}','\u{2049}\u{FE0F}','\u{2795}','\u{2796}','\u{2716}\u{FE0F}'
+  ] }
+];
+const EMOJIS = EMOJI_CATEGORIES.flatMap(c => c.emojis);
 
 /* Palette used for banner / accent selection. */
 const PALETTE = ['#5865F2','#3BA55D','#FAA81A','#ED4245','#EB459E','#9B59B6','#1ABC9C','#E67E22','#3498DB','#95A5A6','#2B2D31','#111214'];
@@ -464,11 +518,47 @@ function mirrorSettingsLocal() {
   try { localStorage.setItem('cr_settings', JSON.stringify(state.settings || {})); } catch (e) { /* ignore */ }
 }
 
+/* ---------------- Client-side custom background ----------------
+   Purely local: the chosen image/GIF lives in localStorage on this device and
+   is never uploaded to the server. A fixed layer sits behind #app; when it is
+   active the panels turn translucent so the artwork (including animated GIFs)
+   shows through while text stays readable. */
+const CUSTOM_BG_KEY = 'cr_custom_bg';
+function getCustomBg() {
+  try { return JSON.parse(localStorage.getItem(CUSTOM_BG_KEY) || 'null'); } catch (e) { return null; }
+}
+function setCustomBg(cfg) {
+  try {
+    if (cfg && cfg.url) localStorage.setItem(CUSTOM_BG_KEY, JSON.stringify(cfg));
+    else localStorage.removeItem(CUSTOM_BG_KEY);
+  } catch (e) {
+    return false;
+  }
+  applyCustomBg();
+  return true;
+}
+function applyCustomBg() {
+  const layer = document.getElementById('app-bg-layer');
+  if (!layer) return;
+  const cfg = getCustomBg();
+  if (cfg && cfg.url) {
+    layer.style.backgroundImage = `url("${String(cfg.url).replace(/"/g, '%22')}")`;
+    layer.style.backgroundSize = 'cover';
+    layer.style.backgroundPosition = 'center center';
+    layer.style.backgroundRepeat = 'no-repeat';
+    document.body.classList.add('has-custom-bg');
+  } else {
+    layer.style.backgroundImage = '';
+    document.body.classList.remove('has-custom-bg');
+  }
+}
+
 function applyTheme() {
   document.body.dataset.theme = setting('theme') || 'dark';
   document.body.dataset.bg = setting('bg') || 'graphite';
   document.body.classList.toggle('compact', !!setting('compact'));
   state.showMembers = setting('showMembers') !== false;
+  applyCustomBg();
   if (state.server) renderMembers();
 }
 const saveTimers = {};
@@ -1205,14 +1295,12 @@ function renderDMList() {
     list.appendChild(item);
   }
   if (!state.dms.length) {
-    const empty = document.createElement('div');
-    empty.className = 'dm-empty';
-    empty.textContent = t('No conversations yet. Start one below.');
-    list.appendChild(empty);
+    /* Intentionally no empty-state copy here — the + button in the
+       "Direct Messages" header is the single, always-visible way to start one. */
   }
   const add = document.createElement('div');
   add.className = 'dm-item dm-add';
-  add.innerHTML = `<div class="avatar" style="width:32px;height:32px;font-size:14px;background:#5865f2">${icon('plus')}</div><span class="dm-name">${t('Start a conversation')}</span>`;
+  add.innerHTML = `<span class="dm-add-ic">${icon('plus')}</span><span class="dm-name">${t('Start a conversation')}</span>`;
   add.addEventListener('click', openNewDM);
   list.appendChild(add);
 }
@@ -1380,13 +1468,39 @@ function renderFriendsView() {
   let body = '';
   if (tab === 'add') {
     body = `<div class="fr-add-wrap">
-      <p class="fr-add-lead">Add friends by entering their <b>full tag</b> \u2014 a username followed by the four-digit number after the <b>#</b>. For example, <b>test#6842</b>.</p>
-      <div class="fr-add-row">
-        <span class="fr-add-hash">#</span>
-        <input id="fr-add-input" placeholder="username#0000" autocomplete="off" spellcheck="false">
-        <button class="btn" id="fr-add-btn">${t('Send Friend Request')}</button>
+      <div class="fr-add-hero">
+        <div class="fr-add-hero-ico">${icon('user-plus')}</div>
+        <div class="fr-add-hero-txt">
+          <h3>Add Friend</h3>
+          <p>You can add friends with their Discord tag. It's the fastest way to grow your circle on Crossroads.</p>
+        </div>
       </div>
-      <div class="fr-add-hint" id="fr-add-hint"></div>
+
+      <div class="fr-add-card">
+        <div class="fr-add-card-head">
+          <span class="fr-add-eyebrow">ADD FRIEND</span>
+          <span class="fr-add-badge">${icon('shield')} Safe & private</span>
+        </div>
+        <p class="fr-add-lead">Add friends by entering their <b>full tag</b> \u2014 a username followed by the four-digit number after the <b>#</b>. For example, <b>test#6842</b>.</p>
+        <div class="fr-add-row">
+          <span class="fr-add-hash">#</span>
+          <input id="fr-add-input" placeholder="username#0000" autocomplete="off" spellcheck="false">
+          <button class="btn fr-add-send" id="fr-add-btn">${t('Send Friend Request')}</button>
+        </div>
+        <div class="fr-add-hint" id="fr-add-hint"></div>
+        <div class="fr-add-yourtag">
+          <div class="fr-add-yourtag-l"><span class="fr-add-yourtag-label">Your tag</span><b id="fr-my-tag">${escapeHtml(fullTag(me))}</b></div>
+          <button class="fr-add-copy" id="fr-copy-tag" type="button">${icon('copy')} Copy</button>
+        </div>
+      </div>
+
+      <div class="fr-add-steps">
+        <div class="fr-step"><span class="fr-step-n">1</span><div class="fr-step-t"><h5>Find their tag</h5><p>Ask a friend for their username and the four-digit number after the #.</p></div></div>
+        <div class="fr-step"><span class="fr-step-n">2</span><div class="fr-step-t"><h5>Type it exactly</h5><p>Usernames are case-sensitive, and the tag is always four digits.</p></div></div>
+        <div class="fr-step"><span class="fr-step-n">3</span><div class="fr-step-t"><h5>Send the request</h5><p>They'll see it under Pending and can accept it in one click.</p></div></div>
+      </div>
+
+      <div class="fr-add-tip">${icon('circle-info')} <span>Tip: start typing a username below \u2014 matching people appear instantly so you can add them without guessing the tag.</span></div>
       <div class="fr-search-results" id="fr-search-results"></div>
     </div>`;
   } else if (tab === 'pending') {
@@ -1472,6 +1586,18 @@ function renderFriendsView() {
       searchTimer = setTimeout(() => searchUsersForFriend(q), 250);
     });
   }
+
+  const copyBtn = $('fr-copy-tag');
+  if (copyBtn) copyBtn.addEventListener('click', () => {
+    const tag = fullTag(me);
+    const reset = () => { copyBtn.innerHTML = `${icon('copy')} Copy`; hydrateIcons(copyBtn); };
+    navigator.clipboard.writeText(tag).then(() => {
+      copyBtn.innerHTML = `${icon('check')} Copied`;
+      hydrateIcons(copyBtn);
+      toast('Copied ' + tag, 'success');
+      setTimeout(reset, 1600);
+    }).catch(() => toast('Could not copy your tag', 'error'));
+  });
 }
 
 /* Client-side filter for the visible friend rows (name or tag). */
@@ -2163,7 +2289,7 @@ function renderMembers() {
       const roleTag = role === 'admin' ? '<span class="member-role-tag admin">ADMIN</span>' : '';
       const crole = (m.custom_role_id && state.roles) ? state.roles.find(r => r.id === m.custom_role_id) : null;
       const croleTag = crole ? `<span class="member-role-tag" style="color:${crole.color};border-color:${crole.color}">${escapeHtml(crole.name)}</span>` : '';
-      row.innerHTML = `${avatarHTML(m, 32, m.status || 'offline')}<span class="mname">${escapeHtml(m.display_name || m.username)}${crown}${roleTag}${croleTag}</span>`;
+      row.innerHTML = `${avatarHTML(m, 36, m.status || 'offline')}<span class="mname">${escapeHtml(m.display_name || m.username)}${crown}${roleTag}${croleTag}</span>`;
       row.addEventListener('click', () => openProfile(m));
       wrap.appendChild(row);
     }
@@ -2934,17 +3060,60 @@ async function toggleReaction(mid, emoji) {
   } catch (e) { toast(e.message, 'error'); }
 }
 
+function emojiPickerMarkup(title) {
+  return `<div class="ep-top">
+      <div class="ep-title">${title}</div>
+      <label class="ep-search">${icon('search')}<input id="ep-search" placeholder="Search emoji" autocomplete="off" spellcheck="false"></label>
+    </div>
+    <div class="ep-tabs">
+      ${EMOJI_CATEGORIES.map((c, i) => `<button class="ep-tab${i === 0 ? ' active' : ''}" data-cat="${c.id}" title="${escapeHtml(c.label)}">${c.icon}</button>`).join('')}
+    </div>
+    <div class="ep-scroll" id="ep-scroll">
+      ${EMOJI_CATEGORIES.map(c => `<div class="ep-cat" data-cat="${c.id}">
+        <div class="ep-cat-label">${escapeHtml(c.label)}</div>
+        <div class="ep-grid">${c.emojis.map(e => `<button class="ep-emoji" data-e="${e}" title="${e}">${e}</button>`).join('')}</div>
+      </div>`).join('')}
+    </div>`;
+}
+
+function mountEmojiPicker(picker, onPick) {
+  picker.innerHTML = emojiPickerMarkup(picker.dataset.title || 'Add Reaction');
+  const search = picker.querySelector('#ep-search');
+  const scroll = picker.querySelector('#ep-scroll');
+  const tabs = picker.querySelectorAll('.ep-tab');
+  const cats = picker.querySelectorAll('.ep-cat');
+  picker.querySelectorAll('.ep-emoji').forEach(b => b.addEventListener('click', () => onPick(b.dataset.e)));
+  tabs.forEach(tab => tab.addEventListener('click', () => {
+    tabs.forEach(t => t.classList.toggle('active', t === tab));
+    const target = picker.querySelector(`.ep-cat[data-cat="${tab.dataset.cat}"]`);
+    if (target && scroll) scroll.scrollTo({ top: target.offsetTop - 6, behavior: 'smooth' });
+  }));
+  if (search) search.addEventListener('input', () => {
+    const q = search.value.trim().toLowerCase();
+    cats.forEach(cat => {
+      const labelMatch = cat.querySelector('.ep-cat-label').textContent.toLowerCase().includes(q);
+      let any = false;
+      cat.querySelectorAll('.ep-emoji').forEach(b => {
+        const match = !q || labelMatch || b.dataset.e.includes(q);
+        b.style.display = match ? '' : 'none';
+        if (match) any = true;
+      });
+      cat.style.display = any ? '' : 'none';
+    });
+  });
+}
+
 function openReactionPickerAt(x, y, mid) {
   closePopovers();
   const picker = document.createElement('div');
   picker.className = 'emoji-picker';
   picker.id = 'reaction-picker';
+  picker.dataset.title = 'Add Reaction';
   picker.style.position = 'fixed';
-  picker.style.top = Math.max(8, Math.min(y, window.innerHeight - 340)) + 'px';
-  picker.style.left = Math.max(8, Math.min(x, window.innerWidth - 340)) + 'px';
-  picker.innerHTML = `<h4>Add a reaction</h4><div class="emoji-grid">${EMOJIS.map(e => `<button data-e="${e}">${e}</button>`).join('')}</div>`;
-  picker.querySelectorAll('button').forEach(b => b.addEventListener('click', () => { toggleReaction(mid, b.dataset.e); picker.remove(); }));
+  picker.style.top = Math.max(8, Math.min(y, window.innerHeight - 440)) + 'px';
+  picker.style.left = Math.max(8, Math.min(x, window.innerWidth - 372)) + 'px';
   document.body.appendChild(picker);
+  mountEmojiPicker(picker, (e) => { toggleReaction(mid, e); picker.remove(); });
 }
 
 function openEmojiPickerForInput() {
@@ -2953,15 +3122,15 @@ function openEmojiPickerForInput() {
   const picker = document.createElement('div');
   picker.className = 'emoji-picker';
   picker.id = 'input-emoji-picker';
+  picker.dataset.title = 'Emoji';
   picker.style.position = 'fixed';
-  picker.style.top = Math.max(8, rect.top - 340) + 'px';
-  picker.style.left = Math.max(8, rect.left - 280) + 'px';
-  picker.innerHTML = `<h4>Emoji</h4><div class="emoji-grid">${EMOJIS.map(e => `<button data-e="${e}">${e}</button>`).join('')}</div>`;
-  picker.querySelectorAll('button').forEach(b => b.addEventListener('click', () => {
-    const ta = $('message-input');
-    ta.value += b.dataset.e; ta.focus(); autoGrow(ta);
-  }));
+  picker.style.top = Math.max(8, rect.top - 440) + 'px';
+  picker.style.left = Math.max(8, rect.left - 320) + 'px';
   document.body.appendChild(picker);
+  mountEmojiPicker(picker, (e) => {
+    const ta = $('message-input');
+    ta.value += e; ta.focus(); autoGrow(ta);
+  });
 }
 
 function closePopovers() {
@@ -4623,6 +4792,21 @@ function settingsPanelHTML(section) {
           </div>
           <div class="hint">These background colors apply to the dark theme.</div>
         </div>
+        <div class="field cb-field">
+          <label>Custom Background</label>
+          <p class="cb-desc">Add a personal image or animated GIF behind the whole app. Stored only on this device — 1920×1080 (1080p) looks best.</p>
+          <div class="cb-preview" id="cb-preview"><span class="cb-preview-empty">${icon('image')} No custom background</span></div>
+          <div class="cb-row">
+            <input id="cb-url" placeholder="Paste an image or GIF URL (https://…)" autocomplete="off" spellcheck="false">
+            <button class="btn" id="cb-apply-url">Apply</button>
+          </div>
+          <div class="cb-actions">
+            <button class="btn ghost" id="cb-upload">${icon('upload')} Upload image / GIF</button>
+            <button class="btn ghost" id="cb-remove">${icon('trash')} Remove</button>
+            <input type="file" id="cb-file" accept="image/*" class="hidden">
+          </div>
+          <div class="cb-hint" id="cb-hint"></div>
+        </div>
         ${toggleRow('compact', 'Compact message display', 'Reduce the spacing between messages.')}
         ${toggleRow('showMembers', 'Show member list', 'Display the member list beside channels.')}`;
     case 'notifications':
@@ -4858,6 +5042,76 @@ function wireAppearance() {
     stageSetting('bg', card.dataset.bg);
     document.querySelectorAll('#bg-grid .theme-card').forEach(c => c.classList.toggle('sel', c === card));
   }));
+
+  /* ---- Custom background (client-side only) ---- */
+  const cbPreview = $('cb-preview');
+  const cbHint = $('cb-hint');
+  const cbUrl = $('cb-url');
+  const paintCbPreview = () => {
+    if (!cbPreview) return;
+    const cfg = getCustomBg();
+    if (cfg && cfg.url) {
+      cbPreview.style.backgroundImage = `url("${String(cfg.url).replace(/"/g, '%22')}")`;
+      cbPreview.classList.add('has');
+      cbPreview.innerHTML = '';
+    } else {
+      cbPreview.style.backgroundImage = '';
+      cbPreview.classList.remove('has');
+      cbPreview.innerHTML = `<span class="cb-preview-empty">${icon('image')} No custom background</span>`;
+      hydrateIcons(cbPreview);
+    }
+  };
+  const cbMsg = (text, kind) => {
+    if (!cbHint) return;
+    cbHint.textContent = text;
+    cbHint.className = 'cb-hint' + (kind ? ' ' + kind : '');
+  };
+  paintCbPreview();
+
+  const applyUrl = () => {
+    const v = (cbUrl && cbUrl.value || '').trim();
+    if (!v) { cbMsg('Paste an image or GIF URL first.', 'bad'); return; }
+    if (!/^(https?:\/\/|data:image\/)/i.test(v)) { cbMsg('Use a full https:// image or GIF URL.', 'bad'); return; }
+    if (setCustomBg({ url: v })) {
+      cbMsg('Custom background applied.', 'ok');
+      if (cbUrl) cbUrl.value = '';
+      paintCbPreview();
+    } else {
+      cbMsg('Could not save that background on this device.', 'bad');
+    }
+  };
+  const applyUrlBtn = $('cb-apply-url');
+  if (applyUrlBtn) applyUrlBtn.addEventListener('click', applyUrl);
+  if (cbUrl) cbUrl.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); applyUrl(); } });
+
+  const uploadBtn = $('cb-upload');
+  const fileInput = $('cb-file');
+  if (uploadBtn && fileInput) {
+    uploadBtn.addEventListener('click', () => fileInput.click());
+    fileInput.addEventListener('change', (e) => {
+      const f = e.target.files[0]; e.target.value = '';
+      if (!f) return;
+      if (!/^image\//.test(f.type)) { cbMsg('Please choose an image or GIF file.', 'bad'); return; }
+      const reader = new FileReader();
+      reader.onload = () => {
+        if (setCustomBg({ url: reader.result })) {
+          cbMsg(`Applied ${f.name} — animated GIFs play automatically.`, 'ok');
+          paintCbPreview();
+        } else {
+          cbMsg('That file is too large to store locally. Paste an image URL instead.', 'bad');
+        }
+      };
+      reader.onerror = () => cbMsg('Could not read that file.', 'bad');
+      reader.readAsDataURL(f);
+    });
+  }
+
+  const removeBtn = $('cb-remove');
+  if (removeBtn) removeBtn.addEventListener('click', () => {
+    setCustomBg(null);
+    paintCbPreview();
+    cbMsg('Custom background removed.', 'ok');
+  });
 }
 
 function wireLanguage() {
