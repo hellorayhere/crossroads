@@ -131,7 +131,10 @@ function t(key) {
 /* Re-render the surfaces that contain translated strings. */
 function applyLanguage() {
   document.documentElement.lang = ({ 'English, US': 'en-US', 'English, UK': 'en-GB', 'Español': 'es', 'Français': 'fr', 'Deutsch': 'de' })[setting('language')] || 'en';
-  if (state.view === 'home') { $('sidebar-name').textContent = t('Direct Messages'); if (state.dm) { /* keep */ } renderDMList(); }
+  /* `openServer` also uses view 'home' (Discord's naming for the main view),
+     so only touch the DM sidebar when we are genuinely not inside a server -
+     otherwise restoring a server on refresh got its sidebar reset to DMs. */
+  if (state.view === 'home' && !state.server) { $('sidebar-name').textContent = t('Direct Messages'); renderDMList(); }
   else if (state.view === 'friends') { renderDMList(); renderFriendsView(); }
   if (state.server) renderChannelList();
   if ($('settings-nav')) openSettings(document.querySelector('#settings-nav .sn-item.active')?.dataset.sec || 'account');
@@ -823,7 +826,9 @@ function previewSelf(patch) {
 /* Debounced re-render of the lists that react to presence / profile churn. */
 const rerenderLists = debounce(() => {
   if (state.server) renderMembers();
-  if (state.view === 'home') renderDMList();
+  /* Only redraw the DM sidebar when we are actually in the DM view - `home`
+     is also the view name used while inside a server. */
+  if (state.view === 'home' && !state.server) renderDMList();
   if (state.view === 'friends') renderFriendsView();
 }, 120);
 
@@ -1182,29 +1187,54 @@ function clearChannelUnread(channelId) {
 function renderDMList() {
   const list = $('channel-list');
   list.innerHTML = '';
+
+  /* 2020 Discord put a "Find or start a conversation" field at the very top of
+     the DM sidebar. It filters the DM rows below it as you type. */
+  const search = document.createElement('div');
+  search.className = 'dm-search';
+  search.innerHTML = `<input id="dm-search-input" placeholder="${t('Find or start a conversation')}" autocomplete="off" spellcheck="false">`;
+  list.appendChild(search);
+  const searchInput = search.querySelector('input');
+  searchInput.addEventListener('input', () => {
+    const q = searchInput.value.trim().toLowerCase();
+    list.querySelectorAll('.dm-item[data-dmid]').forEach(row => {
+      const hay = row.dataset.name || '';
+      row.style.display = (!q || hay.includes(q)) ? '' : 'none';
+    });
+  });
+
   const friendsBtn = document.createElement('div');
   friendsBtn.className = 'dm-item friends-entry' + (state.view === 'friends' ? ' active' : '');
   friendsBtn.id = 'friends-entry';
   const pendingCount = (state.friends && state.friends.incoming) ? state.friends.incoming.length : 0;
-  friendsBtn.innerHTML = `${icon('user-group')}<span class="dm-name">${t('Friends')}</span>${pendingCount ? `<span class="friend-badge">${pendingCount}</span>` : ''}`;
+  friendsBtn.innerHTML = `<span class="dm-ic">${icon('user-group')}</span><span class="dm-name">${t('Friends')}</span>${pendingCount ? `<span class="friend-badge">${pendingCount}</span>` : ''}`;
   friendsBtn.addEventListener('click', openFriends);
   list.appendChild(friendsBtn);
 
   const cat = document.createElement('div');
-  cat.className = 'channel-category';
-  cat.innerHTML = `${icon('caret-down')} ${t('Direct Messages')}`;
+  cat.className = 'channel-category dm-cat';
+  cat.innerHTML = `<span class="cat-caret">${icon('caret-down')}</span><span class="cat-name">${t('Direct Messages')}</span><button class="cat-add" id="dm-cat-add" title="${t('Start a conversation')}">${icon('plus')}</button>`;
+  cat.querySelector('#dm-cat-add').addEventListener('click', (e) => { e.stopPropagation(); openNewDM(); });
   list.appendChild(cat);
+
   for (const d of state.dms) {
     const item = document.createElement('div');
     item.className = 'dm-item' + (state.dm && state.dm.id === d.id ? ' active' : '');
     item.dataset.dmid = d.id;
     if (d.user) item.dataset.uid = d.user.id;
+    item.dataset.name = (d.user ? (d.user.display_name || d.user.username) : 'unknown').toLowerCase();
     item.innerHTML = `${avatarHTML(d.user, 32, d.user.status || 'offline')}<span class="dm-name">${escapeHtml(d.user ? (d.user.display_name || d.user.username) : 'Unknown')}</span>${badgeHTML(dmUnreadCount(d.id))}`;
     item.addEventListener('click', () => openDM(d));
     list.appendChild(item);
   }
+  if (!state.dms.length) {
+    const empty = document.createElement('div');
+    empty.className = 'dm-empty';
+    empty.textContent = t('No conversations yet. Start one below.');
+    list.appendChild(empty);
+  }
   const add = document.createElement('div');
-  add.className = 'dm-item';
+  add.className = 'dm-item dm-add';
   add.innerHTML = `<div class="avatar" style="width:32px;height:32px;font-size:14px;background:#5865f2">${icon('plus')}</div><span class="dm-name">${t('Start a conversation')}</span>`;
   add.addEventListener('click', openNewDM);
   list.appendChild(add);
@@ -1403,34 +1433,48 @@ function renderFriendsView() {
 
   const heading = HEADINGS[tab] || HEADINGS.all;
 
+  /* 2020 Discord friends page: a horizontal tab strip along the top (Online /
+     All / Pending / Blocked) with the green "Add Friend" button at the end, an
+     "Active Now" shelf of live friends, then the plain list underneath. */
+  const activeNow = (f.friends || []).filter(x => x.status && x.status !== 'offline').slice(0, 10);
+  const activeHTML = (tab === 'online' || tab === 'all') ? `
+    <section class="fv-active">
+      <h4 class="fv-active-head">Active Now<span class="fv-active-count">${activeNow.length}</span></h4>
+      ${activeNow.length
+        ? `<div class="fv-active-row">${activeNow.map(u => `
+            <div class="fv-card" data-uid="${escapeHtml(u.id)}">
+              <div class="fv-card-ava">${avatarHTML(u, 56, u.status || 'offline')}</div>
+              <div class="fv-card-name">${escapeHtml(u.display_name || u.username)}</div>
+              <div class="fv-card-sub">${escapeHtml(statusLabel(u.status))}</div>
+            </div>`).join('')}</div>`
+        : `<div class="fv-active-empty">It's quiet for now\u2026 when a friend starts an activity, they'll show up here.</div>`}
+    </section>` : '';
+
+  const tabBtn = (id, label, count) =>
+    `<button class="fv-tab${tab === id ? ' active' : ''}" data-tab="${id}">${label}${count ? `<span class="fv-tab-badge">${count}</span>` : ''}</button>`;
+
   box.innerHTML = `<div class="friends-view">
-    <aside class="fr-nav">
-      <div class="fr-nav-head">
-        <span class="fr-nav-title">${t('Friends')}</span>
-        <span class="fr-nav-total">${counts.all}</span>
-      </div>
-      <button class="fr-nav-add${tab === 'add' ? ' active' : ''}" data-tab="add">${icon('user-plus')}<span>${t('Add Friend')}</span></button>
-      <nav class="fr-nav-list">
-        ${navItem('online', t('Online'), counts.online, 'users')}
-        ${navItem('all', t('All'), counts.all, 'user-group')}
-        ${navItem('pending', t('Pending'), counts.pending, 'clock')}
-        ${navItem('blocked', t('Blocked'), counts.blocked, 'ban')}
+    <header class="fv-top">
+      <nav class="fv-tabs">
+        ${tabBtn('online', t('Online'), 0)}
+        ${tabBtn('all', t('All'), 0)}
+        ${tabBtn('pending', t('Pending'), counts.pending)}
+        ${tabBtn('blocked', t('Blocked'), 0)}
       </nav>
-    </aside>
-    <section class="fr-main">
-      <header class="fr-main-head">
-        <div class="fr-head-text">
-          <h3>${heading[0]}</h3>
-          <p>${heading[1]}</p>
-        </div>
-        ${tab !== 'add' ? `<label class="fr-search"><span class="fr-search-ic">${icon('search')}</span><input id="fr-filter" placeholder="Search ${heading[0].toLowerCase()}" autocomplete="off" spellcheck="false"></label>` : ''}
-      </header>
-      <div class="fr-body">${body}</div>
-    </section>
+      ${tab !== 'add' ? `<label class="fv-search">${icon('search')}<input id="fr-filter" placeholder="Search" autocomplete="off" spellcheck="false"></label>` : ''}
+      <button class="fv-add-tab${tab === 'add' ? ' active' : ''}" data-tab="add">${t('Add Friend')}</button>
+    </header>
+    <div class="fr-body">
+      ${activeHTML}
+      ${tab !== 'add' ? `<div class="fv-list-head">${heading[0]} \u2014 ${tab === 'online' ? counts.online : tab === 'all' ? counts.all : tab === 'pending' ? counts.pending : counts.blocked}</div>` : ''}
+      ${body}
+    </div>
   </div>`;
 
-  box.querySelectorAll('.fr-nav-item, .fr-nav-add').forEach(el =>
+  box.querySelectorAll('.fv-tab, .fv-add-tab').forEach(el =>
     el.addEventListener('click', () => { state.friendsTab = el.dataset.tab; renderFriendsView(); }));
+  box.querySelectorAll('.fv-card').forEach(el =>
+    el.addEventListener('click', () => { const u = state.usersCache[el.dataset.uid]; if (u) openProfile(u); }));
   box.querySelectorAll('.fr-info').forEach(el =>
     el.addEventListener('click', () => { const u = state.usersCache[el.closest('.fr-row').dataset.uid]; if (u) openProfile(u); }));
   box.querySelectorAll('[data-fr-act]').forEach(btn =>
@@ -4123,7 +4167,7 @@ function renderOtherProfile(user, ctx) {
     </div>
     <div class="dp-body">
       <div class="dp-head">
-        <div class="dp-avatar">${avatarHTML(user, 96, user.status || 'offline')}</div>
+        <div class="dp-avatar">${avatarHTML(user, 116, user.status || 'offline')}</div>
         <div class="dp-identity">
           <div class="dp-name">${escapeHtml(displayName)}</div>
           <div class="dp-handle">${escapeHtml(fullTag(user))}${user.pronouns ? ` <span class="dp-pronoun">\u00b7 ${escapeHtml(user.pronouns)}</span>` : ''}</div>
