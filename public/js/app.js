@@ -358,6 +358,16 @@ function linkifyBio(text) {
   return html;
 }
 
+/* Bios support the full Discord markdown set (bold, italic, underline,
+   strikethrough, spoilers, code, quotes, headings and lists) while preserving
+   the author's line breaks. */
+function formatBio(text) {
+  if (!text) return '';
+  let html = formatContent(text);
+  html = html.replace(/\n/g, '<br>');
+  return html;
+}
+
 /* ---------- Colour helpers (hex <-> hsl) for the custom colour wheel ---------- */
 function hexToRgb(hex) {
   hex = String(hex || '').replace('#', '');
@@ -682,7 +692,8 @@ let _toastEl = null, _toastTimer = 0;
    they are marked by a small muted dot rather than a loud red bar. */
 function toast(msg, kind) {
   if (!msg) return;
-  if (kind !== 'error' && kind !== 'alert') return;
+  /* Show every kind of toast. Previously only errors/alerts were displayed,
+     which silently swallowed all of the app's success confirmations. */
   try {
     if (!_toastEl) {
       _toastEl = document.createElement('div');
@@ -925,6 +936,7 @@ async function init() {
   renderMe();
   connectSocket();
   initPresence();
+  loadGlobalMessages();
   /* Load everything in parallel so the first paint is not blocked by a chain
      of sequential round-trips. */
   await Promise.all([loadServers(), loadFriends(), loadDMs(), loadNotifications()]);
@@ -978,6 +990,50 @@ const rerenderLists = debounce(() => {
   if (state.view === 'home' && !state.server) renderDMList();
   if (state.view === 'friends') renderFriendsView();
 }, 120);
+
+/* ============================================================
+   GLOBAL ANNOUNCEMENTS
+   ============================================================ */
+async function loadGlobalMessages() {
+  try {
+    const d = await api('/api/global-messages');
+    showGlobalBanner(d);
+  } catch (e) { /* announcements are non-critical */ }
+}
+
+function showGlobalBanner(d) {
+  const existing = document.querySelector('.global-banner');
+  if (existing) existing.remove();
+  const ann = (d.announcements || [])[0];
+  const dismissed = sessionStorage.getItem('cr_ann_dismissed');
+  let title = '', content = '', level = 'info', key = '';
+  if (ann) {
+    if (dismissed === ann.id) {
+      if (!d.maintenance) return;
+    } else {
+      title = ann.title || 'Announcement';
+      content = ann.content || '';
+      level = ann.level || 'info';
+      key = ann.id;
+    }
+  }
+  if (!content && d.maintenance) {
+    title = 'Maintenance in progress';
+    content = d.maintenance_message || 'Some features may be temporarily unavailable.';
+    level = 'warning';
+    key = 'maintenance';
+  }
+  if (!content) return;
+  const el = document.createElement('div');
+  el.className = 'global-banner ' + level;
+  el.innerHTML = `<div><b>${escapeHtml(title)}</b><span>${escapeHtml(content)}</span></div><button title="Dismiss">${icon('xmark')}</button>`;
+  document.body.appendChild(el);
+  hydrateIcons(el);
+  el.querySelector('button').addEventListener('click', () => {
+    if (key) sessionStorage.setItem('cr_ann_dismissed', key);
+    el.remove();
+  });
+}
 
 /* ============================================================
    SOCKET
@@ -1128,6 +1184,10 @@ function connectSocket() {
     if (data.type === 'request') toast((data.user.display_name || data.user.username) + ' sent you a friend request', 'alert');
     if (data.type === 'accepted') toast('You are now friends with ' + (data.user.display_name || data.user.username), 'success');
     if (data.type === 'removed') toast((data.user.display_name || data.user.username) + ' removed you as a friend');
+  });
+  socket.on('global_announcement', (ann) => {
+    sessionStorage.removeItem('cr_ann_dismissed');
+    showGlobalBanner({ announcements: [ann] });
   });
   socket.on('notification', (n) => {
     state.notifications.unshift(n);
@@ -2922,6 +2982,9 @@ function formatContent(text) {
     });
     // #channel links
     s = s.replace(/(^|[\s(])#([a-z0-9-]+)/g, '$1<span class="mention" data-channel="$2">#$2</span>');
+    // Bare domains (Discord auto-links these too): example.com/path, www.example.com
+    s = s.replace(/(^|[\s(])((?:www\.)?[a-z0-9-]+(?:\.[a-z0-9-]+)*\.[a-z]{2,}(?:\/[^\s<)]*)?)/gi,
+      (m, pre, url) => `${pre}<a href="https://${url}" target="_blank" rel="noopener noreferrer">${url}</a>`);
     // Emoji -> Twemoji images (last, so markdown markers never touch them).
     return emojify(s);
   }
@@ -4847,7 +4910,7 @@ function renderOwnProfile(user) {
         </div>
         <div class="profile-section-block">
           <h5>About Me</h5>
-          <p>${user.bio ? linkifyBio(user.bio) : 'You have not written a description yet.'}</p>
+          <p class="bio-md">${user.bio ? formatBio(user.bio) : 'You have not written a description yet.'}</p>
         </div>
       </div>
     </div>`, { modalClass: 'profile-modal' });
@@ -4951,7 +5014,7 @@ function renderOtherProfile(user, ctx) {
           </div>
           ${user.bio ? `<div class="dp-section">
             <div class="dp-label">About Me</div>
-            <div class="dp-bio">${linkifyBio(user.bio)}</div>
+            <div class="dp-bio">${formatBio(user.bio)}</div>
           </div>` : ''}
           <div class="dp-section">
             <div class="dp-label">Note</div>
@@ -5110,7 +5173,9 @@ function openSettings(section) {
   const nav = SETTINGS_NAV.map(item => {
     if (item.cat) return `<div class="sn-cat">${t(item.cat)}</div>`;
     return `<div class="sn-item" data-sec="${item.id}">${t(item.label)} <span class="chev">${icon('chevron-right')}</span></div>`;
-  }).join('');
+  }).join('') + (isPlatformAdmin()
+    ? `<div class="sn-item sn-admin" data-sec="admin">${icon('shield')} Admin Panel <span class="chev">${icon('chevron-right')}</span></div>`
+    : '');
 
   openModal(`
     <div class="settings-body">
@@ -5212,6 +5277,8 @@ function openSettings(section) {
 
 function renderSettings(section) {
   settingsSection = section;
+  /* The Admin Panel lives in its own full-width modal, so hand off cleanly. */
+  if (section === 'admin') { closeModal(); setTimeout(() => openAdminPanel('dashboard'), 60); return; }
   /* Each panel owns its own save routine (or none, when it only stages
      preferences). Reset it so a previous panel's saver can never fire against
      DOM that is no longer on screen. */
@@ -5535,7 +5602,16 @@ function settingsPanelHTML(section) {
             <option>English, US</option><option>English, UK</option><option>Espa\u00f1ol</option>
             <option>Fran\u00e7ais</option><option>Deutsch</option>
           </select></div>
-        <p style="color:var(--text-muted);font-size:13px;line-height:1.5">Additional languages are being prepared and will appear here as they become available.</p>`;
+        <p style="color:var(--text-muted);font-size:13px;line-height:1.5">Additional languages are being prepared and will appear here as they become available.</p>
+        ${isPlatformAdmin() ? `
+        <div class="admin-entry">
+          <div class="admin-entry-ico">${icon('shield')}</div>
+          <div class="admin-entry-txt">
+            <div class="admin-entry-title">Admin Panel</div>
+            <div class="admin-entry-sub">Platform-wide moderation, user management, announcements and system controls.</div>
+          </div>
+          <button class="btn admin-entry-btn" id="open-admin-panel">Open Admin Panel</button>
+        </div>` : ''}`;
     default:
       return `<h4>Settings</h4>`;
   }
@@ -6132,6 +6208,8 @@ function wireAppearance() {
 }
 
 function wireLanguage() {
+  const adminBtn = $('open-admin-panel');
+  if (adminBtn) adminBtn.addEventListener('click', () => { closeModal(); setTimeout(() => openAdminPanel('dashboard'), 60); });
   const sel = $('lang-select');
   if (!sel) return;
   sel.value = setting('language') || 'English, US';
@@ -6144,17 +6222,478 @@ function wireLanguage() {
 }
 
 /* ============================================================
+   PLATFORM ADMIN PANEL  (visible only to "keep")
+   ============================================================ */
+let adminTab = 'dashboard';
+const ADMIN_TABS = [
+  { id: 'dashboard', label: 'Dashboard', icon: 'grid' },
+  { id: 'users', label: 'Users', icon: 'users' },
+  { id: 'servers', label: 'Servers', icon: 'server' },
+  { id: 'announcements', label: 'Announcements', icon: 'megaphone' },
+  { id: 'system', label: 'System', icon: 'sliders' },
+  { id: 'audit', label: 'Audit Log', icon: 'note' }
+];
+
+function openAdminPanel(tab) {
+  if (!isPlatformAdmin()) { toast('Administrator access required', 'error'); return; }
+  adminTab = tab || 'dashboard';
+  openModal(`
+    <div class="adm-shell">
+      <aside class="adm-side">
+        <div class="adm-brand">
+          <div class="adm-brand-ico">${icon('shield')}</div>
+          <div>
+            <div class="adm-brand-title">Crossroads</div>
+            <div class="adm-brand-sub">Admin Console</div>
+          </div>
+        </div>
+        <nav class="adm-nav">
+          ${ADMIN_TABS.map(t => `<button class="adm-nav-item${t.id === adminTab ? ' active' : ''}" data-adm-tab="${t.id}">${icon(t.icon)}<span>${t.label}</span></button>`).join('')}
+        </nav>
+        <div class="adm-side-foot">
+          <div class="adm-me">
+            <div class="adm-me-name">${escapeHtml(me.display_name || me.username)}</div>
+            <div class="adm-me-tag">${escapeHtml(fullTag(me))}</div>
+          </div>
+          <button class="adm-close" id="adm-close">${icon('xmark')} Close</button>
+        </div>
+      </aside>
+      <section class="adm-main">
+        <header class="adm-head">
+          <div>
+            <h3 id="adm-title">Dashboard</h3>
+            <p id="adm-sub">Platform overview and quick actions</p>
+          </div>
+          <div class="adm-head-actions"><button class="adm-refresh" id="adm-refresh">${icon('refresh')} Refresh</button></div>
+        </header>
+        <div class="adm-body" id="adm-body"></div>
+      </section>
+    </div>`, { modalClass: 'adm-modal' });
+  $('adm-close').addEventListener('click', closeModal);
+  $('adm-refresh').addEventListener('click', () => renderAdminTab(adminTab));
+  document.querySelectorAll('[data-adm-tab]').forEach(b => b.addEventListener('click', () => renderAdminTab(b.dataset.admTab)));
+  renderAdminTab(adminTab);
+}
+
+function admLoading() { return `<div class="adm-loading"><div class="adm-spinner"></div>Loading…</div>`; }
+
+async function renderAdminTab(tab) {
+  adminTab = tab;
+  document.querySelectorAll('[data-adm-tab]').forEach(b => b.classList.toggle('active', b.dataset.admTab === tab));
+  const meta = ADMIN_TABS.find(t => t.id === tab) || ADMIN_TABS[0];
+  const title = $('adm-title'), sub = $('adm-sub'), body = $('adm-body');
+  if (!body) return;
+  title.textContent = meta.label;
+  sub.textContent = {
+    dashboard: 'Platform overview and quick actions',
+    users: 'Search, inspect and moderate every account',
+    servers: 'Manage every server on the platform',
+    announcements: 'Send global messages to all users',
+    system: 'Registration, maintenance and platform settings',
+    audit: 'Every administrator action, newest first'
+  }[tab] || '';
+  body.innerHTML = admLoading();
+  try {
+    if (tab === 'dashboard') return await admRenderDashboard(body);
+    if (tab === 'users') return await admRenderUsers(body);
+    if (tab === 'servers') return await admRenderServers(body);
+    if (tab === 'announcements') return await admRenderAnnouncements(body);
+    if (tab === 'system') return await admRenderSystem(body);
+    if (tab === 'audit') return await admRenderAudit(body);
+  } catch (e) {
+    body.innerHTML = `<div class="adm-error">${icon('circle-exclamation')} ${escapeHtml(e.message)}</div>`;
+  }
+}
+
+function admStat(label, value, tone) {
+  return `<div class="adm-stat${tone ? ' ' + tone : ''}"><div class="adm-stat-val">${value}</div><div class="adm-stat-label">${escapeHtml(label)}</div></div>`;
+}
+
+async function admRenderDashboard(body) {
+  const o = await api('/api/admin/overview');
+  body.innerHTML = `
+    <div class="adm-stats">
+      ${admStat('Total users', o.users)}
+      ${admStat('Online now', o.online, 'green')}
+      ${admStat('Servers', o.servers)}
+      ${admStat('Messages', o.messages)}
+      ${admStat('Global bans', o.bans, o.bans ? 'red' : '')}
+      ${admStat('Muted', o.muted)}
+      ${admStat('Disabled', o.disabled)}
+      ${admStat('New (24h)', o.new_users_24h, 'blue')}
+    </div>
+    <div class="adm-cols">
+      <div class="adm-card">
+        <div class="adm-card-title">Quick actions</div>
+        <div class="adm-quick">
+          <button class="adm-quick-btn" data-quick="broadcast">${icon('megaphone')} Send global message</button>
+          <button class="adm-quick-btn" data-quick="users">${icon('users')} Manage users</button>
+          <button class="adm-quick-btn" data-quick="registration">${icon('lock')} ${o.settings.registration_open ? 'Close' : 'Open'} registration</button>
+          <button class="adm-quick-btn" data-quick="maintenance">${icon('sliders')} ${o.settings.maintenance_mode ? 'Disable' : 'Enable'} maintenance</button>
+          <button class="adm-quick-btn" data-quick="export">${icon('download')} Export platform data</button>
+        </div>
+      </div>
+      <div class="adm-card">
+        <div class="adm-card-title">Platform health</div>
+        <div class="adm-kv"><span>Uptime</span><b>${Math.floor(o.uptime_seconds / 3600)}h ${Math.floor((o.uptime_seconds % 3600) / 60)}m</b></div>
+        <div class="adm-kv"><span>Messages (24h)</span><b>${o.messages_24h}</b></div>
+        <div class="adm-kv"><span>New users (7d)</span><b>${o.new_users_7d}</b></div>
+        <div class="adm-kv"><span>Verified</span><b>${o.verified}</b></div>
+        <div class="adm-kv"><span>Active announcements</span><b>${o.active_announcements}</b></div>
+        <div class="adm-kv"><span>Registration</span><b class="${o.settings.registration_open ? 'ok' : 'bad'}">${o.settings.registration_open ? 'Open' : 'Closed'}</b></div>
+        <div class="adm-kv"><span>Maintenance</span><b class="${o.settings.maintenance_mode ? 'bad' : 'ok'}">${o.settings.maintenance_mode ? 'On' : 'Off'}</b></div>
+      </div>
+    </div>`;
+  body.querySelectorAll('[data-quick]').forEach(b => b.addEventListener('click', async () => {
+    const q = b.dataset.quick;
+    if (q === 'broadcast') return admAnnouncementDialog();
+    if (q === 'users') return renderAdminTab('users');
+    if (q === 'registration') {
+      await api('/api/admin/settings', { method: 'PATCH', body: JSON.stringify({ registration_open: !o.settings.registration_open }) });
+      toast('Registration ' + (!o.settings.registration_open ? 'opened' : 'closed'), 'success');
+      return renderAdminTab('dashboard');
+    }
+    if (q === 'maintenance') {
+      await api('/api/admin/settings', { method: 'PATCH', body: JSON.stringify({ maintenance_mode: !o.settings.maintenance_mode }) });
+      toast('Maintenance mode ' + (!o.settings.maintenance_mode ? 'enabled' : 'disabled'), 'success');
+      return renderAdminTab('dashboard');
+    }
+    if (q === 'export') return admExport();
+  }));
+}
+
+async function admRenderUsers(body) {
+  const q = sessionStorage.getItem('adm-user-q') || '';
+  const data = await api('/api/admin/users?limit=300&q=' + encodeURIComponent(q));
+  body.innerHTML = `
+    <div class="adm-toolbar">
+      <div class="adm-search">${icon('search')}<input id="adm-user-search" placeholder="Search by username or ID…" value="${escapeHtml(q)}"></div>
+      <div class="adm-count">${data.total} account${data.total === 1 ? '' : 's'}</div>
+    </div>
+    <div class="adm-table-wrap">
+      <table class="adm-table">
+        <thead><tr><th>User</th><th>Status</th><th>Servers</th><th>Messages</th><th>Flags</th><th></th></tr></thead>
+        <tbody>${data.users.map(u => `
+          <tr>
+            <td><div class="adm-user-cell">${avatarHTML({ id: u.id, username: u.username, avatar_url: u.avatar_url, discriminator: u.discriminator, display_name: u.display_name }, 30, u.status)}
+              <div><div class="adm-user-name">${escapeHtml(u.display_name || u.username)}${u.verified ? '<span class="adm-badge verified">✓</span>' : ''}${u.platform_admin ? '<span class="adm-badge admin">ADMIN</span>' : ''}</div>
+              <div class="adm-user-tag">${escapeHtml(u.tag)}</div></div></div></td>
+            <td><span class="adm-dot ${u.status}"></span>${escapeHtml(u.status)}</td>
+            <td>${u.servers}</td><td>${u.messages}</td>
+            <td><div class="adm-flags">${u.banned ? '<span class="adm-badge red">BANNED</span>' : ''}${u.muted ? '<span class="adm-badge amber">MUTED</span>' : ''}${u.disabled ? '<span class="adm-badge red">DISABLED</span>' : ''}</div></td>
+            <td><button class="adm-manage" data-manage-user="${u.id}">Manage</button></td>
+          </tr>`).join('') || '<tr><td colspan="6" class="adm-empty">No users found.</td></tr>'}
+        </tbody>
+      </table>
+    </div>`;
+  const input = $('adm-user-search');
+  let timer;
+  input.addEventListener('input', () => {
+    clearTimeout(timer);
+    timer = setTimeout(() => { sessionStorage.setItem('adm-user-q', input.value.trim()); renderAdminTab('users'); }, 300);
+  });
+  body.querySelectorAll('[data-manage-user]').forEach(b => b.addEventListener('click', () => {
+    const u = data.users.find(x => x.id === b.dataset.manageUser);
+    if (u) openAdminUser(u);
+  }));
+}
+
+async function openAdminUser(u) {
+  openModal(`
+    <div class="adm-user-modal">
+      <div class="adm-user-head">
+        ${avatarHTML({ id: u.id, username: u.username, avatar_url: u.avatar_url, discriminator: u.discriminator, display_name: u.display_name }, 64, u.status)}
+        <div>
+          <h3>${escapeHtml(u.display_name || u.username)} ${u.verified ? '<span class="adm-badge verified">✓</span>' : ''}</h3>
+          <div class="adm-user-tag">${escapeHtml(u.tag)} · ${escapeHtml(u.id)}</div>
+          <div class="adm-flags">${u.banned ? '<span class="adm-badge red">BANNED</span>' : ''}${u.muted ? '<span class="adm-badge amber">MUTED</span>' : ''}${u.disabled ? '<span class="adm-badge red">DISABLED</span>' : ''}${u.platform_admin ? '<span class="adm-badge admin">PLATFORM ADMIN</span>' : ''}</div>
+        </div>
+      </div>
+      <div class="adm-user-stats">
+        <div><b>${u.servers}</b><span>Servers</span></div>
+        <div><b>${u.owned_servers}</b><span>Owned</span></div>
+        <div><b>${u.messages}</b><span>Messages</span></div>
+        <div><b>${u.created_at ? new Date(u.created_at).toLocaleDateString() : '—'}</b><span>Joined</span></div>
+      </div>
+      <div class="adm-section-title">Account</div>
+      <div class="adm-action-grid">
+        <button class="adm-action" data-ua="set_username">${icon('pencil')} Change username</button>
+        <button class="adm-action" data-ua="set_display_name">${icon('id-badge')} Change display name</button>
+        <button class="adm-action" data-ua="set_discriminator">${icon('hash')} Change discriminator</button>
+        <button class="adm-action" data-ua="reset_password">${icon('key')} Reset password</button>
+        <button class="adm-action" data-ua="force_logout">${icon('log-out')} Force logout</button>
+        <button class="adm-action" data-ua="set_bio">${icon('note')} Edit bio</button>
+      </div>
+      <div class="adm-section-title">Moderation</div>
+      <div class="adm-action-grid">
+        <button class="adm-action ${u.verified ? 'on' : ''}" data-ua="${u.verified ? 'unverify' : 'verify'}">${icon('user-check')} ${u.verified ? 'Remove verification' : 'Verify user'}</button>
+        <button class="adm-action ${u.muted ? 'on' : ''}" data-ua="${u.muted ? 'unmute' : 'mute'}">${icon('mic-off')} ${u.muted ? 'Unmute' : 'Mute'}</button>
+        <button class="adm-action ${u.disabled ? 'on' : ''}" data-ua="${u.disabled ? 'enable' : 'disable'}">${icon('lock')} ${u.disabled ? 'Enable account' : 'Disable account'}</button>
+        <button class="adm-action danger" data-ua="${u.banned ? 'unban' : 'ban'}">${icon('ban')} ${u.banned ? 'Unban user' : 'Ban user'}</button>
+        <button class="adm-action" data-ua="warn">${icon('circle-exclamation')} Send warning</button>
+        <button class="adm-action" data-ua="message">${icon('comment')} Direct message</button>
+      </div>
+      <div class="modal-actions"><button class="btn secondary" id="adm-user-back">Back to users</button></div>
+    </div>`, { modalClass: 'adm-user-modal-wrap' });
+  $('adm-user-back').addEventListener('click', () => openAdminPanel('users'));
+  document.querySelectorAll('[data-ua]').forEach(b => b.addEventListener('click', () => admUserAction(u, b.dataset.ua)));
+}
+
+async function admUserAction(u, action) {
+  const needsValue = ['set_username', 'set_display_name', 'set_discriminator', 'set_bio', 'reset_password', 'warn', 'message', 'ban'].includes(action);
+  const labels = {
+    set_username: ['Change username', 'New username (no length limit)', u.username],
+    set_display_name: ['Change display name', 'New display name', u.display_name || u.username],
+    set_discriminator: ['Change discriminator', 'New discriminator (digits)', u.discriminator],
+    set_bio: ['Edit bio', 'New bio (Markdown supported)', u.bio || ''],
+    reset_password: ['Reset password', 'New password (min 6 characters)', ''],
+    warn: ['Send warning', 'Warning message', ''],
+    message: ['Direct message', 'Message to send', ''],
+    ban: ['Ban user', 'Reason for the ban', '']
+  };
+  if (needsValue) {
+    const [title, label, val] = labels[action];
+    admPrompt({ title, label, value: val, danger: action === 'ban' || action === 'reset_password' }, async (value) => {
+      await api('/api/admin/users/' + u.id + '/action', { method: 'POST', body: JSON.stringify({ action, value }) });
+      toast('Action applied: ' + action.replace(/_/g, ' '), 'success');
+      openAdminPanel('users');
+    });
+    return;
+  }
+  const confirmText = {
+    verify: 'Verify this user?', unverify: 'Remove verification?', mute: 'Mute this user platform-wide?',
+    unmute: 'Unmute this user?', disable: 'Disable this account? They will be signed out.',
+    enable: 'Re-enable this account?', unban: 'Lift the global ban?', force_logout: 'Sign this user out of every device?'
+  }[action];
+  if (confirmText) {
+    const ok = await confirmDialog({ title: 'Confirm action', body: escapeHtml(confirmText), confirmText: 'Confirm', danger: ['disable', 'mute', 'unban'].includes(action) });
+    if (!ok) return;
+  }
+  try {
+    await api('/api/admin/users/' + u.id + '/action', { method: 'POST', body: JSON.stringify({ action }) });
+    toast('Action applied: ' + action.replace(/_/g, ' '), 'success');
+    openAdminPanel('users');
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+async function admRenderServers(body) {
+  const data = await api('/api/admin/servers?limit=300');
+  body.innerHTML = `
+    <div class="adm-toolbar"><div class="adm-count">${data.total} server${data.total === 1 ? '' : 's'}</div></div>
+    <div class="adm-table-wrap"><table class="adm-table">
+      <thead><tr><th>Server</th><th>Owner</th><th>Members</th><th>Messages</th><th>Flags</th><th></th></tr></thead>
+      <tbody>${data.servers.map(s => `
+        <tr>
+          <td><div class="adm-user-cell"><div class="adm-srv-ico">${s.icon_url ? `<img src="${escapeHtml(s.icon_url)}" alt="">` : escapeHtml((s.name || '?')[0].toUpperCase())}</div>
+            <div><div class="adm-user-name">${escapeHtml(s.name)}</div><div class="adm-user-tag">${escapeHtml(s.id)}</div></div></div></td>
+          <td>${escapeHtml(s.owner_tag)}</td><td>${s.members}</td><td>${s.messages}</td>
+          <td><div class="adm-flags">${s.locked ? '<span class="adm-badge red">LOCKED</span>' : ''}${s.featured ? '<span class="adm-badge blue">FEATURED</span>' : ''}</div></td>
+          <td><button class="adm-manage" data-manage-srv="${s.id}">Manage</button></td>
+        </tr>`).join('') || '<tr><td colspan="6" class="adm-empty">No servers found.</td></tr>'}</tbody>
+    </table></div>`;
+  body.querySelectorAll('[data-manage-srv]').forEach(b => b.addEventListener('click', () => {
+    const s = data.servers.find(x => x.id === b.dataset.manageSrv);
+    if (s) openAdminServer(s);
+  }));
+}
+
+async function openAdminServer(s) {
+  openModal(`
+    <div class="adm-user-modal">
+      <div class="adm-user-head">
+        <div class="adm-srv-ico lg">${s.icon_url ? `<img src="${escapeHtml(s.icon_url)}" alt="">` : escapeHtml((s.name || '?')[0].toUpperCase())}</div>
+        <div><h3>${escapeHtml(s.name)}</h3><div class="adm-user-tag">Owner: ${escapeHtml(s.owner_tag)} · ${escapeHtml(s.id)}</div>
+        <div class="adm-flags">${s.locked ? '<span class="adm-badge red">LOCKED</span>' : ''}${s.featured ? '<span class="adm-badge blue">FEATURED</span>' : ''}</div></div>
+      </div>
+      <div class="adm-user-stats"><div><b>${s.members}</b><span>Members</span></div><div><b>${s.channels}</b><span>Channels</span></div><div><b>${s.messages}</b><span>Messages</span></div><div><b>${new Date(s.created_at).toLocaleDateString()}</b><span>Created</span></div></div>
+      <div class="adm-section-title">Server controls</div>
+      <div class="adm-action-grid">
+        <button class="adm-action ${s.locked ? 'on' : ''}" data-sa="${s.locked ? 'unlock' : 'lock'}">${icon('lock')} ${s.locked ? 'Unlock server' : 'Lock server'}</button>
+        <button class="adm-action ${s.featured ? 'on' : ''}" data-sa="${s.featured ? 'unfeature' : 'feature'}">${icon('crown')} ${s.featured ? 'Unfeature' : 'Feature server'}</button>
+        <button class="adm-action" data-sa="rename">${icon('pencil')} Rename server</button>
+        <button class="adm-action" data-sa="set_description">${icon('note')} Edit description</button>
+        <button class="adm-action" data-sa="transfer_owner">${icon('user-check')} Transfer ownership</button>
+        <button class="adm-action" data-sa="announce">${icon('megaphone')} Post announcement</button>
+      </div>
+      <div class="modal-actions"><button class="btn secondary" id="adm-srv-back">Back to servers</button></div>
+    </div>`, { modalClass: 'adm-user-modal-wrap' });
+  $('adm-srv-back').addEventListener('click', () => openAdminPanel('servers'));
+  document.querySelectorAll('[data-sa]').forEach(b => b.addEventListener('click', () => admServerAction(s, b.dataset.sa)));
+}
+
+async function admServerAction(s, action) {
+  const prompts = {
+    rename: ['Rename server', 'New server name', s.name],
+    set_description: ['Edit description', 'New description', s.description || ''],
+    transfer_owner: ['Transfer ownership', 'New owner user ID', s.owner_id],
+    announce: ['Post announcement', 'Message to post in this server', '']
+  };
+  if (prompts[action]) {
+    const [title, label, val] = prompts[action];
+    admPrompt({ title, label, value: val }, async (value) => {
+      await api('/api/admin/servers/' + s.id + '/action', { method: 'POST', body: JSON.stringify({ action, value }) });
+      toast('Server updated', 'success');
+      openAdminPanel('servers');
+    });
+    return;
+  }
+  const ok = await confirmDialog({ title: 'Confirm action', body: escapeHtml(`Apply "${action}" to ${s.name}?`), confirmText: 'Confirm', danger: action === 'lock' });
+  if (!ok) return;
+  try {
+    await api('/api/admin/servers/' + s.id + '/action', { method: 'POST', body: JSON.stringify({ action }) });
+    toast('Server updated', 'success');
+    openAdminPanel('servers');
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+async function admRenderAnnouncements(body) {
+  const data = await api('/api/admin/announcements');
+  body.innerHTML = `
+    <div class="adm-card">
+      <div class="adm-card-title">New global message</div>
+      <div class="adm-form">
+        <div class="field"><label>Title</label><input id="ann-title" placeholder="Optional headline"></div>
+        <div class="field"><label>Message</label><textarea id="ann-content" rows="4" placeholder="This appears to every user in the app."></textarea></div>
+        <div class="field"><label>Level</label><select id="ann-level"><option value="info">Info</option><option value="success">Success</option><option value="warning">Warning</option><option value="critical">Critical</option></select></div>
+        <div class="adm-form-actions"><button class="btn" id="ann-send">${icon('megaphone')} Send to everyone</button></div>
+      </div>
+    </div>
+    <div class="adm-section-title">Recent announcements</div>
+    <div class="adm-ann-list">${data.announcements.map(a => `
+      <div class="adm-ann ${a.active ? '' : 'inactive'}">
+        <div class="adm-ann-main"><div class="adm-ann-title">${escapeHtml(a.title || 'Announcement')} <span class="adm-badge ${a.level}">${escapeHtml(a.level)}</span> ${a.active ? '' : '<span class="adm-badge">INACTIVE</span>'}</div>
+        <div class="adm-ann-content">${escapeHtml(a.content)}</div>
+        <div class="adm-ann-meta">${new Date(a.created_at).toLocaleString()}${a.expires_at ? ' · expires ' + new Date(a.expires_at).toLocaleString() : ''}</div></div>
+        <button class="adm-manage" data-ann-toggle="${a.id}" data-active="${a.active}">${a.active ? 'Deactivate' : 'Activate'}</button>
+      </div>`).join('') || '<div class="adm-empty">No announcements yet.</div>'}</div>`;
+  $('ann-send').addEventListener('click', async () => {
+    const content = $('ann-content').value.trim();
+    if (!content) { toast('Message content required', 'error'); return; }
+    try {
+      await api('/api/admin/announcements', { method: 'POST', body: JSON.stringify({ title: $('ann-title').value.trim(), content, level: $('ann-level').value }) });
+      toast('Global message sent', 'success');
+      renderAdminTab('announcements');
+    } catch (e) { toast(e.message, 'error'); }
+  });
+  body.querySelectorAll('[data-ann-toggle]').forEach(b => b.addEventListener('click', async () => {
+    await api('/api/admin/announcements/' + b.dataset.annToggle + '/action', { method: 'POST', body: JSON.stringify({ action: b.dataset.active === '1' ? 'deactivate' : 'activate' }) });
+    renderAdminTab('announcements');
+  }));
+}
+
+async function admAnnouncementDialog() {
+  admPrompt({ title: 'Global message', label: 'Message to send to every user', value: '', multiline: true }, async (value) => {
+    await api('/api/admin/announcements', { method: 'POST', body: JSON.stringify({ title: '', content: value, level: 'info' }) });
+    toast('Global message sent', 'success');
+    openAdminPanel('announcements');
+  });
+}
+
+async function admRenderSystem(body) {
+  const s = await api('/api/admin/settings');
+  body.innerHTML = `
+    <div class="adm-card">
+      <div class="adm-card-title">Registration & access</div>
+      <div class="adm-toggle-row"><div><b>Open registration</b><span>Allow new accounts to be created.</span></div><div class="toggle${s.registration_open ? ' on' : ''}" data-adm-toggle="registration_open"></div></div>
+      <div class="adm-toggle-row"><div><b>Maintenance mode</b><span>Show a maintenance banner across the app.</span></div><div class="toggle${s.maintenance_mode ? ' on' : ''}" data-adm-toggle="maintenance_mode"></div></div>
+      <div class="field"><label>Maintenance message</label><input id="sys-maint" value="${escapeHtml(s.maintenance_message || '')}" placeholder="We'll be right back…"></div>
+      <div class="field"><label>Message of the day</label><input id="sys-motd" value="${escapeHtml(s.motd || '')}" placeholder="Optional banner text for everyone"></div>
+      <div class="field"><label>Max upload size (MB)</label><input id="sys-upload" type="number" min="1" max="500" value="${Number(s.max_upload_mb) || 50}"></div>
+      <div class="adm-form-actions"><button class="btn" id="sys-save">Save settings</button></div>
+    </div>
+    <div class="adm-card">
+      <div class="adm-card-title">Data</div>
+      <p class="adm-muted">Download a JSON snapshot of users, servers, bans and settings. Password hashes are never included.</p>
+      <div class="adm-form-actions"><button class="btn secondary" id="sys-export">${icon('download')} Export data</button></div>
+    </div>`;
+  let pending = { registration_open: s.registration_open, maintenance_mode: s.maintenance_mode };
+  body.querySelectorAll('[data-adm-toggle]').forEach(t => t.addEventListener('click', () => {
+    const k = t.dataset.admToggle;
+    pending[k] = !pending[k];
+    t.classList.toggle('on', pending[k]);
+  }));
+  $('sys-save').addEventListener('click', async () => {
+    try {
+      await api('/api/admin/settings', { method: 'PATCH', body: JSON.stringify({
+        registration_open: pending.registration_open,
+        maintenance_mode: pending.maintenance_mode,
+        maintenance_message: $('sys-maint').value,
+        motd: $('sys-motd').value,
+        max_upload_mb: Number($('sys-upload').value) || 50
+      }) });
+      toast('Platform settings saved', 'success');
+    } catch (e) { toast(e.message, 'error'); }
+  });
+  $('sys-export').addEventListener('click', admExport);
+}
+
+async function admExport() {
+  try {
+    const data = await api('/api/admin/export');
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'crossroads-export-' + Date.now() + '.json';
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+    toast('Export downloaded', 'success');
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+async function admRenderAudit(body) {
+  const data = await api('/api/admin/audit?limit=300');
+  body.innerHTML = `<div class="adm-table-wrap"><table class="adm-table">
+    <thead><tr><th>When</th><th>Admin</th><th>Action</th><th>Target</th><th>Detail</th></tr></thead>
+    <tbody>${data.audit.map(a => `<tr>
+      <td class="adm-nowrap">${new Date(a.created_at).toLocaleString()}</td>
+      <td>${escapeHtml(a.actor_name ? a.actor_name + '#' + a.actor_disc : 'system')}</td>
+      <td><span class="adm-badge blue">${escapeHtml(a.action)}</span></td>
+      <td class="adm-nowrap">${escapeHtml(a.target_type || '')} ${escapeHtml(a.target_id || '')}</td>
+      <td class="adm-detail">${escapeHtml(a.detail || '')}</td>
+    </tr>`).join('') || '<tr><td colspan="5" class="adm-empty">No admin actions recorded yet.</td></tr>'}</tbody>
+  </table></div>`;
+}
+
+/* Small professional prompt used by the admin panel. */
+function admPrompt({ title, label, value, danger, multiline }, onConfirm) {
+  openModal(`
+    <div class="adm-prompt">
+      <h3>${escapeHtml(title)}</h3>
+      <div class="field"><label>${escapeHtml(label)}</label>
+        ${multiline ? `<textarea id="admp-val" rows="4">${escapeHtml(value || '')}</textarea>` : `<input id="admp-val" value="${escapeHtml(value || '')}" autocomplete="off">`}
+      </div>
+      <div class="modal-actions">
+        <button class="btn secondary" id="admp-cancel">Cancel</button>
+        <button class="btn ${danger ? 'danger' : ''}" id="admp-ok">Confirm</button>
+      </div>
+    </div>`, { modalClass: 'adm-prompt-wrap' });
+  const input = $('admp-val');
+  input.focus(); if (input.select) input.select();
+  $('admp-cancel').addEventListener('click', () => openAdminPanel(adminTab));
+  $('admp-ok').addEventListener('click', async () => {
+    const v = input.value;
+    if (!String(v).trim() && !multiline) { toast('A value is required', 'error'); return; }
+    try { await onConfirm(v); } catch (e) { toast(e.message, 'error'); }
+  });
+  input.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !multiline) { e.preventDefault(); $('admp-ok').click(); } });
+}
+
+/* ============================================================
    SERVER MENU
    ============================================================ */
 function serverMenu(e) {
   if (!state.server) return;
   const rect = $('sidebar-header').getBoundingClientRect();
   const isOwner = state.server.owner_id === me.id;
+  const admin = amIAdmin();
   const items = [
-    { label: 'Invite People', icon: 'user-plus', onClick: () => openInviteModal() },
-    { label: 'Create Channel', icon: 'plus', onClick: () => openCreateChannel('text') },
-    { label: 'Server Settings', icon: 'settings', onClick: openServerSettings }
+    { label: 'Invite People', icon: 'user-plus', onClick: () => openInviteModal() }
   ];
+  /* Management entries are only shown to the owner and server admins. */
+  if (admin) {
+    items.push({ label: 'Create Channel', icon: 'plus', onClick: () => openCreateChannel('text') });
+    items.push({ label: 'Server Settings', icon: 'settings', onClick: openServerSettings });
+  }
   if (isOwner) items.push({ label: 'Delete Server', icon: 'trash', danger: true, onClick: () => deleteServer() });
   else items.push({ label: 'Leave Server', icon: 'log-out', danger: true, onClick: () => leaveServer() });
   showContextMenu(rect.left, rect.bottom + 4, items);
@@ -6373,6 +6912,9 @@ function openInviteModal() {
 function openServerSettings() {
   const s = state.server;
   if (!s) return;
+  /* Defence in depth: never open management UI for a regular member, even if
+     something tries to call this directly. */
+  if (!amIAdmin()) { toast('Only server owners and admins can open Server Settings', 'error'); return; }
   const isOwner = s.owner_id === me.id;
   openModal(`
     <div class="ss-modal-head">
@@ -6833,6 +7375,13 @@ function amIAdmin() {
   if (s.owner_id === me.id) return true;
   const m = state.members.find(x => x.id === me.id);
   return !!(m && (m.role === 'owner' || m.role === 'admin'));
+}
+
+/* Platform administrator = the account named "keep" (or whatever the server
+   lists in ADMIN_USERNAMES). The backend is the real gate; this only controls
+   whether the Admin Panel button is rendered. */
+function isPlatformAdmin() {
+  return !!(me && String(me.username || '').toLowerCase() === 'keep');
 }
 
 function copyChannelLink(c) {

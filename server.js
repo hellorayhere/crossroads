@@ -13,6 +13,16 @@ const { newId, newInviteCode, randomColor, randomDiscriminator } = require('./ut
 
 const PORT = process.env.PORT || 3000;
 const JWT_SECRET = process.env.JWT_SECRET || 'crossroads-dev-secret-change-me';
+/* Platform administrators. Defaults to the account named "keep"; can be
+   extended with a comma-separated ADMIN_USERNAMES environment variable. */
+const ADMIN_USERNAMES = new Set(
+  (process.env.ADMIN_USERNAMES || 'keep')
+    .split(',').map(s => s.trim().toLowerCase()).filter(Boolean)
+);
+function isGlobalAdmin(user) {
+  if (!user || !user.username) return false;
+  return ADMIN_USERNAMES.has(String(user.username).toLowerCase());
+}
 const UPLOAD_DIR = process.env.UPLOAD_DIR ? path.resolve(process.env.UPLOAD_DIR) : path.join(__dirname, 'uploads');
 if (!fs.existsSync(UPLOAD_DIR)) fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 
@@ -44,7 +54,26 @@ function effectiveStatus(uid, dbStatus) {
 
 app.use(express.json({ limit: '25mb' }));
 app.use(express.urlencoded({ extended: true }));
-app.use('/uploads', express.static(UPLOAD_DIR));
+/* Uploads are user-supplied, so they are served with hardening headers. Media
+   is shown inline; anything that could execute in a browser is forced to
+   download instead. Existing files keep working — nothing is deleted. */
+const DANGEROUS_EXT = new Set([
+  '.exe', '.bat', '.cmd', '.com', '.msi', '.scr', '.ps1', '.vbs', '.vbe',
+  '.js', '.mjs', '.jse', '.wsf', '.wsh', '.hta', '.jar', '.sh', '.bash',
+  '.zsh', '.app', '.dll', '.cpl', '.pif', '.reg', '.lnk', '.iso', '.img',
+  '.php', '.asp', '.aspx', '.jsp', '.cgi', '.pl', '.py', '.rb', '.lua',
+  '.html', '.htm', '.xhtml', '.svg', '.svgz', '.xml', '.xhtml'
+]);
+app.use('/uploads', express.static(UPLOAD_DIR, {
+  setHeaders(res, filePath) {
+    res.set('X-Content-Type-Options', 'nosniff');
+    res.set('Content-Security-Policy', "default-src 'none'; img-src 'self'; media-src 'self'; style-src 'unsafe-inline'");
+    const ext = path.extname(filePath).toLowerCase();
+    if (DANGEROUS_EXT.has(ext)) {
+      res.set('Content-Disposition', `attachment; filename="${path.basename(filePath)}"`);
+    }
+  }
+}));
 app.use(express.static(path.join(__dirname, 'public')));
 
 /* ---------------- Health check + keep-alive ----------------
@@ -129,11 +158,21 @@ const storage = multer.diskStorage({
 });
 /* 50 MB ceiling so animated GIF/WebP avatars, banners and backgrounds fit. */
 const MAX_UPLOAD_BYTES = 50 * 1024 * 1024;
-const upload = multer({ storage, limits: { fileSize: MAX_UPLOAD_BYTES } });
+const upload = multer({
+  storage,
+  limits: { fileSize: MAX_UPLOAD_BYTES },
+  fileFilter(req, file, cb) {
+    const ext = path.extname(file.originalname || '').toLowerCase();
+    if (DANGEROUS_EXT.has(ext)) {
+      return cb(new Error('This file type is not allowed for security reasons.'));
+    }
+    cb(null, true);
+  }
+});
 
 /* ---------------- Helpers ---------------- */
 function sign(user) {
-  return jwt.sign({ uid: user.id }, JWT_SECRET, { expiresIn: '30d' });
+  return jwt.sign({ uid: user.id, tv: user.token_version || 0 }, JWT_SECRET, { expiresIn: '30d' });
 }
 
 function publicUser(u, opts = {}) {
@@ -159,8 +198,17 @@ function publicUser(u, opts = {}) {
     accent_color: u.accent_color,
     bio: u.bio,
     status,
+    verified: !!u.verified,
+    muted: !!u.muted,
+    platform_admin: isGlobalAdmin(u),
     created_at: u.created_at
   };
+}
+
+/* A platform ban is checked on every authenticated request so a banned user is
+   locked out immediately, even if they still hold a valid token. */
+function isGloballyBanned(userId) {
+  return !!db.prepare('SELECT 1 FROM global_bans WHERE user_id = ?').get(userId);
 }
 
 function auth(req, res, next) {
@@ -171,12 +219,70 @@ function auth(req, res, next) {
     const payload = jwt.verify(token, JWT_SECRET);
     const user = db.prepare('SELECT * FROM users WHERE id = ?').get(payload.uid);
     if (!user) return res.status(401).json({ error: 'User not found' });
+    /* Token versioning lets an admin revoke every existing session for an
+       account (used by ban / force-logout / password reset actions). */
+    if ((payload.tv || 0) !== (user.token_version || 0)) {
+      return res.status(401).json({ error: 'Session expired. Please sign in again.' });
+    }
+    if (user.disabled) return res.status(403).json({ error: 'This account has been disabled.' });
+    if (isGloballyBanned(user.id)) return res.status(403).json({ error: 'This account has been banned.' });
+    /* Best-effort last-seen tracking for the admin overview. */
+    try { db.prepare('UPDATE users SET last_seen_at = ? WHERE id = ?').run(Date.now(), user.id); } catch (e) {}
     req.user = user;
     next();
   } catch (e) {
     return res.status(401).json({ error: 'Invalid token' });
   }
 }
+
+/* Only platform administrators (username "keep" by default) may pass. */
+function adminOnly(req, res, next) {
+  if (!isGlobalAdmin(req.user)) return res.status(403).json({ error: 'Administrator access required' });
+  next();
+}
+
+function adminAudit(req, action, targetType, targetId, detail) {
+  try {
+    db.prepare(`INSERT INTO admin_audit (id, actor_id, action, target_type, target_id, detail, created_at)
+                VALUES (?,?,?,?,?,?,?)`)
+      .run(newId(), req.user ? req.user.id : null, action, targetType || '', targetId || '', detail || '', Date.now());
+  } catch (e) { /* auditing must never break the action */ }
+}
+
+function getGlobalSetting(key, fallback) {
+  const row = db.prepare('SELECT value FROM global_settings WHERE key = ?').get(key);
+  if (!row) return fallback;
+  try { return JSON.parse(row.value); } catch (e) { return row.value; }
+}
+function setGlobalSetting(key, value) {
+  db.prepare(`INSERT INTO global_settings (key, value) VALUES (?, ?)
+              ON CONFLICT(key) DO UPDATE SET value = excluded.value`)
+    .run(key, JSON.stringify(value));
+}
+
+/* ---------------- Lightweight rate limiting ----------------
+   Protects the unauthenticated auth endpoints (and message sending) from
+   brute-force / spam. In-memory only, so it resets on restart. */
+const rateBuckets = new Map();
+function rateLimit({ windowMs = 60000, max = 20, keyFn } = {}) {
+  return (req, res, next) => {
+    const key = (keyFn ? keyFn(req) : (req.ip || 'unknown')) + ':' + req.path;
+    const now = Date.now();
+    let b = rateBuckets.get(key);
+    if (!b || b.reset < now) { b = { count: 0, reset: now + windowMs }; rateBuckets.set(key, b); }
+    b.count++;
+    if (b.count > max) {
+      res.set('Retry-After', String(Math.ceil((b.reset - now) / 1000)));
+      return res.status(429).json({ error: 'Too many attempts. Please wait a moment and try again.' });
+    }
+    next();
+  };
+}
+/* Occasionally prune stale buckets so the map cannot grow without bound. */
+setInterval(() => {
+  const now = Date.now();
+  for (const [k, b] of rateBuckets) if (b.reset < now) rateBuckets.delete(k);
+}, 5 * 60 * 1000).unref();
 
 function uniqueUsernameDiscriminator(username) {
   // Generate a unique 4-digit discriminator for the username
@@ -620,9 +726,12 @@ app.get('/api/check-username', (req, res) => {
   res.json({ available: !taken, reason: taken ? 'That username is already taken' : 'Username is available' });
 });
 
-app.post('/api/register', (req, res) => {
+app.post('/api/register', rateLimit({ windowMs: 60000, max: 10 }), (req, res) => {
   let { username, password } = req.body || {};
   username = (username || '').trim();
+  if (getGlobalSetting('registration_open', true) === false) {
+    return res.status(403).json({ error: 'Registration is currently closed.' });
+  }
   if (!username || !password) return res.status(400).json({ error: 'Username and password are required' });
   if (username.length < 2 || username.length > 32) return res.status(400).json({ error: 'Username must be 2-32 characters' });
   if (!/^[a-zA-Z0-9._]+$/.test(username)) return res.status(400).json({ error: 'Username may only contain letters, numbers, periods and underscores' });
@@ -643,7 +752,7 @@ app.post('/api/register', (req, res) => {
   res.json({ token, user: publicUser(user) });
 });
 
-app.post('/api/login', (req, res) => {
+app.post('/api/login', rateLimit({ windowMs: 60000, max: 15 }), (req, res) => {
   let { identifier, username, password } = req.body || {};
   const login = (identifier || username || '').trim();
   if (!login || !password) return res.status(400).json({ error: 'Credentials required' });
@@ -657,13 +766,15 @@ app.post('/api/login', (req, res) => {
   if (!user || !bcrypt.compareSync(password, user.password_hash)) {
     return res.status(401).json({ error: 'Invalid username or password' });
   }
+  if (user.disabled) return res.status(403).json({ error: 'This account has been disabled.' });
+  if (isGloballyBanned(user.id)) return res.status(403).json({ error: 'This account has been banned.' });
   const token = sign(user);
   res.json({ token, user: publicUser(user) });
 });
 
 /* Password reset (unauthenticated). Requires the exact username#tag so a user
    who has forgotten their password can regain access. */
-app.post('/api/password/reset', (req, res) => {
+app.post('/api/password/reset', rateLimit({ windowMs: 60000, max: 8 }), (req, res) => {
   let { identifier, new_password } = req.body || {};
   identifier = (identifier || '').trim();
   if (!identifier || !new_password) {
@@ -687,8 +798,11 @@ app.post('/api/password/reset', (req, res) => {
   if (String(new_password).length > 128) {
     return res.status(400).json({ error: 'Password is too long' });
   }
+  if (user.disabled) return res.status(403).json({ error: 'This account has been disabled.' });
+  if (isGloballyBanned(user.id)) return res.status(403).json({ error: 'This account has been banned.' });
   const hash = bcrypt.hashSync(String(new_password), 10);
-  db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(hash, user.id);
+  /* Bumping token_version invalidates every existing session after a reset. */
+  db.prepare('UPDATE users SET password_hash = ?, token_version = COALESCE(token_version,0) + 1 WHERE id = ?').run(hash, user.id);
   res.json({ ok: true });
 });
 
@@ -1534,6 +1648,7 @@ app.post('/api/channels/:id/messages', auth, (req, res) => {
   if (!ch) return res.status(404).json({ error: 'Channel not found' });
   const srv = getServerForUser(ch.server_id, req.user.id);
   if (!srv) return res.status(403).json({ error: 'Not a member of this server' });
+  if (req.user.muted) return res.status(403).json({ error: 'You are muted by a platform administrator.' });
   const { content, attachment_url, attachment_name, attachment_type, attachment_size, reply_to_id } = req.body || {};
   if ((!content || !content.trim()) && !attachment_url) return res.status(400).json({ error: 'Message cannot be empty' });
 
@@ -1750,6 +1865,7 @@ app.get('/api/dms/:id/messages', auth, (req, res) => {
 app.post('/api/dms/:id/messages', auth, (req, res) => {
   const dm = db.prepare('SELECT * FROM dm_channels WHERE id = ?').get(req.params.id);
   if (!dm || (dm.user1_id !== req.user.id && dm.user2_id !== req.user.id)) return res.status(404).json({ error: 'DM not found' });
+  if (req.user.muted) return res.status(403).json({ error: 'You are muted by a platform administrator.' });
   const { content, attachment_url, attachment_name, attachment_type, attachment_size, reply_to_id } = req.body || {};
   if ((!content || !content.trim()) && !attachment_url) return res.status(400).json({ error: 'Message cannot be empty' });
   const id = newId();
@@ -1947,6 +2063,357 @@ app.post('/api/upload', auth, (req, res) => {
   });
 });
 
+/* ============================================================
+   PLATFORM ADMIN API  (username "keep" only)
+   Every endpoint is additive and audited. Nothing here deletes
+   user content; destructive-looking actions are reversible
+   (ban / mute / disable / lock) or operate on admin-created data.
+   ============================================================ */
+const admin = express.Router();
+admin.use(auth, adminOnly);
+
+function adminUserRow(u) {
+  const servers = db.prepare('SELECT COUNT(*) c FROM server_members WHERE user_id = ?').get(u.id).c;
+  const messages = db.prepare('SELECT COUNT(*) c FROM messages WHERE user_id = ?').get(u.id).c;
+  const owned = db.prepare('SELECT COUNT(*) c FROM servers WHERE owner_id = ?').get(u.id).c;
+  const banned = isGloballyBanned(u.id);
+  return {
+    id: u.id, username: u.username, discriminator: u.discriminator,
+    tag: `${u.username}#${u.discriminator}`,
+    display_name: u.display_name || u.username,
+    bio: u.bio || '', avatar_url: u.avatar_url || null,
+    accent_color: u.accent_color || '#5865F2',
+    status: effectiveStatus(u.id, u.status),
+    created_at: u.created_at, last_seen_at: u.last_seen_at || null,
+    verified: !!u.verified, muted: !!u.muted, disabled: !!u.disabled,
+    banned, platform_admin: isGlobalAdmin(u),
+    servers, owned_servers: owned, messages
+  };
+}
+
+/* ---- Overview ---- */
+admin.get('/overview', (req, res) => {
+  const now = Date.now();
+  const count = (sql, ...p) => db.prepare(sql).get(...p).c;
+  res.json({
+    users: count('SELECT COUNT(*) c FROM users'),
+    servers: count('SELECT COUNT(*) c FROM servers'),
+    channels: count('SELECT COUNT(*) c FROM channels'),
+    messages: count('SELECT COUNT(*) c FROM messages'),
+    online: onlineUids.size,
+    bans: count('SELECT COUNT(*) c FROM global_bans'),
+    muted: count('SELECT COUNT(*) c FROM users WHERE muted = 1'),
+    disabled: count('SELECT COUNT(*) c FROM users WHERE disabled = 1'),
+    verified: count('SELECT COUNT(*) c FROM users WHERE verified = 1'),
+    new_users_24h: count('SELECT COUNT(*) c FROM users WHERE created_at > ?', now - 86400000),
+    new_users_7d: count('SELECT COUNT(*) c FROM users WHERE created_at > ?', now - 7 * 86400000),
+    messages_24h: count('SELECT COUNT(*) c FROM messages WHERE created_at > ?', now - 86400000),
+    active_announcements: count('SELECT COUNT(*) c FROM global_messages WHERE active = 1'),
+    settings: {
+      registration_open: getGlobalSetting('registration_open', true),
+      maintenance_mode: getGlobalSetting('maintenance_mode', false),
+      maintenance_message: getGlobalSetting('maintenance_message', ''),
+      motd: getGlobalSetting('motd', '')
+    },
+    uptime_seconds: Math.floor((Date.now() - bootedAt) / 1000),
+    version: '1.0.0'
+  });
+});
+
+/* ---- Users ---- */
+admin.get('/users', (req, res) => {
+  const q = (req.query.q || '').trim();
+  const limit = Math.min(parseInt(req.query.limit) || 100, 500);
+  const offset = Math.max(parseInt(req.query.offset) || 0, 0);
+  const rows = q
+    ? db.prepare(`SELECT * FROM users WHERE username LIKE ? OR display_name LIKE ? OR id = ?
+                  ORDER BY created_at ASC LIMIT ? OFFSET ?`).all(`%${q}%`, `%${q}%`, q, limit, offset)
+    : db.prepare('SELECT * FROM users ORDER BY created_at ASC LIMIT ? OFFSET ?').all(limit, offset);
+  const total = q
+    ? db.prepare('SELECT COUNT(*) c FROM users WHERE username LIKE ? OR display_name LIKE ? OR id = ?').get(`%${q}%`, `%${q}%`, q).c
+    : db.prepare('SELECT COUNT(*) c FROM users').get().c;
+  res.json({ users: rows.map(adminUserRow), total });
+});
+
+/* Generic, audited user action endpoint. */
+admin.post('/users/:id/action', (req, res) => {
+  const target = db.prepare('SELECT * FROM users WHERE id = ?').get(req.params.id);
+  if (!target) return res.status(404).json({ error: 'User not found' });
+  const { action, value } = req.body || {};
+  if (!action) return res.status(400).json({ error: 'Action required' });
+  /* Never let an admin lock themselves out of the panel. */
+  if (target.id === req.user.id && ['ban', 'disable', 'mute', 'force_logout'].includes(action)) {
+    return res.status(400).json({ error: 'You cannot apply that action to your own account.' });
+  }
+  let detail = '';
+  switch (action) {
+    case 'set_username': {
+      const uname = String(value || '').trim();
+      /* Admin rename intentionally has NO length / character ceiling. */
+      if (!uname) return res.status(400).json({ error: 'Username required' });
+      let disc = target.discriminator;
+      const clash = db.prepare('SELECT 1 FROM users WHERE LOWER(username)=LOWER(?) AND discriminator=? AND id!=?').get(uname, disc, target.id);
+      if (clash) disc = uniqueUsernameDiscriminator(uname);
+      db.prepare('UPDATE users SET username=?, discriminator=? WHERE id=?').run(uname, disc, target.id);
+      detail = `username -> ${uname}#${disc}`;
+      break;
+    }
+    case 'set_discriminator': {
+      const disc = String(value || '').trim();
+      if (!/^\d{1,8}$/.test(disc)) return res.status(400).json({ error: 'Discriminator must be 1-8 digits' });
+      db.prepare('UPDATE users SET discriminator=? WHERE id=?').run(disc, target.id);
+      detail = `discriminator -> ${disc}`;
+      break;
+    }
+    case 'set_display_name': {
+      db.prepare('UPDATE users SET display_name=? WHERE id=?').run(String(value || '').slice(0, 200), target.id);
+      detail = 'display name changed';
+      break;
+    }
+    case 'set_bio': {
+      db.prepare('UPDATE users SET bio=? WHERE id=?').run(String(value || ''), target.id);
+      detail = 'bio changed';
+      break;
+    }
+    case 'clear_bio': {
+      db.prepare("UPDATE users SET bio='' WHERE id=?").run(target.id);
+      detail = 'bio cleared';
+      break;
+    }
+    case 'set_accent': {
+      const c = String(value || '');
+      if (!/^#[0-9a-fA-F]{6}$/.test(c)) return res.status(400).json({ error: 'Invalid colour' });
+      db.prepare('UPDATE users SET accent_color=? WHERE id=?').run(c, target.id);
+      detail = `accent -> ${c}`;
+      break;
+    }
+    case 'verify': case 'unverify': {
+      db.prepare('UPDATE users SET verified=? WHERE id=?').run(action === 'verify' ? 1 : 0, target.id);
+      detail = action;
+      break;
+    }
+    case 'mute': case 'unmute': {
+      db.prepare('UPDATE users SET muted=? WHERE id=?').run(action === 'mute' ? 1 : 0, target.id);
+      detail = action;
+      break;
+    }
+    case 'disable': case 'enable': {
+      db.prepare('UPDATE users SET disabled=? WHERE id=?').run(action === 'disable' ? 1 : 0, target.id);
+      if (action === 'disable') db.prepare('UPDATE users SET token_version=COALESCE(token_version,0)+1 WHERE id=?').run(target.id);
+      detail = action;
+      break;
+    }
+    case 'ban': {
+      db.prepare(`INSERT INTO global_bans (user_id, username, reason, moderator_id, created_at)
+                  VALUES (?,?,?,?,?)
+                  ON CONFLICT(user_id) DO UPDATE SET reason=excluded.reason, moderator_id=excluded.moderator_id, created_at=excluded.created_at`)
+        .run(target.id, target.username, String(value || '').slice(0, 500), req.user.id, Date.now());
+      db.prepare('UPDATE users SET token_version=COALESCE(token_version,0)+1 WHERE id=?').run(target.id);
+      detail = `banned: ${value || 'no reason'}`;
+      break;
+    }
+    case 'unban': {
+      db.prepare('DELETE FROM global_bans WHERE user_id=?').run(target.id);
+      detail = 'unbanned';
+      break;
+    }
+    case 'force_logout': {
+      db.prepare('UPDATE users SET token_version=COALESCE(token_version,0)+1 WHERE id=?').run(target.id);
+      detail = 'all sessions revoked';
+      break;
+    }
+    case 'reset_password': {
+      const pw = String(value || '');
+      if (pw.length < 6) return res.status(400).json({ error: 'Password must be at least 6 characters' });
+      db.prepare('UPDATE users SET password_hash=?, token_version=COALESCE(token_version,0)+1 WHERE id=?')
+        .run(bcrypt.hashSync(pw, 10), target.id);
+      detail = 'password reset';
+      break;
+    }
+    case 'warn': {
+      createNotification(target.id, 'system', { title: 'Warning from staff', content: String(value || '').slice(0, 1000) });
+      detail = `warned: ${value || ''}`;
+      break;
+    }
+    case 'message': {
+      createNotification(target.id, 'system', { title: 'Message from staff', content: String(value || '').slice(0, 1000) });
+      detail = 'direct message sent';
+      break;
+    }
+    default:
+      return res.status(400).json({ error: 'Unknown action' });
+  }
+  adminAudit(req, `user.${action}`, 'user', target.id, detail);
+  const fresh = db.prepare('SELECT * FROM users WHERE id = ?').get(target.id);
+  broadcastProfile(fresh);
+  res.json({ ok: true, user: adminUserRow(fresh) });
+});
+
+/* ---- Servers ---- */
+admin.get('/servers', (req, res) => {
+  const q = (req.query.q || '').trim();
+  const limit = Math.min(parseInt(req.query.limit) || 100, 500);
+  const rows = q
+    ? db.prepare(`SELECT * FROM servers WHERE name LIKE ? OR id = ? ORDER BY created_at ASC LIMIT ?`).all(`%${q}%`, q, limit)
+    : db.prepare('SELECT * FROM servers ORDER BY created_at ASC LIMIT ?').all(limit);
+  const out = rows.map(s => {
+    const owner = db.prepare('SELECT username, discriminator FROM users WHERE id = ?').get(s.owner_id);
+    return {
+      id: s.id, name: s.name, description: s.description || '', icon_url: s.icon_url || null,
+      owner_id: s.owner_id,
+      owner_tag: owner ? `${owner.username}#${owner.discriminator}` : 'unknown',
+      members: db.prepare('SELECT COUNT(*) c FROM server_members WHERE server_id = ?').get(s.id).c,
+      channels: db.prepare('SELECT COUNT(*) c FROM channels WHERE server_id = ?').get(s.id).c,
+      messages: db.prepare('SELECT COUNT(*) c FROM messages WHERE channel_id IN (SELECT id FROM channels WHERE server_id = ?)').get(s.id).c,
+      locked: !!s.locked, featured: !!s.featured, created_at: s.created_at
+    };
+  });
+  res.json({ servers: out, total: out.length });
+});
+
+admin.post('/servers/:id/action', (req, res) => {
+  const srv = db.prepare('SELECT * FROM servers WHERE id = ?').get(req.params.id);
+  if (!srv) return res.status(404).json({ error: 'Server not found' });
+  const { action, value } = req.body || {};
+  let detail = '';
+  switch (action) {
+    case 'lock': case 'unlock': {
+      db.prepare('UPDATE servers SET locked=? WHERE id=?').run(action === 'lock' ? 1 : 0, srv.id);
+      detail = action; break;
+    }
+    case 'feature': case 'unfeature': {
+      db.prepare('UPDATE servers SET featured=? WHERE id=?').run(action === 'feature' ? 1 : 0, srv.id);
+      detail = action; break;
+    }
+    case 'rename': {
+      const name = String(value || '').trim();
+      if (!name) return res.status(400).json({ error: 'Name required' });
+      db.prepare('UPDATE servers SET name=? WHERE id=?').run(name.slice(0, 200), srv.id);
+      detail = `renamed -> ${name}`; break;
+    }
+    case 'set_description': {
+      db.prepare('UPDATE servers SET description=? WHERE id=?').run(String(value || '').slice(0, 2000), srv.id);
+      detail = 'description changed'; break;
+    }
+    case 'transfer_owner': {
+      const uid = String(value || '');
+      const member = db.prepare('SELECT 1 FROM server_members WHERE server_id=? AND user_id=?').get(srv.id, uid);
+      if (!member) return res.status(400).json({ error: 'New owner must be a member of the server' });
+      db.prepare('UPDATE servers SET owner_id=? WHERE id=?').run(uid, srv.id);
+      db.prepare("UPDATE server_members SET role='owner' WHERE server_id=? AND user_id=?").run(srv.id, uid);
+      db.prepare("UPDATE server_members SET role='admin' WHERE server_id=? AND user_id=?").run(srv.id, srv.owner_id);
+      detail = `owner -> ${uid}`; break;
+    }
+    case 'announce': {
+      const content = String(value || '').trim();
+      if (!content) return res.status(400).json({ error: 'Message required' });
+      const ch = db.prepare("SELECT id FROM channels WHERE server_id=? AND type='text' ORDER BY position ASC LIMIT 1").get(srv.id);
+      if (!ch) return res.status(400).json({ error: 'Server has no text channel' });
+      const id = newId();
+      db.prepare(`INSERT INTO messages (id, channel_id, user_id, content, created_at) VALUES (?,?,?,?,?)`)
+        .run(id, ch.id, req.user.id, content, Date.now());
+      const m = db.prepare('SELECT * FROM messages WHERE id=?').get(id);
+      io.to(`channel:${ch.id}`).emit('message', messageWithMeta(m, req.user.id));
+      detail = 'announcement posted'; break;
+    }
+    default:
+      return res.status(400).json({ error: 'Unknown action' });
+  }
+  adminAudit(req, `server.${action}`, 'server', srv.id, detail);
+  broadcastChannels(srv.id);
+  broadcastMembers(srv.id);
+  res.json({ ok: true });
+});
+
+/* ---- Global announcements ---- */
+admin.get('/announcements', (req, res) => {
+  res.json({ announcements: db.prepare('SELECT * FROM global_messages ORDER BY created_at DESC LIMIT 200').all() });
+});
+
+admin.post('/announcements', (req, res) => {
+  const { title, content, level, expires_at } = req.body || {};
+  if (!content || !String(content).trim()) return res.status(400).json({ error: 'Message content required' });
+  const id = newId();
+  const now = Date.now();
+  db.prepare(`INSERT INTO global_messages (id, author_id, title, content, level, active, created_at, expires_at)
+              VALUES (?,?,?,?,?,1,?,?)`)
+    .run(id, req.user.id, String(title || '').slice(0, 200), String(content).slice(0, 5000),
+      ['info', 'success', 'warning', 'critical'].includes(level) ? level : 'info',
+      now, expires_at ? Number(expires_at) : null);
+  const row = db.prepare('SELECT * FROM global_messages WHERE id=?').get(id);
+  io.emit('global_announcement', row);
+  adminAudit(req, 'announcement.create', 'announcement', id, String(title || content).slice(0, 200));
+  res.json({ ok: true, announcement: row });
+});
+
+admin.post('/announcements/:id/action', (req, res) => {
+  const row = db.prepare('SELECT * FROM global_messages WHERE id=?').get(req.params.id);
+  if (!row) return res.status(404).json({ error: 'Announcement not found' });
+  const { action } = req.body || {};
+  if (action === 'activate' || action === 'deactivate') {
+    db.prepare('UPDATE global_messages SET active=? WHERE id=?').run(action === 'activate' ? 1 : 0, row.id);
+    adminAudit(req, `announcement.${action}`, 'announcement', row.id, '');
+    return res.json({ ok: true });
+  }
+  return res.status(400).json({ error: 'Unknown action' });
+});
+
+/* ---- Bans list ---- */
+admin.get('/bans', (req, res) => {
+  res.json({ bans: db.prepare('SELECT * FROM global_bans ORDER BY created_at DESC').all() });
+});
+
+/* ---- Audit log ---- */
+admin.get('/audit', (req, res) => {
+  const limit = Math.min(parseInt(req.query.limit) || 200, 1000);
+  const rows = db.prepare(`SELECT a.*, u.username AS actor_name, u.discriminator AS actor_disc
+                           FROM admin_audit a LEFT JOIN users u ON u.id = a.actor_id
+                           ORDER BY a.created_at DESC LIMIT ?`).all(limit);
+  res.json({ audit: rows });
+});
+
+/* ---- Platform settings ---- */
+admin.get('/settings', (req, res) => {
+  res.json({
+    registration_open: getGlobalSetting('registration_open', true),
+    maintenance_mode: getGlobalSetting('maintenance_mode', false),
+    maintenance_message: getGlobalSetting('maintenance_message', ''),
+    motd: getGlobalSetting('motd', ''),
+    max_upload_mb: getGlobalSetting('max_upload_mb', 50)
+  });
+});
+
+admin.patch('/settings', (req, res) => {
+  const allowed = ['registration_open', 'maintenance_mode', 'maintenance_message', 'motd', 'max_upload_mb'];
+  for (const k of allowed) {
+    if (k in (req.body || {})) setGlobalSetting(k, req.body[k]);
+  }
+  adminAudit(req, 'settings.update', 'platform', '', JSON.stringify(req.body || {}).slice(0, 500));
+  res.json({ ok: true });
+});
+
+/* ---- Export (safe, no password hashes) ---- */
+admin.get('/export', (req, res) => {
+  const users = db.prepare('SELECT id, username, discriminator, display_name, bio, status, created_at, verified, muted, disabled FROM users').all();
+  const servers = db.prepare('SELECT id, name, owner_id, created_at, locked, featured FROM servers').all();
+  const bans = db.prepare('SELECT * FROM global_bans').all();
+  const settings = db.prepare('SELECT * FROM global_settings').all();
+  adminAudit(req, 'export.download', 'platform', '', `${users.length} users`);
+  res.set('Content-Disposition', `attachment; filename="crossroads-export-${Date.now()}.json"`);
+  res.json({ exported_at: Date.now(), users, servers, bans, settings });
+});
+
+app.use('/api/admin', admin);
+
+/* Public (authenticated) endpoint so every client can show active announcements. */
+app.get('/api/global-messages', auth, (req, res) => {
+  const now = Date.now();
+  const rows = db.prepare(`SELECT * FROM global_messages
+                           WHERE active = 1 AND (expires_at IS NULL OR expires_at > ?)
+                           ORDER BY created_at DESC LIMIT 10`).all(now);
+  res.json({ announcements: rows, maintenance: getGlobalSetting('maintenance_mode', false), motd: getGlobalSetting('motd', '') });
+});
+
 /* ---------------- SPA fallback ---------------- */
 app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
@@ -1957,6 +2424,11 @@ io.use((socket, next) => {
   try {
     const token = socket.handshake.auth && socket.handshake.auth.token;
     const payload = jwt.verify(token, JWT_SECRET);
+    const u = db.prepare('SELECT id, token_version, disabled FROM users WHERE id = ?').get(payload.uid);
+    if (!u) return next(new Error('unauthorized'));
+    if ((payload.tv || 0) !== (u.token_version || 0)) return next(new Error('unauthorized'));
+    if (u.disabled) return next(new Error('unauthorized'));
+    if (isGloballyBanned(u.id)) return next(new Error('unauthorized'));
     socket.uid = payload.uid;
     next();
   } catch (e) {

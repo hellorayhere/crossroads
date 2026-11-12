@@ -310,6 +310,78 @@ function migrate() {
         AND EXISTS (SELECT 1 FROM servers s WHERE s.id = server_members.server_id AND s.owner_id = server_members.user_id)`);
   } catch (e) {}
 
+  /* ---------------- Admin / platform migrations (all additive) ----------------
+     These power the platform-wide admin panel. Nothing here is destructive:
+     every column is added only when missing and every table uses IF NOT EXISTS,
+     so existing accounts, servers, channels and messages are left untouched. */
+  const adminUserCols = {
+    token_version: 'INTEGER DEFAULT 0',   // bump to revoke every session for a user
+    verified: 'INTEGER DEFAULT 0',        // platform-verified badge
+    muted: 'INTEGER DEFAULT 0',           // platform-wide mute (cannot post)
+    disabled: 'INTEGER DEFAULT 0',        // account disabled (cannot sign in)
+    last_seen_at: 'INTEGER'               // last activity timestamp (admin overview)
+  };
+  for (const [col, def] of Object.entries(adminUserCols)) {
+    if (!names.includes(col)) {
+      try { db.exec(`ALTER TABLE users ADD COLUMN ${col} ${def}`); } catch (e) {}
+    }
+  }
+
+  // Server-level flags used by the admin panel.
+  const adminSrvCols = { locked: 'INTEGER DEFAULT 0', featured: 'INTEGER DEFAULT 0' };
+  for (const [col, def] of Object.entries(adminSrvCols)) {
+    if (!srvCols.includes(col)) {
+      try { db.exec(`ALTER TABLE servers ADD COLUMN ${col} ${def}`); } catch (e) {}
+    }
+  }
+
+  // Platform-wide bans (separate from per-server bans).
+  try {
+    db.exec(`CREATE TABLE IF NOT EXISTS global_bans (
+      user_id TEXT PRIMARY KEY,
+      username TEXT DEFAULT '',
+      reason TEXT DEFAULT '',
+      moderator_id TEXT,
+      created_at INTEGER NOT NULL
+    )`);
+  } catch (e) {}
+
+  // Simple key/value store for platform settings (registration, maintenance…).
+  try {
+    db.exec(`CREATE TABLE IF NOT EXISTS global_settings (
+      key TEXT PRIMARY KEY,
+      value TEXT DEFAULT ''
+    )`);
+  } catch (e) {}
+
+  // Audit trail for every admin action.
+  try {
+    db.exec(`CREATE TABLE IF NOT EXISTS admin_audit (
+      id TEXT PRIMARY KEY,
+      actor_id TEXT,
+      action TEXT NOT NULL,
+      target_type TEXT DEFAULT '',
+      target_id TEXT DEFAULT '',
+      detail TEXT DEFAULT '',
+      created_at INTEGER NOT NULL
+    )`);
+  } catch (e) {}
+  try { db.exec('CREATE INDEX IF NOT EXISTS idx_admin_audit_created ON admin_audit(created_at)'); } catch (e) {}
+
+  // Platform-wide announcements shown in-app to everyone.
+  try {
+    db.exec(`CREATE TABLE IF NOT EXISTS global_messages (
+      id TEXT PRIMARY KEY,
+      author_id TEXT,
+      title TEXT DEFAULT '',
+      content TEXT DEFAULT '',
+      level TEXT DEFAULT 'info',
+      active INTEGER DEFAULT 1,
+      created_at INTEGER NOT NULL,
+      expires_at INTEGER
+    )`);
+  } catch (e) {}
+
   // 2. If email is still NOT NULL, rebuild the table so it becomes optional.
   if (emailNotNull) {
     db.exec(`
@@ -331,11 +403,16 @@ function migrate() {
         bio TEXT DEFAULT '',
         status TEXT DEFAULT 'online',
         settings TEXT DEFAULT '{}',
+        token_version INTEGER DEFAULT 0,
+        verified INTEGER DEFAULT 0,
+        muted INTEGER DEFAULT 0,
+        disabled INTEGER DEFAULT 0,
+        last_seen_at INTEGER,
         created_at INTEGER NOT NULL,
         UNIQUE(username, discriminator)
       );
-      INSERT INTO users_new (id, username, discriminator, email, password_hash, display_name, pronouns, custom_status, banner_color, avatar, avatar_url, banner, banner_url, accent_color, bio, status, settings, created_at)
-        SELECT id, username, discriminator, email, password_hash, display_name, pronouns, custom_status, banner_color, avatar, avatar_url, banner, banner_url, accent_color, bio, status, COALESCE(settings, '{}'), created_at FROM users;
+      INSERT INTO users_new (id, username, discriminator, email, password_hash, display_name, pronouns, custom_status, banner_color, avatar, avatar_url, banner, banner_url, accent_color, bio, status, settings, token_version, verified, muted, disabled, last_seen_at, created_at)
+        SELECT id, username, discriminator, email, password_hash, display_name, pronouns, custom_status, banner_color, avatar, avatar_url, banner, banner_url, accent_color, bio, status, COALESCE(settings, '{}'), COALESCE(token_version, 0), COALESCE(verified, 0), COALESCE(muted, 0), COALESCE(disabled, 0), last_seen_at, created_at FROM users;
       DROP TABLE users;
       ALTER TABLE users_new RENAME TO users;
     `);
