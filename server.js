@@ -14,14 +14,39 @@ const { newId, newInviteCode, randomColor, randomDiscriminator } = require('./ut
 const PORT = process.env.PORT || 3000;
 const JWT_SECRET = process.env.JWT_SECRET || 'crossroads-dev-secret-change-me';
 /* Platform administrators. Defaults to the account named "keep"; can be
-   extended with a comma-separated ADMIN_USERNAMES environment variable. */
+   extended with a comma-separated ADMIN_USERNAMES environment variable.
+   Accounts explicitly whitelisted by the owner are also treated as admins
+   (see the admin_whitelist table below). */
 const ADMIN_USERNAMES = new Set(
   (process.env.ADMIN_USERNAMES || 'keep')
     .split(',').map(s => s.trim().toLowerCase()).filter(Boolean)
 );
+/* The platform owner. This account can never be banned, kicked, muted,
+   disabled, renamed or have its sessions revoked by anyone (including other
+   admins). Defaults to "keep". */
+const OWNER_USERNAMES = new Set(
+  (process.env.OWNER_USERNAMES || process.env.ADMIN_USERNAMES || 'keep')
+    .split(',').map(s => s.trim().toLowerCase()).filter(Boolean)
+);
+/* In-memory cache of whitelisted user ids, refreshed whenever the whitelist
+   changes. Keeps isGlobalAdmin() cheap enough to call per request. */
+let adminWhitelist = new Set();
+function loadAdminWhitelist() {
+  try {
+    adminWhitelist = new Set(db.prepare('SELECT user_id FROM admin_whitelist').all().map(r => r.user_id));
+  } catch (e) { adminWhitelist = new Set(); }
+}
+loadAdminWhitelist();
+
+function isOwner(user) {
+  if (!user || !user.username) return false;
+  return OWNER_USERNAMES.has(String(user.username).toLowerCase());
+}
 function isGlobalAdmin(user) {
   if (!user || !user.username) return false;
-  return ADMIN_USERNAMES.has(String(user.username).toLowerCase());
+  if (ADMIN_USERNAMES.has(String(user.username).toLowerCase())) return true;
+  if (user.id && adminWhitelist.has(user.id)) return true;
+  return false;
 }
 const UPLOAD_DIR = process.env.UPLOAD_DIR ? path.resolve(process.env.UPLOAD_DIR) : path.join(__dirname, 'uploads');
 if (!fs.existsSync(UPLOAD_DIR)) fs.mkdirSync(UPLOAD_DIR, { recursive: true });
@@ -201,6 +226,7 @@ function publicUser(u, opts = {}) {
     verified: !!u.verified,
     muted: !!u.muted,
     platform_admin: isGlobalAdmin(u),
+    platform_owner: isOwner(u),
     created_at: u.created_at
   };
 }
@@ -238,6 +264,12 @@ function auth(req, res, next) {
 /* Only platform administrators (username "keep" by default) may pass. */
 function adminOnly(req, res, next) {
   if (!isGlobalAdmin(req.user)) return res.status(403).json({ error: 'Administrator access required' });
+  next();
+}
+
+/* Only the platform owner may pass (whitelist management, destructive bulk ops). */
+function ownerOnly(req, res, next) {
+  if (!isOwner(req.user)) return res.status(403).json({ error: 'Only the platform owner can do that' });
   next();
 }
 
@@ -2077,16 +2109,22 @@ function adminUserRow(u) {
   const messages = db.prepare('SELECT COUNT(*) c FROM messages WHERE user_id = ?').get(u.id).c;
   const owned = db.prepare('SELECT COUNT(*) c FROM servers WHERE owner_id = ?').get(u.id).c;
   const banned = isGloballyBanned(u.id);
+  let noteCount = 0;
+  try { noteCount = db.prepare('SELECT COUNT(*) c FROM admin_notes WHERE user_id = ?').get(u.id).c; } catch (e) {}
   return {
     id: u.id, username: u.username, discriminator: u.discriminator,
     tag: `${u.username}#${u.discriminator}`,
     display_name: u.display_name || u.username,
+    pronouns: u.pronouns || '',
+    custom_status: u.custom_status || '',
     bio: u.bio || '', avatar_url: u.avatar_url || null,
+    banner_url: u.banner_url || null, banner_color: u.banner_color || '#5865F2',
     accent_color: u.accent_color || '#5865F2',
     status: effectiveStatus(u.id, u.status),
     created_at: u.created_at, last_seen_at: u.last_seen_at || null,
     verified: !!u.verified, muted: !!u.muted, disabled: !!u.disabled,
-    banned, platform_admin: isGlobalAdmin(u),
+    banned, platform_admin: isGlobalAdmin(u), platform_owner: isOwner(u),
+    whitelisted: adminWhitelist.has(u.id), note_count: noteCount,
     servers, owned_servers: owned, messages
   };
 }
@@ -2094,20 +2132,62 @@ function adminUserRow(u) {
 /* ---- Overview ---- */
 admin.get('/overview', (req, res) => {
   const now = Date.now();
+  const DAY = 86400000;
   const count = (sql, ...p) => db.prepare(sql).get(...p).c;
+  const mem = process.memoryUsage();
+  let dbBytes = 0;
+  try { dbBytes = fs.statSync(path.join(process.env.DATA_DIR ? path.resolve(process.env.DATA_DIR) : path.join(__dirname, 'data'), 'crossroads.db')).size; } catch (e) {}
+
+  /* 7-day message activity, oldest -> newest, used for the dashboard chart. */
+  const activity = [];
+  for (let i = 6; i >= 0; i--) {
+    const start = now - (i + 1) * DAY;
+    const end = now - i * DAY;
+    activity.push({
+      day: new Date(end).toISOString().slice(0, 10),
+      messages: count('SELECT COUNT(*) c FROM messages WHERE created_at > ? AND created_at <= ?', start, end),
+      users: count('SELECT COUNT(*) c FROM users WHERE created_at > ? AND created_at <= ?', start, end)
+    });
+  }
+
+  const topServers = db.prepare(`
+    SELECT s.id, s.name, s.icon_url,
+           (SELECT COUNT(*) FROM server_members m WHERE m.server_id = s.id) AS members,
+           (SELECT COUNT(*) FROM messages msg WHERE msg.channel_id IN (SELECT id FROM channels c WHERE c.server_id = s.id)) AS messages
+    FROM servers s ORDER BY messages DESC, members DESC LIMIT 5`).all();
+
+  const recentUsers = db.prepare('SELECT id, username, discriminator, display_name, avatar_url, created_at, status FROM users ORDER BY created_at DESC LIMIT 5').all()
+    .map(u => ({ ...u, tag: `${u.username}#${u.discriminator}`, status: effectiveStatus(u.id, u.status) }));
+
+  const recentAudit = db.prepare(`SELECT a.action, a.target_type, a.target_id, a.detail, a.created_at,
+                                         u.username AS actor_name, u.discriminator AS actor_disc
+                                  FROM admin_audit a LEFT JOIN users u ON u.id = a.actor_id
+                                  ORDER BY a.created_at DESC LIMIT 6`).all();
+
   res.json({
     users: count('SELECT COUNT(*) c FROM users'),
     servers: count('SELECT COUNT(*) c FROM servers'),
     channels: count('SELECT COUNT(*) c FROM channels'),
     messages: count('SELECT COUNT(*) c FROM messages'),
+    dms: count('SELECT COUNT(DISTINCT dm_id) c FROM messages WHERE dm_id IS NOT NULL'),
+    reactions: count('SELECT COUNT(*) c FROM reactions'),
+    attachments: count('SELECT COUNT(*) c FROM messages WHERE attachment_url IS NOT NULL'),
     online: onlineUids.size,
     bans: count('SELECT COUNT(*) c FROM global_bans'),
     muted: count('SELECT COUNT(*) c FROM users WHERE muted = 1'),
     disabled: count('SELECT COUNT(*) c FROM users WHERE disabled = 1'),
     verified: count('SELECT COUNT(*) c FROM users WHERE verified = 1'),
-    new_users_24h: count('SELECT COUNT(*) c FROM users WHERE created_at > ?', now - 86400000),
-    new_users_7d: count('SELECT COUNT(*) c FROM users WHERE created_at > ?', now - 7 * 86400000),
-    messages_24h: count('SELECT COUNT(*) c FROM messages WHERE created_at > ?', now - 86400000),
+    whitelisted: count('SELECT COUNT(*) c FROM admin_whitelist'),
+    notes: count('SELECT COUNT(*) c FROM admin_notes'),
+    locked_servers: count('SELECT COUNT(*) c FROM servers WHERE locked = 1'),
+    featured_servers: count('SELECT COUNT(*) c FROM servers WHERE featured = 1'),
+    new_users_1h: count('SELECT COUNT(*) c FROM users WHERE created_at > ?', now - 3600000),
+    new_users_24h: count('SELECT COUNT(*) c FROM users WHERE created_at > ?', now - DAY),
+    new_users_7d: count('SELECT COUNT(*) c FROM users WHERE created_at > ?', now - 7 * DAY),
+    messages_1h: count('SELECT COUNT(*) c FROM messages WHERE created_at > ?', now - 3600000),
+    messages_24h: count('SELECT COUNT(*) c FROM messages WHERE created_at > ?', now - DAY),
+    messages_7d: count('SELECT COUNT(*) c FROM messages WHERE created_at > ?', now - 7 * DAY),
+    avg_messages_per_user: (() => { const u = count('SELECT COUNT(*) c FROM users'); return u ? Math.round(count('SELECT COUNT(*) c FROM messages') / u) : 0; })(),
     active_announcements: count('SELECT COUNT(*) c FROM global_messages WHERE active = 1'),
     settings: {
       registration_open: getGlobalSetting('registration_open', true),
@@ -2115,8 +2195,22 @@ admin.get('/overview', (req, res) => {
       maintenance_message: getGlobalSetting('maintenance_message', ''),
       motd: getGlobalSetting('motd', '')
     },
+    activity,
+    top_servers: topServers,
+    recent_users: recentUsers,
+    recent_audit: recentAudit,
+    system: {
+      uptime_seconds: Math.floor((Date.now() - bootedAt) / 1000),
+      node: process.version,
+      memory_mb: Math.round(mem.rss / 1048576),
+      heap_mb: Math.round(mem.heapUsed / 1048576),
+      db_mb: +(dbBytes / 1048576).toFixed(2),
+      pid: process.pid,
+      platform: process.platform,
+      version: '1.1.0'
+    },
     uptime_seconds: Math.floor((Date.now() - bootedAt) / 1000),
-    version: '1.0.0'
+    version: '1.1.0'
   });
 });
 
@@ -2142,8 +2236,22 @@ admin.post('/users/:id/action', (req, res) => {
   const { action, value } = req.body || {};
   if (!action) return res.status(400).json({ error: 'Action required' });
   /* Never let an admin lock themselves out of the panel. */
-  if (target.id === req.user.id && ['ban', 'disable', 'mute', 'force_logout'].includes(action)) {
+  if (target.id === req.user.id && ['ban', 'disable', 'mute', 'force_logout', 'kick', 'reset_password'].includes(action)) {
     return res.status(400).json({ error: 'You cannot apply that action to your own account.' });
+  }
+  /* The platform owner is protected: no admin (including the owner's own
+     account) may ban, kick, mute, disable, revoke sessions, reset the
+     password, rename or strip panel access from the owner. */
+  if (isOwner(target)) {
+    const ownerBlocked = ['ban', 'kick', 'disable', 'mute', 'force_logout', 'reset_password',
+      'set_username', 'set_discriminator', 'unwhitelist'];
+    if (ownerBlocked.includes(action)) {
+      return res.status(403).json({ error: 'The platform owner account is protected and cannot be moderated.' });
+    }
+  }
+  /* Whitelist changes are owner-only. */
+  if (['whitelist', 'unwhitelist'].includes(action) && !isOwner(req.user)) {
+    return res.status(403).json({ error: 'Only the platform owner can manage panel access' });
   }
   let detail = '';
   switch (action) {
@@ -2240,6 +2348,89 @@ admin.post('/users/:id/action', (req, res) => {
       detail = 'direct message sent';
       break;
     }
+    /* ---------------- Extended moderation & profile commands ---------------- */
+    case 'kick': {
+      /* Sign the user out everywhere and remove them from every server they
+         do not own. Reversible (they can rejoin); nothing is deleted. */
+      db.prepare('UPDATE users SET token_version=COALESCE(token_version,0)+1 WHERE id=?').run(target.id);
+      const owned = db.prepare('SELECT COUNT(*) c FROM servers WHERE owner_id=?').get(target.id).c;
+      const removed = db.prepare("DELETE FROM server_members WHERE user_id=? AND role!='owner'").run(target.id).changes;
+      createNotification(target.id, 'system', { title: 'You were removed from servers', content: String(value || 'A staff member removed you from your servers.').slice(0, 1000) });
+      detail = `kicked: removed from ${removed} server(s)${owned ? `, owns ${owned}` : ''}`;
+      break;
+    }
+    case 'set_pronouns': {
+      db.prepare('UPDATE users SET pronouns=? WHERE id=?').run(String(value || '').slice(0, 40), target.id);
+      detail = 'pronouns changed';
+      break;
+    }
+    case 'set_custom_status': {
+      db.prepare('UPDATE users SET custom_status=? WHERE id=?').run(String(value || '').slice(0, 128), target.id);
+      detail = 'custom status changed';
+      break;
+    }
+    case 'set_status': {
+      const st = String(value || '').toLowerCase();
+      if (!['online', 'idle', 'dnd', 'invisible'].includes(st)) return res.status(400).json({ error: 'Invalid status' });
+      db.prepare('UPDATE users SET status=? WHERE id=?').run(st, target.id);
+      detail = `status -> ${st}`;
+      break;
+    }
+    case 'set_banner_color': {
+      const c = String(value || '');
+      if (!/^#[0-9a-fA-F]{6}$/.test(c)) return res.status(400).json({ error: 'Invalid colour' });
+      db.prepare('UPDATE users SET banner_color=? WHERE id=?').run(c, target.id);
+      detail = `banner colour -> ${c}`;
+      break;
+    }
+    case 'clear_avatar': {
+      db.prepare('UPDATE users SET avatar=NULL, avatar_url=NULL WHERE id=?').run(target.id);
+      detail = 'avatar cleared';
+      break;
+    }
+    case 'clear_banner': {
+      db.prepare('UPDATE users SET banner=NULL, banner_url=NULL WHERE id=?').run(target.id);
+      detail = 'banner cleared';
+      break;
+    }
+    case 'randomize_discriminator': {
+      let disc = randomDiscriminator();
+      for (let i = 0; i < 25; i++) {
+        const clash = db.prepare('SELECT 1 FROM users WHERE username=? AND discriminator=? AND id!=?').get(target.username, disc, target.id);
+        if (!clash) break;
+        disc = randomDiscriminator();
+      }
+      db.prepare('UPDATE users SET discriminator=? WHERE id=?').run(disc, target.id);
+      detail = `discriminator randomized -> ${disc}`;
+      break;
+    }
+    case 'whitelist': {
+      db.prepare(`INSERT INTO admin_whitelist (user_id, added_by, created_at) VALUES (?,?,?)
+                  ON CONFLICT(user_id) DO NOTHING`).run(target.id, req.user.id, Date.now());
+      loadAdminWhitelist();
+      createNotification(target.id, 'system', { title: 'Admin console access granted', content: 'You can now open the Admin Panel from Settings \u2192 Language.' });
+      detail = 'granted admin console access';
+      break;
+    }
+    case 'unwhitelist': {
+      db.prepare('DELETE FROM admin_whitelist WHERE user_id=?').run(target.id);
+      loadAdminWhitelist();
+      detail = 'revoked admin console access';
+      break;
+    }
+    case 'add_note': {
+      const content = String(value || '').trim();
+      if (!content) return res.status(400).json({ error: 'Note content required' });
+      db.prepare('INSERT INTO admin_notes (id, user_id, author_id, content, created_at) VALUES (?,?,?,?,?)')
+        .run(newId(), target.id, req.user.id, content.slice(0, 2000), Date.now());
+      detail = 'staff note added';
+      break;
+    }
+    case 'clear_notes': {
+      const n = db.prepare('DELETE FROM admin_notes WHERE user_id=?').run(target.id).changes;
+      detail = `cleared ${n} staff note(s)`;
+      break;
+    }
     default:
       return res.status(400).json({ error: 'Unknown action' });
   }
@@ -2316,6 +2507,35 @@ admin.post('/servers/:id/action', (req, res) => {
       io.to(`channel:${ch.id}`).emit('message', messageWithMeta(m, req.user.id));
       detail = 'announcement posted'; break;
     }
+    case 'set_icon_url': {
+      const url = String(value || '').trim();
+      if (url && !/^https?:\/\//i.test(url)) return res.status(400).json({ error: 'Icon URL must start with http(s)://' });
+      db.prepare('UPDATE servers SET icon_url=? WHERE id=?').run(url || null, srv.id);
+      detail = url ? `icon -> ${url.slice(0, 120)}` : 'icon cleared'; break;
+    }
+    case 'set_banner_url': {
+      const url = String(value || '').trim();
+      if (url && !/^https?:\/\//i.test(url)) return res.status(400).json({ error: 'Banner URL must start with http(s)://' });
+      db.prepare('UPDATE servers SET banner_url=? WHERE id=?').run(url || null, srv.id);
+      detail = url ? 'banner updated' : 'banner cleared'; break;
+    }
+    case 'clear_description': {
+      db.prepare("UPDATE servers SET description='' WHERE id=?").run(srv.id);
+      detail = 'description cleared'; break;
+    }
+    case 'create_invite': {
+      const code = newInviteCode();
+      db.prepare('INSERT INTO invites (code, server_id, creator_id, created_at) VALUES (?,?,?,?)')
+        .run(code, srv.id, req.user.id, Date.now());
+      detail = `invite created -> ${code}`;
+      adminAudit(req, 'server.create_invite', 'server', srv.id, code);
+      return res.json({ ok: true, code });
+    }
+    case 'set_slowmode_all': {
+      const secs = Math.max(0, Math.min(21600, parseInt(value, 10) || 0));
+      const n = db.prepare('UPDATE channels SET slow_mode=? WHERE server_id=?').run(secs, srv.id).changes;
+      detail = `slow mode ${secs}s on ${n} channel(s)`; break;
+    }
     default:
       return res.status(400).json({ error: 'Unknown action' });
   }
@@ -2361,6 +2581,114 @@ admin.post('/announcements/:id/action', (req, res) => {
 /* ---- Bans list ---- */
 admin.get('/bans', (req, res) => {
   res.json({ bans: db.prepare('SELECT * FROM global_bans ORDER BY created_at DESC').all() });
+});
+
+/* ---- Admin console whitelist (owner only) ---- */
+admin.get('/whitelist', (req, res) => {
+  const rows = db.prepare(`SELECT w.user_id, w.created_at, u.username, u.discriminator, u.display_name, u.avatar_url,
+                                  a.username AS added_by_name
+                           FROM admin_whitelist w
+                           LEFT JOIN users u ON u.id = w.user_id
+                           LEFT JOIN users a ON a.id = w.added_by
+                           ORDER BY w.created_at ASC`).all();
+  res.json({
+    whitelist: rows.map(r => ({
+      user_id: r.user_id,
+      tag: r.username ? `${r.username}#${r.discriminator}` : r.user_id,
+      display_name: r.display_name || r.username || r.user_id,
+      avatar_url: r.avatar_url || null,
+      added_by: r.added_by_name || 'owner',
+      created_at: r.created_at
+    })),
+    owner: { id: req.user.id, tag: `${req.user.username}#${req.user.discriminator}` }
+  });
+});
+
+admin.post('/whitelist', ownerOnly, (req, res) => {
+  const uid = String((req.body || {}).user_id || '').trim();
+  const target = db.prepare('SELECT * FROM users WHERE id = ? OR LOWER(username) = LOWER(?)').get(uid, uid);
+  if (!target) return res.status(404).json({ error: 'User not found' });
+  if (isOwner(target)) return res.status(400).json({ error: 'The owner already has full access' });
+  db.prepare(`INSERT INTO admin_whitelist (user_id, added_by, created_at) VALUES (?,?,?)
+              ON CONFLICT(user_id) DO NOTHING`).run(target.id, req.user.id, Date.now());
+  loadAdminWhitelist();
+  adminAudit(req, 'whitelist.add', 'user', target.id, `${target.username}#${target.discriminator}`);
+  createNotification(target.id, 'system', { title: 'Admin console access granted', content: 'You can now open the Admin Panel from Settings \u2192 Language.' });
+  res.json({ ok: true, user_id: target.id });
+});
+
+admin.delete('/whitelist/:id', ownerOnly, (req, res) => {
+  const target = db.prepare('SELECT * FROM users WHERE id = ?').get(req.params.id);
+  if (!target) return res.status(404).json({ error: 'User not found' });
+  if (isOwner(target)) return res.status(400).json({ error: 'The owner cannot be removed' });
+  db.prepare('DELETE FROM admin_whitelist WHERE user_id=?').run(target.id);
+  loadAdminWhitelist();
+  adminAudit(req, 'whitelist.remove', 'user', target.id, `${target.username}#${target.discriminator}`);
+  res.json({ ok: true });
+});
+
+/* ---- Private staff notes for a user ---- */
+admin.get('/users/:id/notes', (req, res) => {
+  const rows = db.prepare(`SELECT n.*, u.username AS author_name, u.discriminator AS author_disc
+                           FROM admin_notes n LEFT JOIN users u ON u.id = n.author_id
+                           WHERE n.user_id = ? ORDER BY n.created_at DESC LIMIT 100`).all(req.params.id);
+  res.json({ notes: rows });
+});
+
+/* ---- Bulk / platform-wide operations ---- */
+admin.post('/bulk', ownerOnly, (req, res) => {
+  const { action } = req.body || {};
+  let detail = '';
+  switch (action) {
+    case 'clear_bans': {
+      const n = db.prepare('DELETE FROM global_bans').run().changes;
+      detail = `cleared ${n} global ban(s)`; break;
+    }
+    case 'force_logout_all': {
+      /* Revoke every session except the owner's. */
+      const owners = [...OWNER_USERNAMES];
+      const rows = db.prepare('SELECT id, username FROM users').all().filter(u => !owners.includes(String(u.username).toLowerCase()));
+      const stmt = db.prepare('UPDATE users SET token_version=COALESCE(token_version,0)+1 WHERE id=?');
+      for (const u of rows) stmt.run(u.id);
+      detail = `revoked sessions for ${rows.length} user(s)`; break;
+    }
+    case 'deactivate_announcements': {
+      const n = db.prepare('UPDATE global_messages SET active=0 WHERE active=1').run().changes;
+      detail = `deactivated ${n} announcement(s)`; break;
+    }
+    case 'verify_all': {
+      const n = db.prepare('UPDATE users SET verified=1 WHERE verified=0').run().changes;
+      detail = `verified ${n} user(s)`; break;
+    }
+    case 'unmute_all': {
+      const n = db.prepare('UPDATE users SET muted=0 WHERE muted=1').run().changes;
+      detail = `unmuted ${n} user(s)`; break;
+    }
+    case 'unlock_all_servers': {
+      const n = db.prepare('UPDATE servers SET locked=0 WHERE locked=1').run().changes;
+      detail = `unlocked ${n} server(s)`; break;
+    }
+    default:
+      return res.status(400).json({ error: 'Unknown bulk action' });
+  }
+  adminAudit(req, `bulk.${action}`, 'platform', '', detail);
+  res.json({ ok: true, detail });
+});
+
+/* ---- Audit log CSV export ---- */
+admin.get('/audit/export', (req, res) => {
+  const rows = db.prepare(`SELECT a.created_at, u.username AS actor, u.discriminator AS disc, a.action,
+                                  a.target_type, a.target_id, a.detail
+                           FROM admin_audit a LEFT JOIN users u ON u.id = a.actor_id
+                           ORDER BY a.created_at DESC LIMIT 5000`).all();
+  const esc = v => `"${String(v == null ? '' : v).replace(/"/g, '""')}"`;
+  const csv = ['timestamp,admin,action,target_type,target_id,detail']
+    .concat(rows.map(r => [new Date(r.created_at).toISOString(), r.actor ? `${r.actor}#${r.disc}` : 'system', r.action, r.target_type, r.target_id, r.detail].map(esc).join(',')))
+    .join('\n');
+  adminAudit(req, 'audit.export', 'platform', '', `${rows.length} rows`);
+  res.set('Content-Type', 'text/csv; charset=utf-8');
+  res.set('Content-Disposition', `attachment; filename="crossroads-audit-${Date.now()}.csv"`);
+  res.send(csv);
 });
 
 /* ---- Audit log ---- */

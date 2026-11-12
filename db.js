@@ -368,6 +368,28 @@ function migrate() {
   } catch (e) {}
   try { db.exec('CREATE INDEX IF NOT EXISTS idx_admin_audit_created ON admin_audit(created_at)'); } catch (e) {}
 
+  // Owner-managed whitelist: accounts granted access to the admin console
+  // without being the platform owner. Purely additive.
+  try {
+    db.exec(`CREATE TABLE IF NOT EXISTS admin_whitelist (
+      user_id TEXT PRIMARY KEY,
+      added_by TEXT,
+      created_at INTEGER NOT NULL
+    )`);
+  } catch (e) {}
+
+  // Private staff notes attached to an account (never shown to the user).
+  try {
+    db.exec(`CREATE TABLE IF NOT EXISTS admin_notes (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      author_id TEXT,
+      content TEXT DEFAULT '',
+      created_at INTEGER NOT NULL
+    )`);
+  } catch (e) {}
+  try { db.exec('CREATE INDEX IF NOT EXISTS idx_admin_notes_user ON admin_notes(user_id)'); } catch (e) {}
+
   // Platform-wide announcements shown in-app to everyone.
   try {
     db.exec(`CREATE TABLE IF NOT EXISTS global_messages (

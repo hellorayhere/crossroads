@@ -5174,7 +5174,7 @@ function openSettings(section) {
     if (item.cat) return `<div class="sn-cat">${t(item.cat)}</div>`;
     return `<div class="sn-item" data-sec="${item.id}">${t(item.label)} <span class="chev">${icon('chevron-right')}</span></div>`;
   }).join('') + (isPlatformAdmin()
-    ? `<div class="sn-item sn-admin" data-sec="admin">${icon('shield')} Admin Panel <span class="chev">${icon('chevron-right')}</span></div>`
+    ? `<div class="sn-item sn-admin" data-sec="admin">Admin Panel <span class="adm-staff-pill">STAFF</span> <span class="chev">${icon('chevron-right')}</span></div>`
     : '');
 
   openModal(`
@@ -5605,7 +5605,7 @@ function settingsPanelHTML(section) {
         <p style="color:var(--text-muted);font-size:13px;line-height:1.5">Additional languages are being prepared and will appear here as they become available.</p>
         ${isPlatformAdmin() ? `
         <div class="admin-entry">
-          <div class="admin-entry-ico">${icon('shield')}</div>
+          <div class="admin-entry-ico">CR</div>
           <div class="admin-entry-txt">
             <div class="admin-entry-title">Admin Panel</div>
             <div class="admin-entry-sub">Platform-wide moderation, user management, announcements and system controls.</div>
@@ -6230,6 +6230,7 @@ const ADMIN_TABS = [
   { id: 'users', label: 'Users', icon: 'users' },
   { id: 'servers', label: 'Servers', icon: 'server' },
   { id: 'announcements', label: 'Announcements', icon: 'megaphone' },
+  { id: 'staff', label: 'Staff Access', icon: 'key', ownerOnly: true },
   { id: 'system', label: 'System', icon: 'sliders' },
   { id: 'audit', label: 'Audit Log', icon: 'note' }
 ];
@@ -6237,25 +6238,28 @@ const ADMIN_TABS = [
 function openAdminPanel(tab) {
   if (!isPlatformAdmin()) { toast('Administrator access required', 'error'); return; }
   adminTab = tab || 'dashboard';
+  const tabs = ADMIN_TABS.filter(t => !t.ownerOnly || isPlatformOwner());
+  if (!tabs.some(t => t.id === adminTab)) adminTab = 'dashboard';
   openModal(`
     <div class="adm-shell">
       <aside class="adm-side">
         <div class="adm-brand">
-          <div class="adm-brand-ico">${icon('shield')}</div>
+          <div class="adm-brand-ico">CR</div>
           <div>
             <div class="adm-brand-title">Crossroads</div>
             <div class="adm-brand-sub">Admin Console</div>
           </div>
         </div>
+        <div class="adm-nav-label">Manage</div>
         <nav class="adm-nav">
-          ${ADMIN_TABS.map(t => `<button class="adm-nav-item${t.id === adminTab ? ' active' : ''}" data-adm-tab="${t.id}">${icon(t.icon)}<span>${t.label}</span></button>`).join('')}
+          ${tabs.map(t => `<button class="adm-nav-item${t.id === adminTab ? ' active' : ''}" data-adm-tab="${t.id}">${icon(t.icon)}<span>${t.label}</span></button>`).join('')}
         </nav>
         <div class="adm-side-foot">
           <div class="adm-me">
-            <div class="adm-me-name">${escapeHtml(me.display_name || me.username)}</div>
+            <div class="adm-me-name">${escapeHtml(me.display_name || me.username)}${isPlatformOwner() ? ' <span class="adm-badge admin">OWNER</span>' : ' <span class="adm-badge blue">STAFF</span>'}</div>
             <div class="adm-me-tag">${escapeHtml(fullTag(me))}</div>
           </div>
-          <button class="adm-close" id="adm-close">${icon('xmark')} Close</button>
+          <button class="adm-close" id="adm-close">${icon('xmark')} Close console</button>
         </div>
       </aside>
       <section class="adm-main">
@@ -6264,7 +6268,10 @@ function openAdminPanel(tab) {
             <h3 id="adm-title">Dashboard</h3>
             <p id="adm-sub">Platform overview and quick actions</p>
           </div>
-          <div class="adm-head-actions"><button class="adm-refresh" id="adm-refresh">${icon('refresh')} Refresh</button></div>
+          <div class="adm-head-actions">
+            <span class="adm-live"><span class="adm-live-dot"></span>Live</span>
+            <button class="adm-refresh" id="adm-refresh">${icon('refresh')} Refresh</button>
+          </div>
         </header>
         <div class="adm-body" id="adm-body"></div>
       </section>
@@ -6285,10 +6292,11 @@ async function renderAdminTab(tab) {
   if (!body) return;
   title.textContent = meta.label;
   sub.textContent = {
-    dashboard: 'Platform overview and quick actions',
+    dashboard: 'Platform overview, activity and quick actions',
     users: 'Search, inspect and moderate every account',
     servers: 'Manage every server on the platform',
     announcements: 'Send global messages to all users',
+    staff: 'Grant or revoke admin console access',
     system: 'Registration, maintenance and platform settings',
     audit: 'Every administrator action, newest first'
   }[tab] || '';
@@ -6298,6 +6306,7 @@ async function renderAdminTab(tab) {
     if (tab === 'users') return await admRenderUsers(body);
     if (tab === 'servers') return await admRenderServers(body);
     if (tab === 'announcements') return await admRenderAnnouncements(body);
+    if (tab === 'staff') return await admRenderStaff(body);
     if (tab === 'system') return await admRenderSystem(body);
     if (tab === 'audit') return await admRenderAudit(body);
   } catch (e) {
@@ -6309,45 +6318,185 @@ function admStat(label, value, tone) {
   return `<div class="adm-stat${tone ? ' ' + tone : ''}"><div class="adm-stat-val">${value}</div><div class="adm-stat-label">${escapeHtml(label)}</div></div>`;
 }
 
+/* A richer stat tile used by the redesigned dashboard. */
+function admTile(iconName, label, value, sub, tone) {
+  return `<div class="adm-tile${tone ? ' ' + tone : ''}">
+    <div class="adm-tile-top"><span class="adm-tile-ico">${icon(iconName)}</span><span class="adm-tile-label">${escapeHtml(label)}</span></div>
+    <div class="adm-tile-val">${value}</div>
+    ${sub ? `<div class="adm-tile-sub">${sub}</div>` : ''}
+  </div>`;
+}
+
+function admAgo(ts) {
+  if (!ts) return '—';
+  const s = Math.max(0, Math.floor((Date.now() - ts) / 1000));
+  if (s < 60) return s + 's ago';
+  if (s < 3600) return Math.floor(s / 60) + 'm ago';
+  if (s < 86400) return Math.floor(s / 3600) + 'h ago';
+  return Math.floor(s / 86400) + 'd ago';
+}
+
+function admDuration(sec) {
+  const d = Math.floor(sec / 86400), h = Math.floor((sec % 86400) / 3600), m = Math.floor((sec % 3600) / 60);
+  if (d) return `${d}d ${h}h`;
+  if (h) return `${h}h ${m}m`;
+  return `${m}m`;
+}
+
 async function admRenderDashboard(body) {
   const o = await api('/api/admin/overview');
+  const s = o.system || {};
+  const maxMsg = Math.max(1, ...o.activity.map(a => a.messages));
+  const total7 = o.activity.reduce((n, a) => n + a.messages, 0);
+  const hour = new Date().getHours();
+  const greet = hour < 5 ? 'Working late' : hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening';
+  const pct = (a, b) => b ? Math.round((a / b) * 100) : 0;
+
   body.innerHTML = `
-    <div class="adm-stats">
-      ${admStat('Total users', o.users)}
-      ${admStat('Online now', o.online, 'green')}
-      ${admStat('Servers', o.servers)}
-      ${admStat('Messages', o.messages)}
-      ${admStat('Global bans', o.bans, o.bans ? 'red' : '')}
-      ${admStat('Muted', o.muted)}
-      ${admStat('Disabled', o.disabled)}
-      ${admStat('New (24h)', o.new_users_24h, 'blue')}
+  <div class="adm-dash">
+
+    <div class="adm-hero">
+      <div class="adm-hero-main">
+        <div class="adm-hero-eyebrow">Platform overview</div>
+        <div class="adm-hero-title">${greet}, ${escapeHtml((me.display_name || me.username).split(' ')[0])}</div>
+        <div class="adm-hero-sub">${o.users} accounts · ${o.servers} servers · ${o.messages.toLocaleString()} messages · ${o.online} online right now</div>
+      </div>
+      <div class="adm-hero-badges">
+        <span class="adm-pill ${o.settings.registration_open ? 'ok' : 'bad'}"><span class="adm-live-dot"></span>Registration ${o.settings.registration_open ? 'open' : 'closed'}</span>
+        <span class="adm-pill ${o.settings.maintenance_mode ? 'bad' : 'ok'}">Maintenance ${o.settings.maintenance_mode ? 'on' : 'off'}</span>
+        <span class="adm-pill">v${escapeHtml(s.version || '1.1.0')}</span>
+        <span class="adm-pill">Uptime ${admDuration(o.uptime_seconds)}</span>
+      </div>
     </div>
-    <div class="adm-cols">
+
+    <div class="adm-tiles">
+      ${admTile('users', 'Total users', o.users.toLocaleString(), `+${o.new_users_24h} today · +${o.new_users_7d} this week`)}
+      ${admTile('signal', 'Online now', o.online.toLocaleString(), `${pct(o.online, o.users)}% of all accounts`, 'green')}
+      ${admTile('server', 'Servers', o.servers.toLocaleString(), `${o.channels} channels · ${o.locked_servers} locked`)}
+      ${admTile('comment', 'Messages', o.messages.toLocaleString(), `${o.messages_24h} in 24h · ${o.messages_1h} in 1h`, 'blue')}
+      ${admTile('ban', 'Global bans', o.bans.toLocaleString(), `${o.muted} muted · ${o.disabled} disabled`, o.bans ? 'red' : '')}
+      ${admTile('user-check', 'Verified', o.verified.toLocaleString(), `${o.whitelisted} whitelisted staff`, 'green')}
+      ${admTile('key', 'Staff access', o.whitelisted.toLocaleString(), `${o.notes} staff note${o.notes === 1 ? '' : 's'}`, 'blue')}
+      ${admTile('megaphone', 'Announcements', o.active_announcements.toLocaleString(), `${o.featured_servers} featured server${o.featured_servers === 1 ? '' : 's'}`, 'amber')}
+    </div>
+
+    <div class="adm-grid-2">
       <div class="adm-card">
-        <div class="adm-card-title">Quick actions</div>
-        <div class="adm-quick">
-          <button class="adm-quick-btn" data-quick="broadcast">${icon('megaphone')} Send global message</button>
-          <button class="adm-quick-btn" data-quick="users">${icon('users')} Manage users</button>
-          <button class="adm-quick-btn" data-quick="registration">${icon('lock')} ${o.settings.registration_open ? 'Close' : 'Open'} registration</button>
-          <button class="adm-quick-btn" data-quick="maintenance">${icon('sliders')} ${o.settings.maintenance_mode ? 'Disable' : 'Enable'} maintenance</button>
-          <button class="adm-quick-btn" data-quick="export">${icon('download')} Export platform data</button>
+        <div class="adm-card-head">
+          <div class="adm-card-title">Message activity</div>
+          <div class="adm-card-meta">${total7.toLocaleString()} messages · last 7 days</div>
+        </div>
+        <div class="adm-chart">
+          ${o.activity.map(a => `
+            <div class="adm-bar-col" title="${a.day}: ${a.messages} messages, ${a.users} new users">
+              <div class="adm-bar-val">${a.messages || ''}</div>
+              <div class="adm-bar-track"><div class="adm-bar" style="height:${Math.max(3, Math.round((a.messages / maxMsg) * 100))}%"></div></div>
+              <div class="adm-bar-day">${new Date(a.day + 'T00:00:00').toLocaleDateString(undefined, { weekday: 'short' })}</div>
+            </div>`).join('')}
+        </div>
+        <div class="adm-chart-foot">
+          <span><b>${o.messages_24h}</b> today</span>
+          <span><b>${o.avg_messages_per_user}</b> avg / user</span>
+          <span><b>${o.attachments}</b> attachments</span>
+          <span><b>${o.reactions}</b> reactions</span>
+          <span><b>${o.dms}</b> DM threads</span>
         </div>
       </div>
+
       <div class="adm-card">
-        <div class="adm-card-title">Platform health</div>
-        <div class="adm-kv"><span>Uptime</span><b>${Math.floor(o.uptime_seconds / 3600)}h ${Math.floor((o.uptime_seconds % 3600) / 60)}m</b></div>
-        <div class="adm-kv"><span>Messages (24h)</span><b>${o.messages_24h}</b></div>
-        <div class="adm-kv"><span>New users (7d)</span><b>${o.new_users_7d}</b></div>
-        <div class="adm-kv"><span>Verified</span><b>${o.verified}</b></div>
-        <div class="adm-kv"><span>Active announcements</span><b>${o.active_announcements}</b></div>
+        <div class="adm-card-head"><div class="adm-card-title">Platform health</div><div class="adm-card-meta">live</div></div>
         <div class="adm-kv"><span>Registration</span><b class="${o.settings.registration_open ? 'ok' : 'bad'}">${o.settings.registration_open ? 'Open' : 'Closed'}</b></div>
-        <div class="adm-kv"><span>Maintenance</span><b class="${o.settings.maintenance_mode ? 'bad' : 'ok'}">${o.settings.maintenance_mode ? 'On' : 'Off'}</b></div>
+        <div class="adm-kv"><span>Maintenance mode</span><b class="${o.settings.maintenance_mode ? 'bad' : 'ok'}">${o.settings.maintenance_mode ? 'On' : 'Off'}</b></div>
+        <div class="adm-kv"><span>New users (24h / 7d)</span><b>${o.new_users_24h} / ${o.new_users_7d}</b></div>
+        <div class="adm-kv"><span>Messages (24h / 7d)</span><b>${o.messages_24h} / ${o.messages_7d}</b></div>
+        <div class="adm-kv"><span>Active announcements</span><b>${o.active_announcements}</b></div>
+        <div class="adm-kv"><span>Locked servers</span><b>${o.locked_servers}</b></div>
+        <div class="adm-kv"><span>Node runtime</span><b>${escapeHtml(s.node || '—')}</b></div>
+        <div class="adm-kv"><span>Memory (RSS / heap)</span><b>${s.memory_mb} MB / ${s.heap_mb} MB</b></div>
+        <div class="adm-kv"><span>Database size</span><b>${s.db_mb} MB</b></div>
+        <div class="adm-kv"><span>Process</span><b>PID ${s.pid} · ${escapeHtml(s.platform || '')}</b></div>
       </div>
-    </div>`;
+    </div>
+
+    <div class="adm-grid-3">
+      <div class="adm-card">
+        <div class="adm-card-head"><div class="adm-card-title">Quick actions</div></div>
+        <div class="adm-quick-grid">
+          <button class="adm-quick-btn" data-quick="broadcast">${icon('megaphone')}<span>Global message</span></button>
+          <button class="adm-quick-btn" data-quick="users">${icon('users')}<span>Manage users</span></button>
+          <button class="adm-quick-btn" data-quick="servers">${icon('server')}<span>Manage servers</span></button>
+          <button class="adm-quick-btn" data-quick="registration">${icon('lock')}<span>${o.settings.registration_open ? 'Close' : 'Open'} registration</span></button>
+          <button class="adm-quick-btn" data-quick="maintenance">${icon('sliders')}<span>${o.settings.maintenance_mode ? 'Disable' : 'Enable'} maintenance</span></button>
+          <button class="adm-quick-btn" data-quick="export">${icon('download')}<span>Export data</span></button>
+          <button class="adm-quick-btn" data-quick="audit">${icon('note')}<span>Audit log</span></button>
+          ${isPlatformOwner() ? `<button class="adm-quick-btn" data-quick="staff">${icon('key')}<span>Staff access</span></button>` : ''}
+        </div>
+      </div>
+
+      <div class="adm-card">
+        <div class="adm-card-head"><div class="adm-card-title">Top servers</div><div class="adm-card-meta">by messages</div></div>
+        <div class="adm-list">
+          ${o.top_servers.length ? o.top_servers.map((sv, i) => `
+            <div class="adm-list-row">
+              <span class="adm-rank">${i + 1}</span>
+              <div class="adm-srv-ico">${sv.icon_url ? `<img src="${escapeHtml(sv.icon_url)}" alt="">` : escapeHtml((sv.name || '?')[0].toUpperCase())}</div>
+              <div class="adm-list-main"><div class="adm-list-title">${escapeHtml(sv.name)}</div><div class="adm-list-sub">${sv.members} members</div></div>
+              <div class="adm-list-val">${sv.messages}</div>
+            </div>`).join('') : '<div class="adm-empty-sm">No servers yet.</div>'}
+        </div>
+      </div>
+
+      <div class="adm-card">
+        <div class="adm-card-head"><div class="adm-card-title">Recent signups</div><div class="adm-card-meta">newest first</div></div>
+        <div class="adm-list">
+          ${o.recent_users.length ? o.recent_users.map(u => `
+            <div class="adm-list-row">
+              ${avatarHTML({ id: u.id, username: u.username, avatar_url: u.avatar_url, discriminator: u.discriminator, display_name: u.display_name }, 28, u.status)}
+              <div class="adm-list-main"><div class="adm-list-title">${escapeHtml(u.display_name || u.username)}</div><div class="adm-list-sub">${escapeHtml(u.tag)}</div></div>
+              <div class="adm-list-val sm">${admAgo(u.created_at)}</div>
+            </div>`).join('') : '<div class="adm-empty-sm">No users yet.</div>'}
+        </div>
+      </div>
+    </div>
+
+    <div class="adm-grid-2">
+      <div class="adm-card">
+        <div class="adm-card-head"><div class="adm-card-title">Recent admin activity</div><button class="adm-link" data-quick="audit">View all</button></div>
+        <div class="adm-timeline">
+          ${o.recent_audit.length ? o.recent_audit.map(a => `
+            <div class="adm-tl-row">
+              <span class="adm-tl-dot"></span>
+              <div class="adm-tl-main">
+                <div class="adm-tl-title"><b>${escapeHtml(a.actor_name ? a.actor_name + '#' + a.actor_disc : 'system')}</b> · ${escapeHtml(a.action)}</div>
+                <div class="adm-tl-sub">${escapeHtml(a.detail || (a.target_type + ' ' + a.target_id))}</div>
+              </div>
+              <div class="adm-tl-time">${admAgo(a.created_at)}</div>
+            </div>`).join('') : '<div class="adm-empty-sm">No admin actions recorded yet.</div>'}
+        </div>
+      </div>
+
+      <div class="adm-card">
+        <div class="adm-card-head"><div class="adm-card-title">Platform snapshot</div></div>
+        <div class="adm-snap">
+          <div><b>${o.users}</b><span>Accounts</span></div>
+          <div><b>${o.servers}</b><span>Servers</span></div>
+          <div><b>${o.channels}</b><span>Channels</span></div>
+          <div><b>${o.messages.toLocaleString()}</b><span>Messages</span></div>
+          <div><b>${o.reactions}</b><span>Reactions</span></div>
+          <div><b>${o.attachments}</b><span>Files</span></div>
+        </div>
+        <div class="adm-note">${icon('circle-info')} All moderation actions are reversible and recorded in the audit log. No user content is deleted by this console.</div>
+      </div>
+    </div>
+  </div>`;
+
   body.querySelectorAll('[data-quick]').forEach(b => b.addEventListener('click', async () => {
     const q = b.dataset.quick;
     if (q === 'broadcast') return admAnnouncementDialog();
     if (q === 'users') return renderAdminTab('users');
+    if (q === 'servers') return renderAdminTab('servers');
+    if (q === 'staff') return renderAdminTab('staff');
+    if (q === 'audit') return renderAdminTab('audit');
     if (q === 'registration') {
       await api('/api/admin/settings', { method: 'PATCH', body: JSON.stringify({ registration_open: !o.settings.registration_open }) });
       toast('Registration ' + (!o.settings.registration_open ? 'opened' : 'closed'), 'success');
@@ -6361,7 +6510,6 @@ async function admRenderDashboard(body) {
     if (q === 'export') return admExport();
   }));
 }
-
 async function admRenderUsers(body) {
   const q = sessionStorage.getItem('adm-user-q') || '';
   const data = await api('/api/admin/users?limit=300&q=' + encodeURIComponent(q));
@@ -6399,6 +6547,10 @@ async function admRenderUsers(body) {
 }
 
 async function openAdminUser(u) {
+  let notes = [];
+  try { notes = (await api('/api/admin/users/' + u.id + '/notes')).notes; } catch (e) {}
+  const ownerBlocked = u.platform_owner;
+  const disabledAttr = ownerBlocked ? 'disabled title="The owner account is protected"' : '';
   openModal(`
     <div class="adm-user-modal">
       <div class="adm-user-head">
@@ -6406,54 +6558,107 @@ async function openAdminUser(u) {
         <div>
           <h3>${escapeHtml(u.display_name || u.username)} ${u.verified ? '<span class="adm-badge verified">✓</span>' : ''}</h3>
           <div class="adm-user-tag">${escapeHtml(u.tag)} · ${escapeHtml(u.id)}</div>
-          <div class="adm-flags">${u.banned ? '<span class="adm-badge red">BANNED</span>' : ''}${u.muted ? '<span class="adm-badge amber">MUTED</span>' : ''}${u.disabled ? '<span class="adm-badge red">DISABLED</span>' : ''}${u.platform_admin ? '<span class="adm-badge admin">PLATFORM ADMIN</span>' : ''}</div>
+          <div class="adm-flags">
+            ${u.platform_owner ? '<span class="adm-badge admin">OWNER</span>' : ''}
+            ${u.platform_admin && !u.platform_owner ? '<span class="adm-badge admin">STAFF</span>' : ''}
+            ${u.whitelisted ? '<span class="adm-badge blue">WHITELISTED</span>' : ''}
+            ${u.banned ? '<span class="adm-badge red">BANNED</span>' : ''}
+            ${u.muted ? '<span class="adm-badge amber">MUTED</span>' : ''}
+            ${u.disabled ? '<span class="adm-badge red">DISABLED</span>' : ''}
+          </div>
         </div>
       </div>
+      ${ownerBlocked ? `<div class="adm-protect">${icon('lock')} This is the platform owner. Bans, kicks, mutes, disables, password resets and renames are blocked on this account.</div>` : ''}
       <div class="adm-user-stats">
         <div><b>${u.servers}</b><span>Servers</span></div>
         <div><b>${u.owned_servers}</b><span>Owned</span></div>
         <div><b>${u.messages}</b><span>Messages</span></div>
         <div><b>${u.created_at ? new Date(u.created_at).toLocaleDateString() : '—'}</b><span>Joined</span></div>
       </div>
+      <div class="adm-user-meta">
+        <div><span>Pronouns</span><b>${escapeHtml(u.pronouns || '—')}</b></div>
+        <div><span>Status</span><b>${escapeHtml(u.custom_status || u.status || '—')}</b></div>
+        <div><span>Last seen</span><b>${u.last_seen_at ? admAgo(u.last_seen_at) : '—'}</b></div>
+        <div><span>Staff notes</span><b>${u.note_count || 0}</b></div>
+      </div>
+
       <div class="adm-section-title">Account</div>
       <div class="adm-action-grid">
         <button class="adm-action" data-ua="set_username">${icon('pencil')} Change username</button>
         <button class="adm-action" data-ua="set_display_name">${icon('id-badge')} Change display name</button>
         <button class="adm-action" data-ua="set_discriminator">${icon('hash')} Change discriminator</button>
+        <button class="adm-action" data-ua="randomize_discriminator">${icon('refresh')} Randomize tag</button>
+        <button class="adm-action" data-ua="set_pronouns">${icon('users')} Set pronouns</button>
+        <button class="adm-action" data-ua="set_custom_status">${icon('comment')} Set custom status</button>
+        <button class="adm-action" data-ua="set_status">${icon('signal')} Set presence</button>
+        <button class="adm-action" data-ua="set_bio">${icon('note')} Edit bio</button>
+        <button class="adm-action" data-ua="clear_bio">${icon('trash')} Clear bio</button>
+        <button class="adm-action" data-ua="set_accent">${icon('palette')} Set accent colour</button>
+        <button class="adm-action" data-ua="set_banner_color">${icon('image')} Set banner colour</button>
+        <button class="adm-action" data-ua="clear_avatar">${icon('user-minus')} Clear avatar</button>
+        <button class="adm-action" data-ua="clear_banner">${icon('image')} Clear banner</button>
         <button class="adm-action" data-ua="reset_password">${icon('key')} Reset password</button>
         <button class="adm-action" data-ua="force_logout">${icon('log-out')} Force logout</button>
-        <button class="adm-action" data-ua="set_bio">${icon('note')} Edit bio</button>
       </div>
+
       <div class="adm-section-title">Moderation</div>
       <div class="adm-action-grid">
         <button class="adm-action ${u.verified ? 'on' : ''}" data-ua="${u.verified ? 'unverify' : 'verify'}">${icon('user-check')} ${u.verified ? 'Remove verification' : 'Verify user'}</button>
-        <button class="adm-action ${u.muted ? 'on' : ''}" data-ua="${u.muted ? 'unmute' : 'mute'}">${icon('mic-off')} ${u.muted ? 'Unmute' : 'Mute'}</button>
-        <button class="adm-action ${u.disabled ? 'on' : ''}" data-ua="${u.disabled ? 'enable' : 'disable'}">${icon('lock')} ${u.disabled ? 'Enable account' : 'Disable account'}</button>
-        <button class="adm-action danger" data-ua="${u.banned ? 'unban' : 'ban'}">${icon('ban')} ${u.banned ? 'Unban user' : 'Ban user'}</button>
+        <button class="adm-action ${u.muted ? 'on' : ''}" data-ua="${u.muted ? 'unmute' : 'mute'}" ${disabledAttr}>${icon('mic-off')} ${u.muted ? 'Unmute' : 'Mute'}</button>
+        <button class="adm-action ${u.disabled ? 'on' : ''}" data-ua="${u.disabled ? 'enable' : 'disable'}" ${disabledAttr}>${icon('lock')} ${u.disabled ? 'Enable account' : 'Disable account'}</button>
+        <button class="adm-action" data-ua="kick" ${disabledAttr}>${icon('log-out')} Kick from servers</button>
+        <button class="adm-action danger" data-ua="${u.banned ? 'unban' : 'ban'}" ${disabledAttr}>${icon('ban')} ${u.banned ? 'Unban user' : 'Ban user'}</button>
         <button class="adm-action" data-ua="warn">${icon('circle-exclamation')} Send warning</button>
         <button class="adm-action" data-ua="message">${icon('comment')} Direct message</button>
       </div>
+
+      <div class="adm-section-title">Staff access</div>
+      <div class="adm-action-grid">
+        ${u.platform_owner
+          ? `<div class="adm-note" style="grid-column:1/-1">${icon('crown')} The owner always has full access.</div>`
+          : (isPlatformOwner()
+            ? `<button class="adm-action ${u.whitelisted ? 'on' : ''}" data-ua="${u.whitelisted ? 'unwhitelist' : 'whitelist'}">${icon('key')} ${u.whitelisted ? 'Revoke panel access' : 'Whitelist for panel'}</button>`
+            : `<div class="adm-note" style="grid-column:1/-1">${icon('lock')} Only the owner can manage staff access.</div>`)}
+        <button class="adm-action" data-ua="add_note">${icon('note')} Add staff note</button>
+        <button class="adm-action" data-ua="clear_notes">${icon('trash')} Clear staff notes</button>
+      </div>
+
+      <div class="adm-section-title">Staff notes</div>
+      <div class="adm-notes">
+        ${notes.length ? notes.map(n => `
+          <div class="adm-note-row">
+            <div class="adm-note-head"><b>${escapeHtml(n.author_name ? n.author_name + '#' + n.author_disc : 'staff')}</b> · ${admAgo(n.created_at)}</div>
+            <div class="adm-note-body">${escapeHtml(n.content)}</div>
+          </div>`).join('') : '<div class="adm-empty-sm">No staff notes yet.</div>'}
+      </div>
+
       <div class="modal-actions"><button class="btn secondary" id="adm-user-back">Back to users</button></div>
     </div>`, { modalClass: 'adm-user-modal-wrap' });
   $('adm-user-back').addEventListener('click', () => openAdminPanel('users'));
   document.querySelectorAll('[data-ua]').forEach(b => b.addEventListener('click', () => admUserAction(u, b.dataset.ua)));
 }
-
 async function admUserAction(u, action) {
-  const needsValue = ['set_username', 'set_display_name', 'set_discriminator', 'set_bio', 'reset_password', 'warn', 'message', 'ban'].includes(action);
+  const needsValue = ['set_username', 'set_display_name', 'set_discriminator', 'set_bio', 'set_pronouns',
+    'set_custom_status', 'set_banner_color', 'set_accent', 'add_note', 'reset_password', 'warn', 'message', 'ban', 'kick'].includes(action);
   const labels = {
     set_username: ['Change username', 'New username (no length limit)', u.username],
     set_display_name: ['Change display name', 'New display name', u.display_name || u.username],
     set_discriminator: ['Change discriminator', 'New discriminator (digits)', u.discriminator],
     set_bio: ['Edit bio', 'New bio (Markdown supported)', u.bio || ''],
+    set_pronouns: ['Set pronouns', 'Pronouns (e.g. they/them)', u.pronouns || ''],
+    set_custom_status: ['Set custom status', 'Custom status text', u.custom_status || ''],
+    set_banner_color: ['Set banner colour', 'Hex colour (#5865F2)', u.banner_color || '#5865F2'],
+    set_accent: ['Set accent colour', 'Hex colour (#5865F2)', u.accent_color || '#5865F2'],
+    add_note: ['Add staff note', 'Private note (only staff can see this)', ''],
     reset_password: ['Reset password', 'New password (min 6 characters)', ''],
     warn: ['Send warning', 'Warning message', ''],
     message: ['Direct message', 'Message to send', ''],
-    ban: ['Ban user', 'Reason for the ban', '']
+    ban: ['Ban user', 'Reason for the ban', ''],
+    kick: ['Kick from servers', 'Reason (sent to the user)', '']
   };
   if (needsValue) {
     const [title, label, val] = labels[action];
-    admPrompt({ title, label, value: val, danger: action === 'ban' || action === 'reset_password' }, async (value) => {
+    admPrompt({ title, label, value: val, danger: ['ban', 'reset_password', 'kick'].includes(action) }, async (value) => {
       await api('/api/admin/users/' + u.id + '/action', { method: 'POST', body: JSON.stringify({ action, value }) });
       toast('Action applied: ' + action.replace(/_/g, ' '), 'success');
       openAdminPanel('users');
@@ -6463,10 +6668,14 @@ async function admUserAction(u, action) {
   const confirmText = {
     verify: 'Verify this user?', unverify: 'Remove verification?', mute: 'Mute this user platform-wide?',
     unmute: 'Unmute this user?', disable: 'Disable this account? They will be signed out.',
-    enable: 'Re-enable this account?', unban: 'Lift the global ban?', force_logout: 'Sign this user out of every device?'
+    enable: 'Re-enable this account?', unban: 'Lift the global ban?', force_logout: 'Sign this user out of every device?',
+    randomize_discriminator: 'Generate a new random discriminator for this user?',
+    clear_avatar: 'Remove this user\'s avatar?', clear_banner: 'Remove this user\'s banner?',
+    clear_bio: 'Clear this user\'s bio?', clear_notes: 'Delete all staff notes for this user?',
+    whitelist: 'Grant this user access to the admin console?', unwhitelist: 'Revoke this user\'s admin console access?'
   }[action];
   if (confirmText) {
-    const ok = await confirmDialog({ title: 'Confirm action', body: escapeHtml(confirmText), confirmText: 'Confirm', danger: ['disable', 'mute', 'unban'].includes(action) });
+    const ok = await confirmDialog({ title: 'Confirm action', body: escapeHtml(confirmText), confirmText: 'Confirm', danger: ['disable', 'mute', 'unban', 'clear_avatar', 'clear_banner', 'clear_bio', 'clear_notes', 'unwhitelist'].includes(action) });
     if (!ok) return;
   }
   try {
@@ -6512,8 +6721,16 @@ async function openAdminServer(s) {
         <button class="adm-action ${s.featured ? 'on' : ''}" data-sa="${s.featured ? 'unfeature' : 'feature'}">${icon('crown')} ${s.featured ? 'Unfeature' : 'Feature server'}</button>
         <button class="adm-action" data-sa="rename">${icon('pencil')} Rename server</button>
         <button class="adm-action" data-sa="set_description">${icon('note')} Edit description</button>
+        <button class="adm-action" data-sa="clear_description">${icon('trash')} Clear description</button>
         <button class="adm-action" data-sa="transfer_owner">${icon('user-check')} Transfer ownership</button>
         <button class="adm-action" data-sa="announce">${icon('megaphone')} Post announcement</button>
+      </div>
+      <div class="adm-section-title">Appearance &amp; access</div>
+      <div class="adm-action-grid">
+        <button class="adm-action" data-sa="set_icon_url">${icon('image')} Set icon URL</button>
+        <button class="adm-action" data-sa="set_banner_url">${icon('image')} Set banner URL</button>
+        <button class="adm-action" data-sa="set_slowmode_all">${icon('clock')} Slow mode (all)</button>
+        <button class="adm-action" data-sa="create_invite">${icon('link')} Create invite</button>
       </div>
       <div class="modal-actions"><button class="btn secondary" id="adm-srv-back">Back to servers</button></div>
     </div>`, { modalClass: 'adm-user-modal-wrap' });
@@ -6525,6 +6742,9 @@ async function admServerAction(s, action) {
   const prompts = {
     rename: ['Rename server', 'New server name', s.name],
     set_description: ['Edit description', 'New description', s.description || ''],
+    set_icon_url: ['Set icon URL', 'Image URL (https://…)', s.icon_url || ''],
+    set_banner_url: ['Set banner URL', 'Image URL (https://…)', s.banner_url || ''],
+    set_slowmode_all: ['Slow mode (all channels)', 'Seconds between messages (0 to disable)', '0'],
     transfer_owner: ['Transfer ownership', 'New owner user ID', s.owner_id],
     announce: ['Post announcement', 'Message to post in this server', '']
   };
@@ -6537,7 +6757,16 @@ async function admServerAction(s, action) {
     });
     return;
   }
-  const ok = await confirmDialog({ title: 'Confirm action', body: escapeHtml(`Apply "${action}" to ${s.name}?`), confirmText: 'Confirm', danger: action === 'lock' });
+  if (action === 'create_invite') {
+    try {
+      const r = await api('/api/admin/servers/' + s.id + '/action', { method: 'POST', body: JSON.stringify({ action }) });
+      const link = location.origin + '/app.html?invite=' + r.code;
+      try { await navigator.clipboard.writeText(link); toast('Invite created and copied: ' + r.code, 'success'); }
+      catch (e) { toast('Invite created: ' + r.code, 'success'); }
+    } catch (e) { toast(e.message, 'error'); }
+    return;
+  }
+  const ok = await confirmDialog({ title: 'Confirm action', body: escapeHtml(`Apply "${action.replace(/_/g, ' ')}" to ${s.name}?`), confirmText: 'Confirm', danger: ['lock', 'clear_description'].includes(action) });
   if (!ok) return;
   try {
     await api('/api/admin/servers/' + s.id + '/action', { method: 'POST', body: JSON.stringify({ action }) });
@@ -6589,6 +6818,61 @@ async function admAnnouncementDialog() {
   });
 }
 
+async function admRenderStaff(body) {
+  if (!isPlatformOwner()) { body.innerHTML = `<div class="adm-error">${icon('lock')} Only the platform owner can manage staff access.</div>`; return; }
+  const data = await api('/api/admin/whitelist');
+  body.innerHTML = `
+    <div class="adm-card">
+      <div class="adm-card-head"><div class="adm-card-title">Owner</div></div>
+      <div class="adm-staff-row owner">
+        <div class="adm-staff-ico">${icon('crown')}</div>
+        <div class="adm-staff-main"><div class="adm-staff-name">${escapeHtml(data.owner.tag)}</div><div class="adm-staff-sub">Full, permanent access · cannot be removed</div></div>
+        <span class="adm-badge admin">OWNER</span>
+      </div>
+    </div>
+
+    <div class="adm-card">
+      <div class="adm-card-head">
+        <div class="adm-card-title">Whitelisted staff</div>
+        <div class="adm-card-meta">${data.whitelist.length} account${data.whitelist.length === 1 ? '' : 's'}</div>
+      </div>
+      <p class="adm-muted">Whitelisted accounts can open this console and use every moderation tool. Only you (the owner) can grant or revoke access. The owner account is always protected from bans and kicks.</p>
+      <div class="adm-staff-add">
+        <div class="adm-search">${icon('search')}<input id="staff-add-input" placeholder="Username or user ID to whitelist…"></div>
+        <button class="btn" id="staff-add-btn">${icon('user-plus')} Grant access</button>
+      </div>
+      <div class="adm-list" style="margin-top:14px">
+        ${data.whitelist.length ? data.whitelist.map(w => `
+          <div class="adm-staff-row">
+            ${avatarHTML({ id: w.user_id, username: w.display_name, avatar_url: w.avatar_url }, 34, 'offline')}
+            <div class="adm-staff-main"><div class="adm-staff-name">${escapeHtml(w.display_name)}</div><div class="adm-staff-sub">${escapeHtml(w.tag)} · added by ${escapeHtml(w.added_by)} · ${admAgo(w.created_at)}</div></div>
+            <button class="adm-manage danger" data-staff-remove="${w.user_id}">Revoke</button>
+          </div>`).join('') : '<div class="adm-empty-sm">No staff whitelisted yet. Use the field above to grant access.</div>'}
+      </div>
+    </div>`;
+
+  const grant = async () => {
+    const v = ($('staff-add-input').value || '').trim();
+    if (!v) { toast('Enter a username or user ID', 'error'); return; }
+    try {
+      await api('/api/admin/whitelist', { method: 'POST', body: JSON.stringify({ user_id: v }) });
+      toast('Access granted', 'success');
+      renderAdminTab('staff');
+    } catch (e) { toast(e.message, 'error'); }
+  };
+  $('staff-add-btn').addEventListener('click', grant);
+  $('staff-add-input').addEventListener('keydown', e => { if (e.key === 'Enter') grant(); });
+  body.querySelectorAll('[data-staff-remove]').forEach(b => b.addEventListener('click', async () => {
+    const ok = await confirmDialog({ title: 'Revoke access', body: 'Remove this account from the admin console whitelist?', confirmText: 'Revoke', danger: true });
+    if (!ok) return;
+    try {
+      await api('/api/admin/whitelist/' + b.dataset.staffRemove, { method: 'DELETE' });
+      toast('Access revoked', 'success');
+      renderAdminTab('staff');
+    } catch (e) { toast(e.message, 'error'); }
+  }));
+}
+
 async function admRenderSystem(body) {
   const s = await api('/api/admin/settings');
   body.innerHTML = `
@@ -6604,8 +6888,24 @@ async function admRenderSystem(body) {
     <div class="adm-card">
       <div class="adm-card-title">Data</div>
       <p class="adm-muted">Download a JSON snapshot of users, servers, bans and settings. Password hashes are never included.</p>
-      <div class="adm-form-actions"><button class="btn secondary" id="sys-export">${icon('download')} Export data</button></div>
-    </div>`;
+      <div class="adm-form-actions">
+        <button class="btn secondary" id="sys-export">${icon('download')} Export data (JSON)</button>
+        <button class="btn secondary" id="sys-audit-export">${icon('download')} Export audit log (CSV)</button>
+      </div>
+    </div>
+    ${isPlatformOwner() ? `
+    <div class="adm-card">
+      <div class="adm-card-title">Bulk operations</div>
+      <p class="adm-muted">Owner-only, platform-wide actions. Every one is recorded in the audit log.</p>
+      <div class="adm-action-grid">
+        <button class="adm-action" data-bulk="clear_bans">${icon('ban')} Clear all global bans</button>
+        <button class="adm-action" data-bulk="force_logout_all">${icon('log-out')} Sign out everyone</button>
+        <button class="adm-action" data-bulk="deactivate_announcements">${icon('megaphone')} Deactivate announcements</button>
+        <button class="adm-action" data-bulk="verify_all">${icon('user-check')} Verify all users</button>
+        <button class="adm-action" data-bulk="unmute_all">${icon('mic-off')} Unmute everyone</button>
+        <button class="adm-action" data-bulk="unlock_all_servers">${icon('unlock')} Unlock all servers</button>
+      </div>
+    </div>` : ''}`;
   let pending = { registration_open: s.registration_open, maintenance_mode: s.maintenance_mode };
   body.querySelectorAll('[data-adm-toggle]').forEach(t => t.addEventListener('click', () => {
     const k = t.dataset.admToggle;
@@ -6625,6 +6925,22 @@ async function admRenderSystem(body) {
     } catch (e) { toast(e.message, 'error'); }
   });
   $('sys-export').addEventListener('click', admExport);
+  $('sys-audit-export').addEventListener('click', () => {
+    const token = localStorage.getItem('cr_token') || '';
+    const a = document.createElement('a');
+    a.href = '/api/admin/audit/export?token=' + encodeURIComponent(token);
+    a.download = 'crossroads-audit-' + Date.now() + '.csv';
+    document.body.appendChild(a); a.click(); a.remove();
+  });
+  body.querySelectorAll('[data-bulk]').forEach(b => b.addEventListener('click', async () => {
+    const action = b.dataset.bulk;
+    const ok = await confirmDialog({ title: 'Confirm bulk action', body: escapeHtml(`Run "${action.replace(/_/g, ' ')}" across the whole platform?`), confirmText: 'Run', danger: true });
+    if (!ok) return;
+    try {
+      const r = await api('/api/admin/bulk', { method: 'POST', body: JSON.stringify({ action }) });
+      toast(r.detail || 'Done', 'success');
+    } catch (e) { toast(e.message, 'error'); }
+  }));
 }
 
 async function admExport() {
@@ -7378,10 +7694,14 @@ function amIAdmin() {
 }
 
 /* Platform administrator = the account named "keep" (or whatever the server
-   lists in ADMIN_USERNAMES). The backend is the real gate; this only controls
-   whether the Admin Panel button is rendered. */
+   lists in ADMIN_USERNAMES) OR any account the owner has whitelisted. The
+   backend is the real gate; this only controls whether the Admin Panel button
+   is rendered. */
 function isPlatformAdmin() {
-  return !!(me && String(me.username || '').toLowerCase() === 'keep');
+  return !!(me && me.platform_admin);
+}
+function isPlatformOwner() {
+  return !!(me && me.platform_owner);
 }
 
 function copyChannelLink(c) {
