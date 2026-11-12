@@ -1864,8 +1864,11 @@ async function openServer(id, preferredChannelId) {
   $('sidebar-name').textContent = data.server.name;
   syncSidebarBanner(true);
   renderChannelList();
-  // Automatically reveal the member list when a server is opened.
-  state.showMembers = true;
+  /* Honour the member-list preference the user last chose. It is persisted in
+     settings and mirrored onto state.showMembers by applyTheme(), so switching
+     servers, opening a DM and coming back all keep the same collapsed/expanded
+     state instead of force-reopening the panel. */
+  state.showMembers = setting('showMembers') !== false;
   renderMembers();
   /* Re-open the channel the user was last on, if it still exists. */
   const wanted = preferredChannelId && state.channels.find(c => c.id === preferredChannelId && c.type === 'text');
@@ -2723,8 +2726,12 @@ function messageNode(m, grouped, animate) {
   const bodyText = isEmbeddableMediaUrl((extractUrls(m.content || '')[0] || ''))
     ? stripEmbeddableUrls(m.content)
     : m.content;
+  /* Discord enlarges messages that are nothing but emoji ("jumbo" emoji). */
+  const emojiOnly = isEmojiOnly(bodyText || '');
+  const nEmoji = emojiOnly ? emojiCount(bodyText || '') : 0;
+  const jumboCls = emojiOnly ? (nEmoji <= 3 ? ' jumbo' : (nEmoji <= 6 ? ' jumbo lg' : '')) : '';
   node.innerHTML = `${toolbar}${gutter}<div class="body">${m.reply_to ? replyRefHTML(m.reply_to) : ''}${head}
-    <div class="text" data-content>${m.pinned ? `<span class="msg-pin" title="Pinned message">${icon('pin')}</span>` : ''}<span class="text-body">${formatContent(bodyText)}</span>${m.edited_at ? `<span class="msg-edited" title="Edited ${escapeHtml(formatTime(m.edited_at))}">(edited)</span>` : ''}</div>
+    <div class="text" data-content>${m.pinned ? `<span class="msg-pin" title="Pinned message">${icon('pin')}</span>` : ''}<span class="text-body${jumboCls}">${formatContent(bodyText)}</span>${m.edited_at ? `<span class="msg-edited" title="Edited ${escapeHtml(formatTime(m.edited_at))}">(edited)</span>` : ''}</div>
     <div class="attachment-slot"></div>
     <div class="embed-slot"></div>
     <div class="reactions">${reactionsHTML(m.reactions)}</div>
@@ -2824,6 +2831,53 @@ function userByName(name) {
   return null;
 }
 
+/* ------------------------------------------------------------
+   Emoji rendering
+   Discord renders emoji with Twemoji, so we do the same: every emoji
+   glyph becomes an <img> from the Twemoji SVG set. This gives identical
+   artwork across platforms (Windows/Android/Linux) instead of whatever
+   the OS font happens to draw.
+   ------------------------------------------------------------ */
+const EMOJI_RE = /(?:\p{Extended_Pictographic}(?:\uFE0F|\uFE0E)?(?:\u{1F3FB}-\u{1F3FF})?(?:\u200D\p{Extended_Pictographic}(?:\uFE0F|\uFE0E)?(?:\u{1F3FB}-\u{1F3FF})?)*)|(?:[\u{1F1E6}-\u{1F1FF}]{2})|(?:[0-9#*]\uFE0F?\u20E3)/gu;
+const TWEMOJI_BASE = 'https://cdn.jsdelivr.net/gh/jdecked/twemoji@15.0.3/assets/svg/';
+
+/* Twemoji filenames are lowercase hex code points joined by "-". Variation
+   selectors are dropped unless the sequence contains a ZWJ (matches Twemoji). */
+function twemojiUrl(e) {
+  const hasZWJ = e.indexOf('\u200D') >= 0;
+  let cps = Array.from(e).map(c => c.codePointAt(0)).filter(c => c !== 0xFE0E);
+  if (!hasZWJ) cps = cps.filter(c => c !== 0xFE0F);
+  return TWEMOJI_BASE + cps.map(c => c.toString(16)).join('-') + '.svg';
+}
+
+function emojiImg(e) {
+  return `<img class="emoji" src="${twemojiUrl(e)}" alt="${escapeHtml(e)}" draggable="false" loading="lazy">`;
+}
+
+/* Replace every emoji in an already-escaped HTML string with a Twemoji image. */
+function emojify(html) {
+  if (!html) return html;
+  EMOJI_RE.lastIndex = 0;
+  if (!EMOJI_RE.test(html)) return html;
+  EMOJI_RE.lastIndex = 0;
+  return html.replace(EMOJI_RE, (m) => emojiImg(m));
+}
+
+function emojiCount(text) {
+  if (!text) return 0;
+  EMOJI_RE.lastIndex = 0;
+  const m = text.match(EMOJI_RE);
+  return m ? m.length : 0;
+}
+
+/* True when a message contains nothing but emoji + whitespace. */
+function isEmojiOnly(text) {
+  if (!text || !text.trim()) return false;
+  EMOJI_RE.lastIndex = 0;
+  const stripped = text.replace(EMOJI_RE, '').replace(/\s+/g, '');
+  return stripped === '';
+}
+
 function formatContent(text) {
   if (!text) return '';
   let html = escapeHtml(text);
@@ -2868,7 +2922,8 @@ function formatContent(text) {
     });
     // #channel links
     s = s.replace(/(^|[\s(])#([a-z0-9-]+)/g, '$1<span class="mention" data-channel="$2">#$2</span>');
-    return s;
+    // Emoji -> Twemoji images (last, so markdown markers never touch them).
+    return emojify(s);
   }
 
   /* --- 3. Block-level markdown, line by line --- */
@@ -2923,7 +2978,7 @@ function extractUrls(text) {
 function reactionsHTML(reactions) {
   if (!reactions || !reactions.length) return '';
   return reactions.map(r => `<div class="reaction${r.me ? ' me' : ''}" data-emoji="${escapeHtml(r.emoji)}" title="${escapeHtml((r.users || []).length)} reactions">
-    <span class="emoji">${r.emoji}</span><span class="count">${r.count}</span></div>`).join('');
+    <span class="emoji">${emojify(escapeHtml(r.emoji))}</span><span class="count">${r.count}</span></div>`).join('');
 }
 
 function updateReactions(mid, reactions) {
@@ -3606,7 +3661,7 @@ function emojiPickerMarkup(title) {
     <div class="ep-scroll" id="ep-scroll">
       ${EMOJI_CATEGORIES.map(c => `<div class="ep-cat" data-cat="${c.id}">
         <div class="ep-cat-label">${escapeHtml(c.label)}</div>
-        <div class="ep-grid">${c.emojis.map(e => `<button class="ep-emoji" data-e="${e}" title="${e}">${e}</button>`).join('')}</div>
+        <div class="ep-grid">${c.emojis.map(e => `<button class="ep-emoji" data-e="${e}" title="${e}">${emojiImg(e)}</button>`).join('')}</div>
       </div>`).join('')}
     </div>`;
 }
@@ -3750,7 +3805,13 @@ function updateMessageNode(m) {
   const node = document.querySelector(`[data-mid="${m.id}"]`);
   if (!node) return;
   const body = node.querySelector('.text-body');
-  if (body) body.innerHTML = formatContent(m.content);
+  if (body) {
+    body.innerHTML = formatContent(m.content);
+    /* Recompute the jumbo-emoji treatment after an edit. */
+    const onlyEmoji = isEmojiOnly(m.content || '');
+    const cnt = onlyEmoji ? emojiCount(m.content || '') : 0;
+    body.className = 'text-body' + (onlyEmoji ? (cnt <= 3 ? ' jumbo' : (cnt <= 6 ? ' jumbo lg' : '')) : '');
+  }
   const text = node.querySelector('.text');
   if (!text) return;
   let ed = text.querySelector('.msg-edited');
@@ -7088,6 +7149,23 @@ function bindGlobalEvents() {
       closePopovers();
     }
   });
+  /* "/" focuses the message box (Discord's quick-reply shortcut).
+     Desktop only, and never while typing in a field or with a dialog open. */
+  const isDesktop = () => window.matchMedia('(hover: hover) and (pointer: fine)').matches;
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== '/' || e.ctrlKey || e.metaKey || e.altKey) return;
+    if (!isDesktop()) return;
+    const t = e.target;
+    if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+    if (document.querySelector('.modal-overlay:not(.hidden), #confirm-overlay, .lightbox, .emoji-picker, .context-menu, .dropdown-menu')) return;
+    const input = $('message-input');
+    if (!input || $('composer').classList.contains('hidden')) return;
+    e.preventDefault();
+    input.focus();
+    const len = input.value.length;
+    try { input.setSelectionRange(len, len); } catch (err) { /* ignore */ }
+  });
+
   document.addEventListener('keydown', (e) => {
     if (e.key !== 'Escape') return;
     const cu = $('confirm-overlay');
