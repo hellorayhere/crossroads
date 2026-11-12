@@ -249,7 +249,8 @@ function migrate() {
     pronouns: "TEXT DEFAULT ''",
     custom_status: "TEXT DEFAULT ''",
     banner_color: "TEXT DEFAULT '#5865F2'",
-    settings: "TEXT DEFAULT '{}'"
+    settings: "TEXT DEFAULT '{}'",
+    username_changed_at: 'INTEGER'
   };
   for (const [col, def] of Object.entries(additions)) {
     if (!names.includes(col)) {
@@ -284,6 +285,14 @@ function migrate() {
   if (!srvCols.includes('description')) {
     try { db.exec("ALTER TABLE servers ADD COLUMN description TEXT DEFAULT ''"); } catch (e) {}
   }
+  // Banner framing: zoom (scale) and vertical/horizontal position, so the
+  // Overview tab can offer scale/position tools. Additive, never destructive.
+  if (!srvCols.includes('banner_scale')) {
+    try { db.exec('ALTER TABLE servers ADD COLUMN banner_scale REAL DEFAULT 1'); } catch (e) {}
+  }
+  if (!srvCols.includes('banner_position')) {
+    try { db.exec("ALTER TABLE servers ADD COLUMN banner_position TEXT DEFAULT '50% 50%'"); } catch (e) {}
+  }
 
   // 1c-2. Additive migration: channel categories. A category groups channels
   // under a collapsible header, exactly like Discord. Channels keep working
@@ -310,7 +319,8 @@ function migrate() {
   const extraChCols = {
     read_only: 'INTEGER DEFAULT 0',   // members can read but not send messages
     nsfw: 'INTEGER DEFAULT 0',        // age-restricted channel marker
-    user_limit: 'INTEGER DEFAULT 0'   // voice channel user cap (0 = unlimited)
+    user_limit: 'INTEGER DEFAULT 0',  // voice channel user cap (0 = unlimited)
+    bitrate: 'INTEGER DEFAULT 64'     // voice channel bitrate in kbps
   };
   for (const [col, def] of Object.entries(extraChCols)) {
     if (!chCols.includes(col)) {

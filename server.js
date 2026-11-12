@@ -197,18 +197,12 @@ const storage = multer.diskStorage({
     cb(null, `${newId()}${ext}`);
   }
 });
-/* 50 MB ceiling so animated GIF/WebP avatars, banners and backgrounds fit. */
-const MAX_UPLOAD_BYTES = 50 * 1024 * 1024;
+/* 250 MB ceiling. Any file type is accepted now; risky extensions are still
+   served as downloads (Content-Disposition: attachment) rather than executed. */
+const MAX_UPLOAD_BYTES = 250 * 1024 * 1024;
 const upload = multer({
   storage,
-  limits: { fileSize: MAX_UPLOAD_BYTES },
-  fileFilter(req, file, cb) {
-    const ext = path.extname(file.originalname || '').toLowerCase();
-    if (DANGEROUS_EXT.has(ext)) {
-      return cb(new Error('This file type is not allowed for security reasons.'));
-    }
-    cb(null, true);
-  }
+  limits: { fileSize: MAX_UPLOAD_BYTES }
 });
 
 /* ---------------- Helpers ---------------- */
@@ -368,6 +362,7 @@ function publicUser(u, opts = {}) {
     created_at: u.created_at
   };
   if (opts.self) out.twofa_enabled = !!u.twofa_enabled;
+  if (opts.self) out.username_changed_at = u.username_changed_at || 0;
   return out;
 }
 
@@ -1238,6 +1233,19 @@ app.patch('/api/me', auth, (req, res) => {
     if (uname && uname.toLowerCase() !== (req.user.username || '').toLowerCase()) {
       if (uname.length < 2 || uname.length > 32) return res.status(400).json({ error: 'Username must be 2-32 characters' });
       if (!/^[a-zA-Z0-9._]+$/.test(uname)) return res.status(400).json({ error: 'Username may only contain letters, numbers, periods and underscores' });
+      // 24-hour cooldown between username changes.
+      const USERNAME_COOLDOWN_MS = 24 * 60 * 60 * 1000;
+      const lastChange = Number(req.user.username_changed_at || 0);
+      if (lastChange && Date.now() - lastChange < USERNAME_COOLDOWN_MS) {
+        const remain = USERNAME_COOLDOWN_MS - (Date.now() - lastChange);
+        const totalMins = Math.ceil(remain / 60000);
+        const hours = Math.floor(totalMins / 60);
+        const mins = totalMins % 60;
+        return res.status(429).json({
+          error: `You can only change your username once every 24 hours. Try again in ${hours}h ${mins}m.`,
+          retry_after: remain
+        });
+      }
       const taken = db.prepare('SELECT 1 FROM users WHERE LOWER(username) = LOWER(?) AND id != ?').get(uname, uid);
       if (taken) return res.status(409).json({ error: 'That username is already taken' });
       let disc = req.user.discriminator;
@@ -1245,6 +1253,7 @@ app.patch('/api/me', auth, (req, res) => {
       if (clash) disc = uniqueUsernameDiscriminator(uname);
       updates.push('username = ?'); values.push(uname);
       updates.push('discriminator = ?'); values.push(disc);
+      updates.push('username_changed_at = ?'); values.push(Date.now());
     }
   }
   const statusChanged = 'status' in req.body;
@@ -1693,6 +1702,10 @@ app.patch('/api/servers/:id/channels/:cid', auth, (req, res) => {
     const n = Math.max(0, Math.min(99, parseInt(req.body.user_limit, 10) || 0));
     updates.push('user_limit = ?'); values.push(n);
   }
+  if ('bitrate' in req.body) {
+    const n = Math.max(8, Math.min(384, parseInt(req.body.bitrate, 10) || 64));
+    updates.push('bitrate = ?'); values.push(n);
+  }
   if (updates.length) {
     values.push(ch.id);
     db.prepare(`UPDATE channels SET ${updates.join(', ')} WHERE id = ?`).run(...values);
@@ -1775,6 +1788,14 @@ app.patch('/api/servers/:id', auth, (req, res) => {
   if ('icon_url' in req.body) { updates.push('icon_url = ?'); values.push(req.body.icon_url || null); }
   if ('banner_url' in req.body) { updates.push('banner_url = ?'); values.push(req.body.banner_url || null); }
   if ('description' in req.body) { updates.push('description = ?'); values.push(String(req.body.description || '').slice(0, 500)); }
+  if ('banner_scale' in req.body) {
+    const sc = Math.max(1, Math.min(4, parseFloat(req.body.banner_scale) || 1));
+    updates.push('banner_scale = ?'); values.push(sc);
+  }
+  if ('banner_position' in req.body) {
+    const pos = String(req.body.banner_position || '50% 50%').slice(0, 32);
+    updates.push('banner_position = ?'); values.push(pos);
+  }
   if (updates.length) {
     values.push(srv.id);
     db.prepare(`UPDATE servers SET ${updates.join(', ')} WHERE id = ?`).run(...values);
@@ -2580,12 +2601,12 @@ app.get('/api/embed', auth, async (req, res) => {
 });
 
 /* ---------------- Upload ----------------
-   Accepts images (including animated GIF/WebP), video, audio and documents.
-   Hard limit: 50 MB (animated avatars / banners / backgrounds). */
+   Accepts any file type (images, video, audio, archives, documents…).
+   Hard limit: 250 MB. */
 app.post('/api/upload', auth, (req, res) => {
   upload.single('file')(req, res, (err) => {
     if (err) {
-      if (err.code === 'LIMIT_FILE_SIZE') return res.status(413).json({ error: 'File is too large (maximum 50 MB)' });
+      if (err.code === 'LIMIT_FILE_SIZE') return res.status(413).json({ error: 'File is too large (maximum 250 MB)' });
       return res.status(400).json({ error: err.message || 'Upload failed' });
     }
     if (!req.file) return res.status(400).json({ error: 'No file uploaded' });

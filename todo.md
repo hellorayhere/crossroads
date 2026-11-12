@@ -44,3 +44,66 @@ Goal: stop the Render free instance from sleeping, so visitors never hit the
 - [x] Expose `keepAlive` object on `/health` (enabled, intervalSeconds, selfPings, selfPingFails, lastSelfPingAt, lastSelfPingStatus)
 - [x] Verify locally: `selfPings: 1`, `lastSelfPingStatus: 200`
 - [x] Commit, push, redeploy to Render, verify in production
+
+---
+
+# Crossroads — Round 12 Task List
+
+Goal: the 15 requested UI/UX, security and feature updates, deployed to
+https://crossroadsv2.onrender.com/app.html **without wiping any data**
+(additive DB migrations only; never touch DATA_DIR / GH_DATA_REPO / GH_DATA_TOKEN).
+
+## 1. Two-Step reset custom UI
+- [x] Dedicated modal (not generic promptDialog) for "Reset your two-step code?"
+- [x] Requires the account password (server already verifies via bcrypt)
+- [x] Invalidates the previous code/secret (server regenerates secret, disables 2FA)
+
+## 2. Server banner longer
+- [x] Increase `.ss-banner` height in app.css
+
+## 3. Server Overview scale tools
+- [x] Banner zoom + position (x/y) controls in Overview tab
+- [x] Persist `banner_scale` / `banner_position` (additive DB columns + PATCH)
+
+## 4. Banner Color bug
+- [x] Make Banner Color actually apply everywhere it should
+
+## 5. Avatar/banner flash fix
+- [x] Remove blurple fallback flash + lazy-load delay
+
+## 6. E2E hardening
+- [x] Stronger key derivation/binding without breaking existing messages
+
+## 7. Copy usernames + server ID
+- [x] Click display/username to copy
+- [x] Copy Server ID option in server rail context menu
+
+## 8. Uploads
+- [x] Remove file-type block ("not allowed for security reasons")
+- [x] Raise limit to 250 MB (server + client hints)
+
+## 9. Close DM toast
+- [x] Close DM only dismisses the "Conversation closed" toast UI
+
+## 10. Username cooldown
+- [x] 24h cooldown after a username change (DB column + server + UI countdown)
+
+## 11. Profiles revamp
+- [x] Full revamp of Profiles settings panel with more details/options
+
+## 12. Languages
+- [x] Ensure all language options work
+
+## 13. Accent #000000
+- [x] Pure black accent displays correctly (fix saturation/brightness clamps)
+
+## 14. Fade animations
+- [x] Smooth fade in/out for Join a Server, User Settings, Voice Settings
+
+## 15. Edit Channel UI
+- [x] Wider modal + more important options
+
+## 16. Test & deploy
+- [x] Local smoke test
+- [x] Commit + push
+- [x] Render deploy + verify live, data preserved

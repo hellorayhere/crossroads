@@ -387,14 +387,20 @@ function t(key) {
 }
 
 /* Re-render the surfaces that contain translated strings. */
-function applyLanguage() {
-  document.documentElement.lang = LANG_CODE[setting('language')] || 'en';
-  /* `openServer` also uses view 'home' (Discord's naming for the main view),
-     so only touch the DM sidebar when we are genuinely not inside a server -
-     otherwise restoring a server on refresh got its sidebar reset to DMs. */
-  if (state.view === 'home' && !state.server) { $('sidebar-name').textContent = t('Direct Messages'); renderDMList(); }
+function applyLanguageLite() {
+  const code = LANG_CODE[setting('language')] || 'en';
+  document.documentElement.lang = code;
+  const rtl = /^(ar|he|fa|ur|yi)/i.test(code);
+  document.documentElement.dir = rtl ? 'rtl' : 'ltr';
+  document.documentElement.classList.toggle('rtl', rtl);
+  if (state.view === 'home' && !state.server) { const sn = $('sidebar-name'); if (sn) sn.textContent = t('Direct Messages'); renderDMList(); }
   else if (state.view === 'friends') { renderDMList(); renderFriendsView(); }
   if (state.server) renderChannelList();
+}
+function applyLanguage() {
+  applyLanguageLite();
+  /* Re-render the settings chrome so nav labels pick up the new language.
+     Only do this when settings is actually open (openSettings resets pending). */
   if ($('settings-nav')) openSettings(document.querySelector('#settings-nav .sn-item.active')?.dataset.sec || 'account');
 }
 
@@ -629,7 +635,7 @@ function setupColorWheel(root, initialHex, onChange) {
   const hexEl = root.querySelector('.cw-hex-input');
   const preview = root.querySelector('.cw-preview');
   const start = hexToHsl(initialHex || '#5865F2');
-  let h = start.h, s = Math.max(35, start.s), l = start.l;
+  let h = start.h, s = start.s, l = start.l;
 
   const render = (emit) => {
     const hex = hslToHex(h, s, l);
@@ -718,13 +724,40 @@ function formatTime(ts) {
 }
 function shortTime(ts) { return new Date(ts).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }); }
 function fullTag(u) { return u ? `${u.username}#${u.discriminator}` : ''; }
+/* Copy helper with a graceful fallback for browsers/contexts without the
+   async clipboard API. */
+function fallbackCopyText(t, done) {
+  try {
+    const ta = document.createElement('textarea');
+    ta.value = t; ta.style.position = 'fixed'; ta.style.top = '-1000px'; ta.style.opacity = '0';
+    document.body.appendChild(ta); ta.focus(); ta.select();
+    document.execCommand('copy'); ta.remove(); done();
+  } catch (e) { toast('Could not copy', 'error'); }
+}
+function copyToClipboard(text, label) {
+  const t = String(text == null ? '' : text);
+  if (!t) return;
+  const done = () => toast((label || 'Copied') + (label && label.endsWith(':') ? ' ' : ': ') + t, 'success');
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(t).then(done).catch(() => fallbackCopyText(t, done));
+  } else fallbackCopyText(t, done);
+}
+/* Make an element click-to-copy. */
+function makeCopyable(el, text, label) {
+  if (!el) return;
+  el.style.cursor = 'pointer';
+  el.title = 'Click to copy';
+  el.addEventListener('click', (e) => { e.stopPropagation(); copyToClipboard(typeof text === 'function' ? text() : text, label); });
+}
 function statusLabel(s) { return { online: 'Online', idle: 'Idle', dnd: 'Do Not Disturb', offline: 'Invisible' }[s] || 'Offline'; }
 
 function avatarHTML(user, size = 40, status = null) {
   if (!user) user = { username: '?' };
-  const bg = user.avatar_url ? '#5865f2' : (user.accent_color || '#5865f2');
+  /* When an image is present, use a neutral dark placeholder (never the blurple
+     default) so no coloured flash appears before the picture paints. */
+  const bg = user.avatar_url ? '#2b2d31' : (user.accent_color || '#5865f2');
   const inner = user.avatar_url
-    ? `<img src="${escapeHtml(user.avatar_url)}" alt="" loading="lazy" decoding="async">`
+    ? `<img src="${escapeHtml(user.avatar_url)}" alt="" loading="eager" decoding="async" fetchpriority="high">`
     : (user.avatar ? escapeHtml(user.avatar) : escapeHtml((user.username || '?')[0].toUpperCase()));
   const dot = status ? `<span class="status-dot ${status}"></span>` : '';
   /* Use background-color (not the `background` shorthand) so the stylesheet's
@@ -988,16 +1021,32 @@ async function e2eConfig() {
   return e2e.config;
 }
 
-/* Wrap a raw 32-byte AES key for one recipient public key. */
-async function e2eWrapKey(pubJwk, rawKey) {
+/* HKDF-SHA-256: turn raw ECDH shared bits into a uniformly-random 256-bit key.
+   Raw ECDH output is not uniformly distributed, so we always run it through
+   HKDF before using it as an AES key (defence against biased key material). */
+async function e2eHkdf(bits, salt, info) {
+  const base = await crypto.subtle.importKey('raw', bits, { name: 'HKDF' }, false, ['deriveBits']);
+  return crypto.subtle.deriveBits(
+    { name: 'HKDF', hash: 'SHA-256', salt, info: new TextEncoder().encode(info) },
+    base, 256
+  );
+}
+
+/* Wrap a raw 32-byte AES key for one recipient public key.
+   v2: ECDH -> HKDF-SHA-256 (random salt) -> AES-256-GCM with AAD binding the
+   recipient key id, so a wrapped key can never be replayed onto another device. */
+async function e2eWrapKey(pubJwk, rawKey, keyId) {
   const pub = await crypto.subtle.importKey('jwk', pubJwk, { name: 'ECDH', namedCurve: 'P-256' }, false, []);
   const eph = await crypto.subtle.generateKey({ name: 'ECDH', namedCurve: 'P-256' }, true, ['deriveBits']);
   const bits = await crypto.subtle.deriveBits({ name: 'ECDH', public: pub }, eph.privateKey, 256);
-  const kek = await crypto.subtle.importKey('raw', bits, { name: 'AES-GCM' }, false, ['encrypt']);
+  const salt = crypto.getRandomValues(new Uint8Array(16));
+  const kekBits = await e2eHkdf(bits, salt, 'crossroads-e2e-kek-v2');
+  const kek = await crypto.subtle.importKey('raw', kekBits, { name: 'AES-GCM' }, false, ['encrypt']);
   const iv = crypto.getRandomValues(new Uint8Array(12));
-  const wrapped = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, kek, rawKey);
+  const aad = new TextEncoder().encode('E2E1|v2|' + keyId);
+  const wrapped = await crypto.subtle.encrypt({ name: 'AES-GCM', iv, additionalData: aad }, kek, rawKey);
   const ephPub = await crypto.subtle.exportKey('jwk', eph.publicKey);
-  return { e: ephPub, i: e2eB64e(iv), k: e2eB64e(wrapped) };
+  return { e: ephPub, i: e2eB64e(iv), k: e2eB64e(wrapped), s: e2eB64e(salt), d: 'hkdf' };
 }
 
 async function e2eFetchKeys(ids) {
@@ -1025,10 +1074,11 @@ async function e2eEncrypt(content, recipientIds) {
     const raw = crypto.getRandomValues(new Uint8Array(32));
     const key = await crypto.subtle.importKey('raw', raw, { name: 'AES-GCM' }, false, ['encrypt']);
     const iv = crypto.getRandomValues(new Uint8Array(12));
-    const ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, new TextEncoder().encode(content));
+    const aad = new TextEncoder().encode('E2E1|v2');
+    const ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv, additionalData: aad }, key, new TextEncoder().encode(content));
     const wrapped = {};
-    for (const k of keys) wrapped[k.key_id] = await e2eWrapKey(JSON.parse(k.public_jwk), raw);
-    const env = { v: 1, iv: e2eB64e(iv), ct: e2eB64e(ct), keys: wrapped };
+    for (const k of keys) wrapped[k.key_id] = await e2eWrapKey(JSON.parse(k.public_jwk), raw, k.key_id);
+    const env = { v: 2, iv: e2eB64e(iv), ct: e2eB64e(ct), keys: wrapped };
     return { content: E2E_PREFIX + JSON.stringify(env), encrypted: true };
   } catch (e) {
     console.warn('[e2e] encrypt failed', e);
@@ -1046,10 +1096,17 @@ async function e2eDecrypt(content) {
     if (!entry) return null;
     const ephPub = await crypto.subtle.importKey('jwk', entry.e, { name: 'ECDH', namedCurve: 'P-256' }, false, []);
     const bits = await crypto.subtle.deriveBits({ name: 'ECDH', public: ephPub }, e2e.priv, 256);
-    const kek = await crypto.subtle.importKey('raw', bits, { name: 'AES-GCM' }, false, ['decrypt']);
-    const raw = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: e2eB64d(entry.i) }, kek, e2eB64d(entry.k));
+    /* v2 uses HKDF + AAD; v1 (legacy) uses the raw ECDH bits directly. */
+    const isV2 = Number(env.v) >= 2;
+    const kekBits = (isV2 && entry.s)
+      ? await e2eHkdf(bits, e2eB64d(entry.s), 'crossroads-e2e-kek-v2')
+      : bits;
+    const kek = await crypto.subtle.importKey('raw', kekBits, { name: 'AES-GCM' }, false, ['decrypt']);
+    const wrapAad = isV2 ? new TextEncoder().encode('E2E1|v2|' + e2e.keyId) : undefined;
+    const raw = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: e2eB64d(entry.i), additionalData: wrapAad }, kek, e2eB64d(entry.k));
     const key = await crypto.subtle.importKey('raw', raw, { name: 'AES-GCM' }, false, ['decrypt']);
-    const pt = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: e2eB64d(env.iv) }, key, e2eB64d(env.ct));
+    const msgAad = isV2 ? new TextEncoder().encode('E2E1|v2') : undefined;
+    const pt = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: e2eB64d(env.iv), additionalData: msgAad }, key, e2eB64d(env.ct));
     return new TextDecoder().decode(pt);
   } catch (e) {
     return null;
@@ -1191,6 +1248,65 @@ function promptDialog(opts = {}) {
       if (e.key === 'Escape') done(null);
     });
     setTimeout(() => { input.focus(); input.select(); }, 30);
+  });
+}
+
+/* Dedicated, purpose-built dialog for resetting the two-step code.
+   Resolves with the account password (string) or null if cancelled. */
+function twoFactorResetDialog() {
+  return new Promise((resolve) => {
+    const wrap = document.createElement('div');
+    wrap.className = 'confirm-overlay tfr-overlay';
+    wrap.innerHTML = `
+      <div class="confirm-box tfr-box">
+        <div class="tfr-icon">${icon('shield')}</div>
+        <h3>Reset your two-step code?</h3>
+        <p class="tfr-sub">This turns two-step login <b>off</b> and generates a brand-new code. Your old authenticator entry will stop working immediately.</p>
+        <ul class="tfr-list">
+          <li>${icon('lock')}<span>You must enter your account password</span></li>
+          <li>${icon('refresh')}<span>The previous code is invalidated right away</span></li>
+          <li>${icon('mobile')}<span>Set up the new code to turn two-step back on</span></li>
+        </ul>
+        <div class="field tfr-field">
+          <label for="tfr-pw">Account password <span class="req">*</span></label>
+          <div class="tfr-pw-wrap">
+            <input id="tfr-pw" type="password" placeholder="Enter your password" autocomplete="current-password" maxlength="128">
+            <button type="button" class="tfr-eye" id="tfr-eye" aria-label="Show password" title="Show password">${icon('eye')}</button>
+          </div>
+          <div class="tfr-error" id="tfr-error" role="alert"></div>
+        </div>
+        <div class="confirm-actions">
+          <button class="btn ghost" id="tfr-cancel">Cancel</button>
+          <button class="btn danger" id="tfr-ok">Reset code</button>
+        </div>
+      </div>`;
+    document.body.appendChild(wrap);
+    const input = wrap.querySelector('#tfr-pw');
+    const eye = wrap.querySelector('#tfr-eye');
+    const errEl = wrap.querySelector('#tfr-error');
+    const okBtn = wrap.querySelector('#tfr-ok');
+    let done = false;
+    const finish = (v) => { if (done) return; done = true; wrap.remove(); resolve(v); };
+    const submit = () => {
+      const pw = input.value;
+      if (!pw) { errEl.textContent = 'Please enter your account password.'; input.focus(); return; }
+      finish(pw);
+    };
+    okBtn.addEventListener('click', submit);
+    wrap.querySelector('#tfr-cancel').addEventListener('click', () => finish(null));
+    wrap.addEventListener('click', (e) => { if (e.target === wrap) finish(null); });
+    eye.addEventListener('click', () => {
+      const showing = input.type === 'text';
+      input.type = showing ? 'password' : 'text';
+      eye.classList.toggle('on', !showing);
+      eye.setAttribute('aria-label', showing ? 'Show password' : 'Hide password');
+      input.focus();
+    });
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); submit(); }
+      if (e.key === 'Escape') finish(null);
+    });
+    setTimeout(() => input.focus(), 40);
   });
 }
 
@@ -1756,6 +1872,15 @@ function renderRail() {
     const mentions = serverMentionCount(s.id);
     if (mentions) d.innerHTML += `<span class="badge">${mentions > 99 ? '99+' : mentions}</span>`;
     d.addEventListener('click', () => openServer(s.id));
+    d.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      showContextMenu(e.clientX, e.clientY, [
+        { label: 'Open Server', icon: 'server', onClick: () => openServer(s.id) },
+        { sep: true },
+        { label: 'Copy Server ID', icon: 'id-badge', onClick: () => copyToClipboard(s.id, 'Server ID') },
+        { label: 'Copy Server Name', icon: 'copy', onClick: () => copyToClipboard(s.name, 'Server name') }
+      ]);
+    });
     wrap.appendChild(d);
   }
 }
@@ -2004,7 +2129,6 @@ async function closeDM(d) {
     await api('/api/dms/' + d.id + '/close', { method: 'POST' });
     if (state.dm && state.dm.id === d.id) { state.dm = null; showHome(); }
     await loadDMs();
-    toast('Conversation closed', 'success');
   } catch (e) { toast(e.message, 'error'); }
 }
 
@@ -4266,7 +4390,7 @@ function pickFile(accept) {
 }
 async function handleFile(file) {
   if (!file) return;
-  if (file.size > 25 * 1024 * 1024) { toast('File is too large (maximum 25 MB)', 'error'); return; }
+  if (file.size > 250 * 1024 * 1024) { toast('File is too large (maximum 250 MB)', 'error'); return; }
   const fd = new FormData();
   fd.append('file', file);
   /* Inline progress in the composer instead of a floating toast. */
@@ -5417,33 +5541,64 @@ function openEditChannel(c) {
       <span class="ec-toggle-text"><span class="ec-toggle-title">${title}</span><span class="ec-toggle-desc">${desc}</span></span>
       <span class="re-switch"><input type="checkbox" id="${id}"${checked ? ' checked' : ''}><span class="re-switch-track"></span></span>
     </label>`;
+  const slowPresets = [[0, 'Off'], [5, '5 seconds'], [10, '10 seconds'], [30, '30 seconds'], [60, '1 minute'], [300, '5 minutes'], [600, '10 minutes'], [3600, '1 hour'], [21600, '6 hours']];
+  const hasPreset = slowPresets.some(([v]) => v === slow);
+  const slowOpts = slowPresets.map(([v, l]) => `<option value="${v}"${slow === v ? ' selected' : ''}>${l}</option>`).join('') +
+    (hasPreset ? '' : `<option value="${slow}" selected>${slow} seconds (custom)</option>`);
   openModal(`
-    <h3>Edit Channel</h3>
-    <p class="msub">#${escapeHtml(c.name)} \u00b7 ${isVoice ? 'Voice' : 'Text'} channel</p>
-    <div class="field"><label>Channel Name <span class="req">*</span></label>
-      <input id="ec-name" value="${escapeHtml(c.name)}" maxlength="40"></div>
-    <div class="field"><label>Topic</label>
-      <input id="ec-topic" value="${escapeHtml(c.topic || '')}" placeholder="What is this channel about?" maxlength="200"></div>
-    <div class="field"><label>Category</label>
-      <select id="ec-cat">${catOpts}</select></div>
-    <div class="field"><label>Slow Mode (seconds between messages)</label>
-      <input id="ec-slow" type="number" min="0" max="21600" value="${slow}">
-      <div class="hint">0 = off. Members must wait this long between messages. Staff are exempt.</div></div>
-    ${isVoice ? `<div class="field"><label>Voice User Limit</label>
-      <input id="ec-userlimit" type="number" min="0" max="99" value="${c.user_limit || 0}">
-      <div class="hint">0 = unlimited. Maximum number of people who can join at once.</div></div>` : ''}
-    <div class="ec-toggles">
-      ${toggleRow('ec-readonly', !!c.read_only, 'Lock channel', 'Members can read this channel but cannot send messages. Staff can still post.')}
-      ${toggleRow('ec-nsfw', !!c.nsfw, 'Age-restricted channel', 'Marks the channel as NSFW. Members see a warning before opening it.')}
+    <div class="ec-head">
+      <div class="ec-head-icon">${icon(isVoice ? 'volume-high' : 'hash')}</div>
+      <div><h3>Edit Channel</h3><p class="msub">#${escapeHtml(c.name)} \u00b7 ${isVoice ? 'Voice' : 'Text'} channel</p></div>
+    </div>
+    <div class="ec-grid">
+      <div class="ec-col">
+        <div class="ec-section-title">General</div>
+        <div class="field"><label>Channel Name <span class="req">*</span></label>
+          <input id="ec-name" value="${escapeHtml(c.name)}" maxlength="40"></div>
+        <div class="field"><label>Topic</label>
+          <input id="ec-topic" value="${escapeHtml(c.topic || '')}" placeholder="What is this channel about?" maxlength="200"></div>
+        <div class="field"><label>Category</label>
+          <select id="ec-cat">${catOpts}</select></div>
+        ${isVoice ? '' : `<div class="field"><label>Slow Mode</label>
+          <select id="ec-slow">${slowOpts}</select>
+          <div class="hint">Members must wait this long between messages. Staff are exempt.</div></div>`}
+      </div>
+      <div class="ec-col">
+        <div class="ec-section-title">${isVoice ? 'Voice Settings' : 'Permissions & Access'}</div>
+        ${isVoice ? `
+          <div class="field"><label>User Limit</label>
+            <input id="ec-userlimit" type="number" min="0" max="99" value="${c.user_limit || 0}">
+            <div class="hint">0 = unlimited. Maximum people who can join at once.</div></div>
+          <div class="field"><label>Bitrate (kbps)</label>
+            <input id="ec-bitrate" type="number" min="8" max="384" value="${c.bitrate || 64}">
+            <div class="hint">Higher is clearer audio but uses more bandwidth.</div></div>
+          <div class="ec-toggles">${toggleRow('ec-nsfw', !!c.nsfw, 'Age-restricted channel', 'Marks the channel as NSFW. Members see a warning before joining.')}</div>
+        ` : `
+          <div class="ec-toggles">
+            ${toggleRow('ec-readonly', !!c.read_only, 'Lock channel', 'Members can read this channel but cannot send messages. Staff can still post.')}
+            ${toggleRow('ec-nsfw', !!c.nsfw, 'Age-restricted channel', 'Marks the channel as NSFW. Members see a warning before opening it.')}
+          </div>
+        `}
+        <div class="ec-idbox">
+          <div><div class="ec-idlabel">Channel ID</div><code class="ec-idval">${escapeHtml(c.id)}</code></div>
+          <button class="btn secondary ec-copyid" id="ec-copyid">${icon('copy')} Copy</button>
+        </div>
+        <div class="ec-reorder">
+          <span class="ec-reorder-label">Position</span>
+          <button class="btn secondary" id="ec-up">${icon('chevron-up')} Move up</button>
+          <button class="btn secondary" id="ec-down">${icon('chevron-down')} Move down</button>
+        </div>
+      </div>
     </div>
     <div class="modal-actions ec-actions">
-      <button class="btn secondary" id="ec-up" title="Move up">${icon('chevron-up')} Up</button>
-      <button class="btn secondary" id="ec-down" title="Move down">${icon('chevron-down')} Down</button>
+      <button class="btn danger ghost" id="ec-delete">${icon('trash')} Delete Channel</button>
       <span style="flex:1"></span>
       <button class="btn secondary" id="ec-cancel">Cancel</button>
       <button class="btn" id="ec-save">${icon('check')} Save Changes</button>
-    </div>`);
+    </div>`, { modalClass: 'modal channel-edit-modal' });
   $('ec-cancel').addEventListener('click', closeModal);
+  $('ec-copyid').addEventListener('click', () => copyToClipboard(c.id, 'Channel ID'));
+  $('ec-delete').addEventListener('click', () => { closeModal(); deleteChannel(c); });
   $('ec-up').addEventListener('click', async () => { await moveChannelBy(c, -1); closeModal(); });
   $('ec-down').addEventListener('click', async () => { await moveChannelBy(c, 1); closeModal(); });
   $('ec-save').addEventListener('click', async () => {
@@ -5453,11 +5608,15 @@ function openEditChannel(c) {
       name,
       topic: $('ec-topic').value.trim(),
       category_id: $('ec-cat').value || null,
-      slow_mode: Math.max(0, Math.min(21600, parseInt($('ec-slow').value, 10) || 0)),
       read_only: !!($('ec-readonly') && $('ec-readonly').checked),
       nsfw: !!($('ec-nsfw') && $('ec-nsfw').checked)
     };
-    if (isVoice) payload.user_limit = Math.max(0, Math.min(99, parseInt($('ec-userlimit').value, 10) || 0));
+    if (isVoice) {
+      payload.user_limit = Math.max(0, Math.min(99, parseInt($('ec-userlimit').value, 10) || 0));
+      payload.bitrate = Math.max(8, Math.min(384, parseInt($('ec-bitrate').value, 10) || 64));
+    } else {
+      payload.slow_mode = Math.max(0, Math.min(21600, parseInt($('ec-slow').value, 10) || 0));
+    }
     try {
       await api('/api/servers/' + state.server.id + '/channels/' + c.id, { method: 'PATCH', body: JSON.stringify(payload) });
       closeModal();
@@ -5535,7 +5694,7 @@ function renderOwnProfile(user) {
   const displayName = user.display_name || user.username;
   const bannerColor = user.banner_color || user.accent_color || '#5865F2';
   const bannerStyle = user.banner_url
-    ? `background-image:url('${escapeHtml(user.banner_url)}')`
+    ? `background-image:url('${escapeHtml(user.banner_url)}');background-color:${escapeHtml(bannerColor)};background-size:cover;background-position:center`
     : `background:${bannerColor}`;
   const memberSince = new Date(user.created_at).toLocaleDateString([], { year: 'numeric', month: 'long', day: 'numeric' });
   const swatches = PALETTE.map(c => `<span class="pnav-swatch${bannerColor.toLowerCase() === c.toLowerCase() ? ' sel' : ''}" data-color="${c}" style="background:${c}"></span>`).join('');
@@ -5602,16 +5761,20 @@ function renderOwnProfile(user) {
   $('pf-edit').addEventListener('click', () => openSettings('account'));
   $('pf-banner').addEventListener('click', () => openSettings('account'));
   $('pf-avatar').addEventListener('click', () => openSettings('account'));
+  makeCopyable(document.querySelector('.profile-content .pic-name'), displayName, 'Display name');
+  makeCopyable(document.querySelector('.profile-content .pic-tag'), fullTag(user), 'Username');
+  makeCopyable(document.querySelector('.pnav-text .n1'), displayName, 'Display name');
+  makeCopyable(document.querySelector('.pnav-text .n2'), fullTag(user), 'Username');
   document.querySelectorAll('#pf-swatches .pnav-swatch').forEach(sw => {
     sw.addEventListener('click', async () => {
       const color = sw.dataset.color;
       document.querySelectorAll('#pf-swatches .pnav-swatch').forEach(x => x.classList.toggle('sel', x === sw));
       const hero = document.querySelector('.profile-hero');
-      if (hero && !user.banner_url) hero.style.background = color;
+      if (hero) { hero.style.backgroundImage = 'none'; hero.style.background = color; }
       try {
-        const { user: updated } = await api('/api/me', { method: 'PATCH', body: JSON.stringify({ banner_color: color }) });
+        const { user: updated } = await api('/api/me', { method: 'PATCH', body: JSON.stringify({ banner_color: color, banner_url: null }) });
         me = updated; localStorage.setItem('cr_user', JSON.stringify(me)); renderMe();
-        user.banner_color = color;
+        user.banner_color = color; user.banner_url = null;
       } catch (e) { toast(e.message, 'error'); }
     });
   });
@@ -5634,7 +5797,7 @@ function renderOtherProfile(user, ctx) {
     ? user.banner_color : null;
   const tint = customBanner || accent;
   const bannerStyle = user.banner_url
-    ? `background-image:url('${escapeHtml(user.banner_url)}')`
+    ? `background-image:url('${escapeHtml(user.banner_url)}');background-color:${escapeHtml(tint)};background-size:cover;background-position:center`
     : `background:linear-gradient(180deg, ${escapeHtml(tint)} 0%, color-mix(in srgb, ${escapeHtml(tint)} 70%, #000) 100%)`;
 
   let addBtn;
@@ -5711,6 +5874,9 @@ function renderOtherProfile(user, ctx) {
     </div>`, { modalClass: 'oprofile-modal' });
 
   applyAccent($('modal'), accent);
+
+  makeCopyable(document.querySelector('.dp-name'), displayName, 'Display name');
+  makeCopyable(document.querySelector('.dp-handle'), fullTag(user), 'Username');
 
   document.querySelectorAll('.dp-server-ico').forEach(el => el.addEventListener('click', () => {
     closeModal();
@@ -6074,13 +6240,13 @@ async function wireTwoFactor() {
     refresh();
     codeTimer = setInterval(refresh, 5000);
     $('twofa-reset').addEventListener('click', async () => {
-      const pw = await promptDialog({ title: 'Reset two-step code', body: 'This creates a brand-new code and turns two-step login off until you confirm the new one. Enter your password to continue.', input: 'password', placeholder: 'Password', confirmText: 'Reset code' });
+      const pw = await twoFactorResetDialog();
       if (pw == null) return;
       try {
         const d = await api('/api/2fa/reset', { method: 'POST', body: JSON.stringify({ password: pw }) });
         stopTimer();
         showSetup(d);
-        toast('New two-step code generated', 'success');
+        toast('Old code invalidated \\u2014 new two-step code generated', 'success');
       } catch (e) { toast(e.message, 'error'); }
     });
     $('twofa-disable').addEventListener('click', async () => {
@@ -6274,7 +6440,7 @@ function settingsPanelHTML(section) {
               <div class="cw-wheel"><div class="cw-cursor"></div></div>
               <div class="cw-side">
                 <div class="cw-preview" style="background:${escapeHtml(accent)}"></div>
-                <label class="cw-field"><span>Brightness</span><input type="range" class="cw-light-range" min="18" max="92" value="${Math.round(hexToHsl(accent).l)}"></label>
+                <label class="cw-field"><span>Brightness</span><input type="range" class="cw-light-range" min="0" max="100" value="${Math.round(hexToHsl(accent).l)}"></label>
                 <label class="cw-field"><span>Hex code</span><input type="text" class="cw-hex-input" maxlength="7" value="${escapeHtml(accent.toUpperCase())}" placeholder="#5865F2"></label>
               </div>
             </div>
@@ -6306,14 +6472,75 @@ function settingsPanelHTML(section) {
 
         </div>`;
     }
-    case 'profiles':
+    case 'profiles': {
+      const pBanner = u.banner_url ? `background-image:url('${escapeHtml(u.banner_url)}');background-color:${escapeHtml(u.banner_color || '#5865F2')};background-size:cover;background-position:center` : `background:${escapeHtml(u.banner_color || '#5865F2')}`;
+      const pAccent = u.accent_color || '#5865F2';
+      const pSince = new Date(u.created_at || Date.now()).toLocaleDateString([], { year: 'numeric', month: 'long', day: 'numeric' });
+      const pBadges = (u.badges || []).length;
       return `
         <h4>Profiles</h4>
-        <p style="color:var(--text-muted);font-size:14px;margin-bottom:18px;line-height:1.5">Personalise how your name and banner appear across Crossroads.</p>
-        <div class="field"><label>Banner Color</label>
-          <div class="color-row" id="prof-banner-row">${PALETTE.map(c => `<span class="swatch${(u.banner_color || '#5865F2').toLowerCase() === c.toLowerCase() ? ' sel' : ''}" data-color="${c}" style="background:${c}"></span>`).join('')}</div>
-          <div class="hint">Used for your banner whenever you have not uploaded a banner image.</div>
+        <p style="color:var(--text-muted);font-size:14px;margin-bottom:18px;line-height:1.5">Design how you appear across Crossroads. Changes preview live and save with the button below.</p>
+        <div class="prof-revamp">
+          <div class="prof-preview-card" id="prof-preview-card">
+            <div class="prof-preview-banner" id="prof-preview-banner" style="${pBanner}"></div>
+            <div class="prof-preview-body">
+              <div class="prof-preview-avatar" id="prof-preview-avatar">${avatarHTML(u, 76, u.status || 'online')}</div>
+              <div class="prof-preview-name" id="prof-preview-name">${escapeHtml(u.display_name || u.username)}</div>
+              <div class="prof-preview-tag" id="prof-preview-tag">${escapeHtml(fullTag(u))}</div>
+              <div class="prof-preview-status" id="prof-preview-status">${escapeHtml(u.custom_status || '')}</div>
+              <div class="prof-preview-bio" id="prof-preview-bio">${escapeHtml(u.bio || 'No bio yet.')}</div>
+            </div>
+          </div>
+          <div class="prof-fields">
+            <section class="acct-card">
+              <div class="acct-card-head"><div><h5>Identity</h5><p class="acct-card-sub">Your public name and details.</p></div></div>
+              <div class="field"><label>Display Name</label><input id="prof-display" maxlength="32" value="${escapeHtml(u.display_name || '')}" placeholder="${escapeHtml(u.username)}"></div>
+              <div class="field"><label>Pronouns</label><input id="prof-pronouns" maxlength="40" value="${escapeHtml(u.pronouns || '')}" placeholder="e.g. they/them"></div>
+              <div class="field"><label>Custom Status</label><input id="prof-custom" maxlength="128" value="${escapeHtml(u.custom_status || '')}" placeholder="What are you up to?"></div>
+              <div class="field"><label>About Me</label><textarea id="prof-bio" maxlength="190" rows="3" placeholder="Tell people a little about yourself\u2026">${escapeHtml(u.bio || '')}</textarea><div class="hint"><span id="prof-bio-count">${(u.bio || '').length}</span>/190</div></div>
+            </section>
+            <section class="acct-card">
+              <div class="acct-card-head"><div><h5>Banner</h5><p class="acct-card-sub">Upload an image or pick a solid colour.</p></div></div>
+              <div class="prof-banner-preview" id="prof-banner-preview" style="${pBanner}">
+                <div class="prof-banner-btns">
+                  <button class="btn secondary" id="prof-banner-upload">${icon('image')} Upload</button>
+                  <button class="btn secondary" id="prof-banner-remove">${icon('trash')} Remove</button>
+                </div>
+              </div>
+              <input type="file" id="prof-banner-file" accept="image/*,image/gif" class="hidden">
+              <div class="color-row" id="prof-banner-row" style="margin-top:12px">${PALETTE.map(c => `<span class="swatch${(u.banner_color || '#5865F2').toLowerCase() === c.toLowerCase() ? ' sel' : ''}" data-color="${c}" style="background:${c}"></span>`).join('')}</div>
+            </section>
+            <section class="acct-card">
+              <div class="acct-card-head"><div><h5>Accent Color</h5><p class="acct-card-sub">Tints your profile card and highlights.</p></div></div>
+              <div class="color-row" id="prof-accent-row">${ACCENT_PALETTE.map(c => `<span class="swatch${pAccent.toLowerCase() === c.toLowerCase() ? ' sel' : ''}" data-color="${c}" style="background:${c}"></span>`).join('')}</div>
+              <div class="cc-row">
+                <label class="cc-label" for="prof-accent-custom">Custom colour</label>
+                <span class="cc-picker"><input type="color" id="prof-accent-custom" value="${escapeHtml(pAccent)}" aria-label="Custom accent colour"><span class="cc-hex" id="prof-accent-hex">${escapeHtml(pAccent.toUpperCase())}</span></span>
+              </div>
+            </section>
+            <section class="acct-card">
+              <div class="acct-card-head"><div><h5>Avatar</h5><p class="acct-card-sub">This is how you appear in chats and member lists.</p></div></div>
+              <div class="prof-avatar-row">
+                <div class="prof-avatar-big" id="prof-avatar-big">${avatarHTML(u, 80, u.status || 'online')}</div>
+                <div class="prof-avatar-btns">
+                  <button class="btn secondary" id="prof-avatar-upload">${icon('image')} Upload Avatar</button>
+                  <button class="btn secondary" id="prof-avatar-remove">${icon('trash')} Remove</button>
+                </div>
+              </div>
+              <input type="file" id="prof-avatar-file" accept="image/*" class="hidden">
+            </section>
+            <section class="acct-card">
+              <div class="acct-card-head"><div><h5>Profile Details</h5><p class="acct-card-sub">Account information at a glance.</p></div></div>
+              <div class="prof-detail-grid">
+                <div class="prof-detail"><span>Username</span><b>${escapeHtml(fullTag(u))}</b></div>
+                <div class="prof-detail"><span>User ID</span><b class="prof-copyable" id="prof-copy-id">${escapeHtml(u.id)}</b></div>
+                <div class="prof-detail"><span>Member Since</span><b>${escapeHtml(pSince)}</b></div>
+                <div class="prof-detail"><span>Badges</span><b>${pBadges}</b></div>
+              </div>
+            </section>
+          </div>
         </div>`;
+    }
     case 'privacy':
       return `
         <h4>Privacy &amp; Safety</h4>
@@ -6547,7 +6774,7 @@ function wireAccountPanel() {
       editor.style.backgroundColor = 'transparent';
     } else {
       editor.style.backgroundImage = 'none';
-      editor.style.backgroundColor = bannerColor;
+      editor.style.background = bannerColor;
     }
     previewSelf({ banner_url: settingsUploads.banner_url, banner_color: bannerColor });
   };
@@ -6605,6 +6832,25 @@ function wireAccountPanel() {
   const hint = $('username-hint');
   let usernameOk = true;
   let t = null;
+  /* 24-hour username-change cooldown. */
+  const USERNAME_COOLDOWN_MS = 24 * 60 * 60 * 1000;
+  const lastChange = Number(u.username_changed_at || 0);
+  const cooldownLeft = lastChange ? Math.max(0, USERNAME_COOLDOWN_MS - (Date.now() - lastChange)) : 0;
+  if (cooldownLeft > 0 && unameInput) {
+    unameInput.disabled = true;
+    unameInput.title = 'You can only change your username once every 24 hours.';
+    const updateCooldownHint = () => {
+      const left = Math.max(0, USERNAME_COOLDOWN_MS - (Date.now() - lastChange));
+      if (left <= 0) { unameInput.disabled = false; unameInput.title = ''; hint.textContent = `Your unique tag is #${u.discriminator}`; hint.className = 'hint'; return; }
+      const h = Math.floor(left / 3600000);
+      const m = Math.floor((left % 3600000) / 60000);
+      const s = Math.floor((left % 60000) / 1000);
+      hint.textContent = `Username locked \u2014 you can change it again in ${h}h ${m}m ${s}s.`;
+      hint.className = 'hint bad';
+      setTimeout(updateCooldownHint, 1000);
+    };
+    updateCooldownHint();
+  }
   unameInput.addEventListener('input', () => {
     markDirty();
     clearTimeout(t);
@@ -6659,17 +6905,91 @@ function wireAccountPanel() {
 }
 
 function wireProfilesPanel() {
-  let color = me.banner_color || '#5865F2';
+  let bannerColor = me.banner_color || '#5865F2';
+  let accent = me.accent_color || '#5865F2';
+  let avatarUrl = me.avatar_url || null;
+  let bannerUrl = me.banner_url || null;
+
+  const previewCard = $('prof-preview-card');
+  const previewBanner = $('prof-preview-banner');
+  const bannerPreview = $('prof-banner-preview');
+
+  const paintBanner = () => {
+    [previewBanner, bannerPreview].forEach(el => {
+      if (!el) return;
+      if (bannerUrl) {
+        el.style.backgroundImage = `url('${bannerUrl}')`;
+        el.style.backgroundColor = bannerColor;
+        el.style.backgroundSize = 'cover';
+        el.style.backgroundPosition = 'center';
+      } else {
+        el.style.backgroundImage = 'none';
+        el.style.background = bannerColor;
+      }
+    });
+  };
+  const paintAvatar = () => {
+    const p = Object.assign({}, me, { avatar_url: avatarUrl });
+    const big = $('prof-avatar-big'); if (big) big.innerHTML = avatarHTML(p, 80, me.status || 'online');
+    const pv = $('prof-preview-avatar'); if (pv) pv.innerHTML = avatarHTML(p, 76, me.status || 'online');
+  };
+  const syncBannerSwatches = () => document.querySelectorAll('#prof-banner-row .swatch').forEach(x => x.classList.toggle('sel', (x.dataset.color || '').toLowerCase() === bannerColor.toLowerCase()));
+  const syncAccentSwatches = () => {
+    document.querySelectorAll('#prof-accent-row .swatch').forEach(x => x.classList.toggle('sel', (x.dataset.color || '').toLowerCase() === accent.toLowerCase()));
+    const inp = $('prof-accent-custom'); if (inp && inp.value.toLowerCase() !== accent.toLowerCase()) inp.value = accent;
+    const hex = $('prof-accent-hex'); if (hex) hex.textContent = accent.toUpperCase();
+    applyAccent(previewCard, accent);
+  };
+
   document.querySelectorAll('#prof-banner-row .swatch').forEach(sw => sw.addEventListener('click', () => {
-    color = sw.dataset.color;
-    setSettingsDirty(true);
-    document.querySelectorAll('#prof-banner-row .swatch').forEach(x => x.classList.toggle('sel', x === sw));
+    bannerColor = sw.dataset.color; bannerUrl = null; syncBannerSwatches(); paintBanner(); setSettingsDirty(true);
   }));
+  document.querySelectorAll('#prof-accent-row .swatch').forEach(sw => sw.addEventListener('click', () => {
+    accent = sw.dataset.color; syncAccentSwatches(); setSettingsDirty(true);
+  }));
+  const accentCustom = $('prof-accent-custom');
+  if (accentCustom) accentCustom.addEventListener('input', () => { accent = accentCustom.value; syncAccentSwatches(); setSettingsDirty(true); });
+
+  const bindUpload = (btnId, fileId, kind, onDone) => {
+    const btn = $(btnId), file = $(fileId);
+    if (!btn || !file) return;
+    btn.addEventListener('click', () => file.click());
+    file.addEventListener('change', (e) => {
+      const f = e.target.files[0]; e.target.value = ''; if (!f) return;
+      openImageEditor(f, { kind, title: kind === 'avatar' ? 'Adjust Avatar' : 'Adjust Banner', onSave: async (blob, filename) => {
+        try { const d = await uploadImage(blob, filename); onDone(d.url); setSettingsDirty(true); }
+        catch (err) { toast(err.message, 'error'); }
+      } });
+    });
+  };
+  bindUpload('prof-avatar-upload', 'prof-avatar-file', 'avatar', (url) => { avatarUrl = url; paintAvatar(); });
+  bindUpload('prof-banner-upload', 'prof-banner-file', 'banner', (url) => { bannerUrl = url; paintBanner(); });
+  const avRm = $('prof-avatar-remove'); if (avRm) avRm.addEventListener('click', () => { avatarUrl = null; paintAvatar(); setSettingsDirty(true); });
+  const bnRm = $('prof-banner-remove'); if (bnRm) bnRm.addEventListener('click', () => { bannerUrl = null; paintBanner(); setSettingsDirty(true); });
+
+  const bindPreview = (id, fn) => { const el = $(id); if (el) el.addEventListener('input', () => { fn(el.value); setSettingsDirty(true); }); };
+  bindPreview('prof-display', (v) => { const n = $('prof-preview-name'); if (n) n.textContent = v.trim() || me.username; });
+  bindPreview('prof-custom', (v) => { const s = $('prof-preview-status'); if (s) s.textContent = v.trim(); });
+  bindPreview('prof-bio', (v) => { const b = $('prof-preview-bio'); if (b) b.textContent = v.trim() || 'No bio yet.'; const c = $('prof-bio-count'); if (c) c.textContent = v.length; });
+  const copyId = $('prof-copy-id'); if (copyId) makeCopyable(copyId, me.id, 'User ID');
+
+  paintBanner(); paintAvatar(); syncBannerSwatches(); syncAccentSwatches();
+
   const doSave = async () => {
     try {
-      const { user } = await api('/api/me', { method: 'PATCH', body: JSON.stringify({ banner_color: color }) });
+      const body = {
+        display_name: ($('prof-display').value.trim() || null),
+        pronouns: $('prof-pronouns').value.trim(),
+        custom_status: $('prof-custom').value.trim(),
+        bio: $('prof-bio').value.trim(),
+        banner_color: bannerColor,
+        accent_color: accent,
+        avatar_url: avatarUrl,
+        banner_url: bannerUrl
+      };
+      const { user } = await api('/api/me', { method: 'PATCH', body: JSON.stringify(body) });
       me = user; localStorage.setItem('cr_user', JSON.stringify(me));
-      toast('Profile style saved', 'success');
+      toast('Profile saved', 'success');
       return true;
     } catch (e) { toast(e.message, 'error'); return false; }
   };
@@ -7099,7 +7419,7 @@ function wireLanguage() {
   sel.value = setting('language') || 'English, US';
   sel.addEventListener('change', () => {
     stageSetting('language', sel.value);
-    applyLanguage();
+    applyLanguageLite();
   });
   const vol = $('voice-volume');
   if (vol) vol.addEventListener('change', () => stageSetting('inputVolume', Number(vol.value)));
@@ -8041,7 +8361,8 @@ function serverMenu(e) {
   const isOwner = state.server.owner_id === me.id;
   const admin = amIAdmin();
   const items = [
-    { label: 'Invite People', icon: 'user-plus', onClick: () => openInviteModal() }
+    { label: 'Invite People', icon: 'user-plus', onClick: () => openInviteModal() },
+    { label: 'Copy Server ID', icon: 'id-badge', onClick: () => copyToClipboard(state.server.id, 'Server ID') }
   ];
   /* Management entries are only shown to the owner and server admins. */
   if (admin) {
@@ -8398,9 +8719,15 @@ function renderServerTab(tab, s, isOwner) {
     return;
   }
   // Overview
-  const bannerStyle = s.banner_url
-    ? `background-image:url('${escapeHtml(s.banner_url)}')`
-    : `background:linear-gradient(135deg, var(--brand), color-mix(in srgb, var(--brand) 40%, #000))`;
+  const bannerScale = Number(s.banner_scale) > 0 ? Number(s.banner_scale) : 1;
+  const posParts = String(s.banner_position || '50% 50%').split(/\s+/);
+  const posX = parseInt(posParts[0], 10) || 0;
+  const posY = parseInt(posParts[1], 10) || 0;
+  const bannerFallback = 'linear-gradient(135deg, var(--brand), color-mix(in srgb, var(--brand) 40%, #000))';
+  const bannerStyle = s.banner_url ? '' : `background:${bannerFallback}`;
+  const bannerImgStyle = s.banner_url
+    ? `background-image:url('${escapeHtml(s.banner_url)}');background-size:cover;background-position:${posX}% ${posY}%;transform:scale(${bannerScale})`
+    : '';
   const created = new Date(s.created_at).toLocaleDateString([], { year: 'numeric', month: 'long', day: 'numeric' });
   body.innerHTML = `
     <div class="ss-overview">
@@ -8418,6 +8745,7 @@ function renderServerTab(tab, s, isOwner) {
         </div>
       </div>
       <div class="ss-banner" id="ss-banner" style="${bannerStyle}">
+        <div class="ss-banner-img" id="ss-banner-img" style="${bannerImgStyle}"></div>
         <div class="ss-banner-shade"></div>
         <div class="ss-banner-actions">
           <button class="ss-banner-btn" id="ss-banner-upload">${icon('image')} ${s.banner_url ? 'Change Banner' : 'Upload Banner'}</button>
@@ -8426,6 +8754,15 @@ function renderServerTab(tab, s, isOwner) {
         <input type="file" id="ss-banner-file" accept="image/*,image/gif" class="hidden">
       </div>
       <div class="ss-banner-hint">${icon('image')} Recommended 960&times;240. Animated GIFs are supported and will play in the sidebar.</div>
+      ${s.banner_url ? `<div class="ss-banner-tools" id="ss-banner-tools">
+        <div class="ss-tool"><label>Zoom <span id="ss-scale-val">${Math.round(bannerScale * 100)}%</span></label>
+          <input type="range" id="ss-banner-scale" min="1" max="3" step="0.05" value="${bannerScale}" ${isOwner ? '' : 'disabled'}></div>
+        <div class="ss-tool"><label>Horizontal <span id="ss-posx-val">${posX}%</span></label>
+          <input type="range" id="ss-banner-posx" min="0" max="100" step="1" value="${posX}" ${isOwner ? '' : 'disabled'}></div>
+        <div class="ss-tool"><label>Vertical <span id="ss-posy-val">${posY}%</span></label>
+          <input type="range" id="ss-banner-posy" min="0" max="100" step="1" value="${posY}" ${isOwner ? '' : 'disabled'}></div>
+        <button class="btn secondary ss-tool-reset" id="ss-banner-reset" ${isOwner ? '' : 'disabled'}>${icon('refresh')} Reset</button>
+      </div>` : ''}
       <div class="ss-fields">
         <div class="field"><label>Server Description</label>
           <div class="ss-desc-wrap">
@@ -8450,6 +8787,7 @@ function renderServerTab(tab, s, isOwner) {
 
   let iconUrl = s.icon_url || null;
   let bannerUrl = s.banner_url || null;
+  let bannerScaleV = bannerScale, bannerPosX = posX, bannerPosY = posY;
   const iconDrop = $('ss-icon-drop');
   if (isOwner && iconDrop) {
     iconDrop.addEventListener('click', () => $('ss-icon-file').click());
@@ -8464,28 +8802,71 @@ function renderServerTab(tab, s, isOwner) {
     });
   }
   const bannerEl = $('ss-banner');
+  const bannerImgEl = $('ss-banner-img');
+  const paintBannerImg = () => {
+    if (!bannerImgEl) return;
+    if (bannerUrl) {
+      bannerImgEl.style.backgroundImage = `url('${bannerUrl}')`;
+      bannerImgEl.style.backgroundSize = 'cover';
+      bannerImgEl.style.backgroundPosition = `${bannerPosX}% ${bannerPosY}%`;
+      bannerImgEl.style.transform = `scale(${bannerScaleV})`;
+    } else {
+      bannerImgEl.style.backgroundImage = 'none';
+    }
+  };
   if (isOwner && bannerEl) {
     $('ss-banner-upload').addEventListener('click', () => $('ss-banner-file').click());
     $('ss-banner-file').addEventListener('change', async (e) => {
       const f = e.target.files[0]; if (!f) return;
       try {
         const d = await uploadImage(f); bannerUrl = d.url;
-        bannerEl.style.background = `url('${d.url}') center/cover`;
+        if (bannerEl) bannerEl.style.background = bannerFallback;
+        paintBannerImg();
       } catch (err) { toast(err.message, 'error'); }
       e.target.value = '';
     });
     const rm = $('ss-banner-remove');
     if (rm) rm.addEventListener('click', () => {
       bannerUrl = null;
-      bannerEl.style.background = 'linear-gradient(135deg, var(--brand), color-mix(in srgb, var(--brand) 40%, #000))';
+      if (bannerEl) bannerEl.style.background = bannerFallback;
+      paintBannerImg();
       rm.remove();
+    });
+    const scaleInput = $('ss-banner-scale');
+    const posxInput = $('ss-banner-posx');
+    const posyInput = $('ss-banner-posy');
+    if (scaleInput) scaleInput.addEventListener('input', () => {
+      bannerScaleV = Number(scaleInput.value) || 1;
+      const lbl = $('ss-scale-val'); if (lbl) lbl.textContent = Math.round(bannerScaleV * 100) + '%';
+      paintBannerImg();
+    });
+    if (posxInput) posxInput.addEventListener('input', () => {
+      bannerPosX = parseInt(posxInput.value, 10) || 0;
+      const lbl = $('ss-posx-val'); if (lbl) lbl.textContent = bannerPosX + '%';
+      paintBannerImg();
+    });
+    if (posyInput) posyInput.addEventListener('input', () => {
+      bannerPosY = parseInt(posyInput.value, 10) || 0;
+      const lbl = $('ss-posy-val'); if (lbl) lbl.textContent = bannerPosY + '%';
+      paintBannerImg();
+    });
+    const resetBtn = $('ss-banner-reset');
+    if (resetBtn) resetBtn.addEventListener('click', () => {
+      bannerScaleV = 1; bannerPosX = 50; bannerPosY = 50;
+      if (scaleInput) scaleInput.value = 1;
+      if (posxInput) posxInput.value = 50;
+      if (posyInput) posyInput.value = 50;
+      const a = $('ss-scale-val'); if (a) a.textContent = '100%';
+      const b = $('ss-posx-val'); if (b) b.textContent = '50%';
+      const c = $('ss-posy-val'); if (c) c.textContent = '50%';
+      paintBannerImg();
     });
   }
   const save = $('ss-save');
   if (save) save.addEventListener('click', async () => {
     save.disabled = true;
     try {
-      const { server } = await api('/api/servers/' + s.id, { method: 'PATCH', body: JSON.stringify({ name: $('ss-name').value.trim(), description: $('ss-desc').value.trim(), icon_url: iconUrl, banner_url: bannerUrl }) });
+      const { server } = await api('/api/servers/' + s.id, { method: 'PATCH', body: JSON.stringify({ name: $('ss-name').value.trim(), description: $('ss-desc').value.trim(), icon_url: iconUrl, banner_url: bannerUrl, banner_scale: bannerScaleV, banner_position: `${bannerPosX}% ${bannerPosY}%` }) });
       state.server = server;
       const sn = $('sidebar-name'); if (sn) sn.textContent = server.name;
       syncSidebarBanner(true);
@@ -9424,9 +9805,10 @@ function bindGlobalEvents() {
   $('attach-btn').addEventListener('click', (e) => {
     e.stopPropagation();
     const r = e.currentTarget.getBoundingClientRect();
-    showContextMenu(r.left, r.top - 104, [
+    showContextMenu(r.left, r.top - 148, [
       { label: 'Images', icon: 'image', onClick: () => pickFile('image/*') },
-      { label: 'Videos & GIFs', icon: 'film', onClick: () => pickFile('video/*,image/gif') }
+      { label: 'Videos & GIFs', icon: 'film', onClick: () => pickFile('video/*,image/gif') },
+      { label: 'Any File', icon: 'upload', onClick: () => pickFile('') }
     ]);
   });
   $('emoji-btn').addEventListener('click', openEmojiPickerForInput);
