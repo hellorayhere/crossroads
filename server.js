@@ -127,7 +127,9 @@ const storage = multer.diskStorage({
     cb(null, `${newId()}${ext}`);
   }
 });
-const upload = multer({ storage, limits: { fileSize: 25 * 1024 * 1024 } });
+/* 50 MB ceiling so animated GIF/WebP avatars, banners and backgrounds fit. */
+const MAX_UPLOAD_BYTES = 50 * 1024 * 1024;
+const upload = multer({ storage, limits: { fileSize: MAX_UPLOAD_BYTES } });
 
 /* ---------------- Helpers ---------------- */
 function sign(user) {
@@ -1927,11 +1929,11 @@ app.get('/api/embed', auth, async (req, res) => {
 
 /* ---------------- Upload ----------------
    Accepts images (including animated GIF/WebP), video, audio and documents.
-   Hard limit: 25 MB. */
+   Hard limit: 50 MB (animated avatars / banners / backgrounds). */
 app.post('/api/upload', auth, (req, res) => {
   upload.single('file')(req, res, (err) => {
     if (err) {
-      if (err.code === 'LIMIT_FILE_SIZE') return res.status(413).json({ error: 'File is too large (maximum 25 MB)' });
+      if (err.code === 'LIMIT_FILE_SIZE') return res.status(413).json({ error: 'File is too large (maximum 50 MB)' });
       return res.status(400).json({ error: err.message || 'Upload failed' });
     }
     if (!req.file) return res.status(400).json({ error: 'No file uploaded' });

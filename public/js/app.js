@@ -2709,7 +2709,7 @@ function replyRefHTML(r) {
 
 function messageNode(m, grouped, animate) {
   const node = document.createElement('div');
-  node.className = 'msg-group' + (grouped ? ' compact' : '') + (animate ? ' fade-in' : '');
+  node.className = 'msg-group' + (grouped ? ' compact' : '');
   node.dataset.mid = m.id;
   node.dataset.uid = m.author.id;
   const a = m.author;
@@ -3290,14 +3290,9 @@ function scrollToBottom() {
   box.scrollTop = box.scrollHeight;
 }
 
-/* Subtle enter animation whenever the user switches server / DM / channel. */
-function animateView() {
-  const box = $('messages');
-  if (!box) return;
-  box.classList.remove('view-enter');
-  void box.offsetWidth;
-  box.classList.add('view-enter');
-}
+/* Discord switches channels instantly - the new view just paints. This is
+   intentionally a no-op so every call site keeps working without any fade. */
+function animateView() { /* no animation on purpose */ }
 
 /* Re-trigger a CSS entrance animation on an element that already exists. */
 function replayAnim(el, cls) {
@@ -4300,8 +4295,14 @@ function wireDropzone(dz, input, onFile) {
   dz.addEventListener('drop', (e) => { e.preventDefault(); dz.classList.remove('drag'); const f = e.dataTransfer.files[0]; if (f) onFile(f); });
   input.addEventListener('change', (e) => { const f = e.target.files[0]; if (f) onFile(f); e.target.value = ''; });
 }
+const MAX_IMAGE_BYTES = 50 * 1024 * 1024;
+function isAnimatedImage(file) {
+  if (!file) return false;
+  return /gif/i.test(file.type || '') || /\.gif$/i.test(file.name || '') ||
+         /webp/i.test(file.type || '') || /\.webp$/i.test(file.name || '');
+}
 async function uploadImage(file, filename) {
-  if (file.size > 25 * 1024 * 1024) throw new Error('Image is too large (maximum 25 MB)');
+  if (file.size > MAX_IMAGE_BYTES) throw new Error('Image is too large (maximum 50 MB)');
   const fd = new FormData();
   fd.append('file', file, filename || file.name || 'upload.png');
   return api('/api/upload', { method: 'POST', body: fd });
@@ -4316,7 +4317,21 @@ function openImageEditor(file, opts = {}) {
   const ch = isBanner ? Math.round(420 * 240 / 600) : 260;
   const outW = isBanner ? 600 : 512;
   const outH = isBanner ? 240 : 512;
-  const isGif = /gif/i.test(file.type) || /\.gif$/i.test(file.name || '');
+  const isGif = isAnimatedImage(file);
+
+  /* Animated GIF/WebP must NOT go through the canvas cropper: drawing a frame
+     to a canvas flattens it into a static PNG. Upload the original file so the
+     animation survives, and tell the user why there is no crop step. */
+  if (isGif) {
+    if (file.size > MAX_IMAGE_BYTES) {
+      toast('That GIF is too large (maximum 50 MB)', 'error');
+      return;
+    }
+    toast('Animated ' + (isBanner ? 'banner' : 'avatar') + ' \u2014 animation preserved', 'success');
+    Promise.resolve(opts.onSave(file, file.name || (isBanner ? 'banner.gif' : 'avatar.gif')))
+      .catch((err) => toast(err.message || 'Upload failed', 'error'));
+    return;
+  }
 
   const url = URL.createObjectURL(file);
   const wrap = document.createElement('div');
@@ -5995,21 +6010,39 @@ function wireAppearance() {
       const f = e.target.files[0]; e.target.value = '';
       if (!f) return;
       if (!/^image\//.test(f.type)) { cbMsg('Please choose an image or GIF file.', 'bad'); return; }
-      const reader = new FileReader();
-      reader.onload = () => {
-        /* A freshly uploaded image gets a slight blur by default so the UI
-           stays readable; the Blur slider can dial it up or back to 0. */
-        const prevOpts = cbOptions(getCustomBg() || {});
-        if (!prevOpts.blur) prevOpts.blur = 6;
-        if (setCustomBg(Object.assign({ url: reader.result }, prevOpts))) {
-          cbMsg(`Applied ${f.name} — animated GIFs play automatically.`, 'ok');
+      if (f.size > MAX_IMAGE_BYTES) { cbMsg('That file is too large (maximum 50 MB).', 'bad'); return; }
+      const prevOpts = cbOptions(getCustomBg() || {});
+      /* A freshly uploaded image gets a slight blur by default so the UI
+         stays readable; the Blur slider can dial it up or back to 0. */
+      if (!prevOpts.blur) prevOpts.blur = 6;
+
+      const applyCfg = (url) => {
+        if (setCustomBg(Object.assign({ url }, prevOpts))) {
+          cbMsg(`Applied ${f.name} \u2014 animated GIFs play automatically.`, 'ok');
           paintCbPreview();
         } else {
-          cbMsg('That file is too large to store locally. Paste an image URL instead.', 'bad');
+          cbMsg('Could not save that background.', 'bad');
         }
       };
-      reader.onerror = () => cbMsg('Could not read that file.', 'bad');
-      reader.readAsDataURL(f);
+
+      /* Upload the file so the browser never has to hold a multi-megabyte
+         data URL (localStorage caps out around 5 MB). This is what lets big
+         animated GIF backgrounds up to 50 MB actually work and stay animated. */
+      cbMsg('Uploading\u2026', 'ok');
+      uploadImage(f, f.name || 'background.gif')
+        .then((d) => applyCfg(d.url))
+        .catch((err) => {
+          /* Offline / not signed in: fall back to an inline data URL, but only
+             for files small enough to fit in localStorage. */
+          if (f.size > 4 * 1024 * 1024) {
+            cbMsg(err.message || 'Upload failed \u2014 that file is too large to store locally.', 'bad');
+            return;
+          }
+          const reader = new FileReader();
+          reader.onload = () => applyCfg(reader.result);
+          reader.onerror = () => cbMsg('Could not read that file.', 'bad');
+          reader.readAsDataURL(f);
+        });
     });
   }
 
