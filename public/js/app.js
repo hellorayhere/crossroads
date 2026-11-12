@@ -4945,14 +4945,14 @@ function renderOtherProfile(user, ctx) {
       <div class="dp-divider"></div>
       <div class="dp-grid">
         <div class="dp-col">
-          ${user.bio ? `<div class="dp-section">
-            <div class="dp-label">About Me</div>
-            <div class="dp-bio">${linkifyBio(user.bio)}</div>
-          </div>` : ''}
           <div class="dp-section">
             <div class="dp-label">Member Since</div>
             <div class="dp-value">${accountCreated}</div>
           </div>
+          ${user.bio ? `<div class="dp-section">
+            <div class="dp-label">About Me</div>
+            <div class="dp-bio">${linkifyBio(user.bio)}</div>
+          </div>` : ''}
           <div class="dp-section">
             <div class="dp-label">Note</div>
             <div class="dp-note" id="pf-note">

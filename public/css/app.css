@@ -623,14 +623,20 @@ button:active, .rail-item:active, .channel:active, .dm-item:active, .member:acti
 /* The avatar is deliberately the top-most layer so it sits IN FRONT of the
    banner (never the other way round). z-index 10 on the avatar wrapper beats
    the banner, its gradient overlay and the body. */
-.dp-head { display: flex; align-items: flex-end; gap: 18px; margin-top: -64px; position: relative; z-index: 5; }
-.dp-avatar { flex: 0 0 auto; position: relative; z-index: 10; }
+/* The avatar is the ONLY thing allowed to climb into the banner. Previously the
+   whole row was pulled up by -64px with align-items:flex-end, so a wrapped
+   display name (or a pronoun / custom status / bio) grew UPWARD and printed on
+   top of the banner art. Now the row starts exactly at the banner's bottom edge
+   and the avatar alone is offset upward, so the name, handle and custom status
+   always render on clean background below the banner. */
+.dp-head { display: flex; align-items: flex-start; gap: 18px; margin-top: 0; position: relative; z-index: 5; }
+.dp-avatar { flex: 0 0 auto; position: relative; z-index: 10; margin-top: -64px; }
 .dp-avatar .avatar {
   border: 7px solid var(--pf-bg); box-sizing: content-box; box-shadow: none;
   position: relative; z-index: 10; border-radius: 50%;
 }
 .dp-avatar .avatar .status-dot { z-index: 11; }
-.dp-identity { flex: 1 1 auto; min-width: 0; padding-bottom: 4px; }
+.dp-identity { flex: 1 1 auto; min-width: 0; padding-top: 8px; }
 .dp-name {
   font-size: 26px; font-weight: 700; line-height: 1.2; color: #f2f3f5;
   word-break: break-word; overflow-wrap: anywhere;
@@ -638,7 +644,7 @@ button:active, .rail-item:active, .channel:active, .dm-item:active, .member:acti
 .dp-handle { font-size: 14px; color: #dbdee1; margin-top: 3px; word-break: break-word; }
 .dp-handle .dp-pronoun { color: #949ba4; }
 .dp-custom { font-size: 13px; color: #b5bac1; margin-top: 6px; word-break: break-word; }
-.dp-actions { flex: 0 0 auto; display: flex; align-items: center; gap: 8px; padding-bottom: 4px; }
+.dp-actions { flex: 0 0 auto; display: flex; align-items: center; gap: 8px; padding-top: 8px; }
 .dp-btn {
   display: flex; align-items: center; justify-content: center; gap: 6px;
   height: 34px; padding: 0 14px; border-radius: 3px; white-space: nowrap;
@@ -1149,7 +1155,8 @@ button:active, .rail-item:active, .channel:active, .dm-item:active, .member:acti
   .oprofile-modal { max-width: 100%; }
   .oprofile-banner { height: 104px; }
   .dp-body { padding: 0 16px 18px; }
-  .dp-head { flex-wrap: wrap; margin-top: -44px; gap: 12px; }
+  .dp-head { flex-wrap: wrap; margin-top: 0; gap: 12px; }
+  .dp-avatar { margin-top: -44px; }
   .dp-avatar .avatar { width: 76px !important; height: 76px !important; }
   .dp-identity { flex: 1 1 140px; }
   .dp-name { font-size: 20px; }
