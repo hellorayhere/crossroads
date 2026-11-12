@@ -1,0 +1,37 @@
+/* gg sans — the typeface Discord uses across its desktop and web apps.
+   Bundled locally so the app renders identically with no external requests. */
+@font-face {
+  font-family: 'gg sans';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('/vendor/ggsans/gg_sans_Regular.woff') format('woff');
+}
+@font-face {
+  font-family: 'gg sans';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url('/vendor/ggsans/gg_sans_Medium.woff') format('woff');
+}
+@font-face {
+  font-family: 'gg sans';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url('/vendor/ggsans/gg_sans_Semibold.woff') format('woff');
+}
+@font-face {
+  font-family: 'gg sans';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url('/vendor/ggsans/gg_sans_Bold.woff') format('woff');
+}
+@font-face {
+  font-family: 'gg sans';
+  font-style: normal;
+  font-weight: 800;
+  font-display: swap;
+  src: url('/vendor/ggsans/gg_sans_Extra_Bold.woff') format('woff');
+}

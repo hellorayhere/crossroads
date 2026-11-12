@@ -1,4 +1,4 @@
-@import url('/vendor/inter/inter.css');
+@import url('/vendor/ggsans/gg-sans.css');
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -16,16 +16,18 @@
 
 /* ---------- Theme base (6 background colours) ---------- */
 body {
+  /* Discord's real dark-theme surface stack. The chat is the lightest panel,
+     the channel sidebar one step darker, and the server rail the darkest. */
   --bg-base: #313338;
   --chat-bg: var(--bg-base);
-  --sidebar-bg: color-mix(in srgb, var(--bg-base) 90%, #000);
-  --rail-bg: color-mix(in srgb, var(--bg-base) 74%, #000);
-  --members-bg: color-mix(in srgb, var(--bg-base) 94%, #000);
-  --input-bg: color-mix(in srgb, var(--bg-base) 84%, #fff);
-  --card: color-mix(in srgb, var(--bg-base) 92%, #000);
-  --menu-bg: color-mix(in srgb, var(--bg-base) 66%, #000);
-  --hover: rgba(255,255,255,0.055);
-  --active: rgba(255,255,255,0.1);
+  --sidebar-bg: color-mix(in srgb, var(--bg-base) 88%, #000);
+  --rail-bg: color-mix(in srgb, var(--bg-base) 61%, #000);
+  --members-bg: color-mix(in srgb, var(--bg-base) 88%, #000);
+  --input-bg: color-mix(in srgb, var(--bg-base) 96%, #fff);
+  --card: color-mix(in srgb, var(--bg-base) 88%, #000);
+  --menu-bg: color-mix(in srgb, var(--bg-base) 35%, #000);
+  --hover: rgba(78,80,88,0.32);
+  --active: rgba(78,80,88,0.48);
   --text-normal: #dbdee1;
   --text-muted: #949ba4;
   --text-faint: #80848e;
@@ -77,11 +79,12 @@ body[data-theme="light"] .msg-group .text code { background: #e9eaec; }
 
 html, body {
   height: 100%;
-  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  font-family: 'gg sans', 'Noto Sans', 'Helvetica Neue', Helvetica, Arial, sans-serif;
   background: var(--chat-bg);
   color: var(--text-normal);
   -webkit-font-smoothing: antialiased;
-  font-size: 15px;
+  font-size: 16px;
+  letter-spacing: 0;
   overflow: hidden;
 }
 
@@ -279,10 +282,10 @@ button:active, .rail-item:active, .channel:active, .dm-item:active, .member:acti
 .msg-group .gutter { width: 40px; flex: 0 0 40px; }
 .msg-group .body { flex: 1; min-width: 0; }
 .msg-group .head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 2px; }
-.msg-group .author { font-size: 15px; font-weight: 600; color: var(--text-header); cursor: pointer; }
+.msg-group .author { font-size: 16px; font-weight: 600; color: var(--text-header); cursor: pointer; }
 .msg-group .author:hover { text-decoration: underline; }
 .msg-group .time { font-size: 12px; color: var(--text-muted); }
-.msg-group .text { font-size: 15px; line-height: 1.4; color: var(--text-normal); word-wrap: break-word; white-space: pre-wrap; }
+.msg-group .text { font-size: 16px; line-height: 1.375; color: var(--text-normal); word-wrap: break-word; white-space: pre-wrap; }
 .msg-group .text a { color: var(--link); text-decoration: none; }
 .msg-group .text a:hover { text-decoration: underline; }
 .msg-group .text .mention { background: rgba(88,101,242,0.3); color: #dee0fc; border-radius: 3px; padding: 0 2px; font-weight: 500; cursor: pointer; }
@@ -372,7 +375,7 @@ button:active, .rail-item:active, .channel:active, .dm-item:active, .member:acti
 .attach-preview button:hover { color: var(--text-header); }
 .composer-box { display: flex; align-items: flex-end; gap: 8px; background: var(--input-bg); border-radius: var(--radius); padding: 0 16px; }
 .composer-box.attached, .composer-box.replying { border-radius: 0 0 var(--radius) var(--radius); }
-.composer-box textarea { flex: 1; background: none; border: none; outline: none; resize: none; color: var(--text-normal); font-size: 15px; line-height: 1.4; padding: 11px 0; max-height: 50vh; }
+.composer-box textarea { flex: 1; background: none; border: none; outline: none; resize: none; color: var(--text-normal); font-size: 16px; line-height: 1.375; padding: 11px 0; max-height: 50vh; }
 .composer-box textarea::placeholder { color: var(--text-faint); }
 .composer-box .cbtn { color: var(--text-muted); font-size: 20px; padding: 10px 0; display: grid; place-items: center; }
 .composer-box .cbtn:hover { color: var(--text-normal); }
