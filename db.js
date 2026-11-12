@@ -191,6 +191,22 @@ CREATE TABLE IF NOT EXISTS server_roles (
   created_at INTEGER NOT NULL
 );
 
+/* Platform profile badges: a custom image + a name, assignable to users by
+   the admin console. Purely additive; existing data is untouched. */
+CREATE TABLE IF NOT EXISTS profile_badges (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  icon_url TEXT NOT NULL,
+  created_at INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS user_badges (
+  user_id TEXT NOT NULL,
+  badge_id TEXT NOT NULL,
+  assigned_at INTEGER NOT NULL,
+  PRIMARY KEY (user_id, badge_id)
+);
+
 /* Lightweight moderation audit trail. */
 CREATE TABLE IF NOT EXISTS server_audit (
   id TEXT PRIMARY KEY,

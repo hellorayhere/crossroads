@@ -734,6 +734,24 @@ function avatarHTML(user, size = 40, status = null) {
   return `<div class="avatar" style="width:${size}px;height:${size}px;font-size:${Math.round(size * 0.42)}px;background-color:${bg};background-clip:padding-box">${inner}${dot}</div>`;
 }
 
+/* Role icons can be a custom uploaded image (URL) or a legacy short glyph. */
+function roleIconHTML(icon, cls = 'role-ico-img') {
+  if (!icon) return '';
+  if (/^(https?:)?\/\//i.test(icon) || icon.startsWith('/uploads/') || icon.startsWith('data:')) {
+    return `<img class="${cls}" src="${escapeHtml(icon)}" alt="" loading="lazy">`;
+  }
+  return `<span class="role-ico">${escapeHtml(icon)}</span>`;
+}
+
+/* Render a user's profile badges as small image+name chips. Badges are
+   assigned by platform admins and arrive on the public user payload. */
+function badgeChips(user, opts = {}) {
+  const list = (user && user.badges) || [];
+  if (!list.length) return '';
+  const cls = opts.compact ? 'badge-chip compact' : 'badge-chip';
+  return `<span class="badge-row">${list.map(b => `<span class="${cls}" title="${escapeHtml(b.name)}"><img src="${escapeHtml(b.icon_url)}" alt="${escapeHtml(b.name)}" loading="lazy"><span class="badge-chip-name">${escapeHtml(b.name)}</span></span>`).join('')}</span>`;
+}
+
 /* ---------------- Settings helpers ---------------- */
 function setting(key) { return state.settings[key] !== undefined ? state.settings[key] : SETTINGS_DEFAULTS[key]; }
 
@@ -3189,8 +3207,8 @@ function renderMembers() {
     const role = state.server.owner_id === m.id ? 'owner' : (m.role || 'member');
     const roleTag = role === 'admin' ? '<span class="member-role-tag admin">ADMIN</span>' : '';
     const crole = (m.custom_role_id && roleById[m.custom_role_id]) || null;
-    const croleTag = crole ? `<span class="member-role-tag" style="color:${crole.color};border-color:${crole.color}">${escapeHtml(crole.name)}</span>` : '';
-    row.innerHTML = `${avatarHTML(m, 36, m.status || 'offline')}<span class="mname">${escapeHtml(m.display_name || m.username)}${crown}${roleTag}${croleTag}</span>`;
+    const croleTag = crole ? `<span class="member-role-tag" style="color:${crole.color};border-color:${crole.color}">${roleIconHTML(crole.icon, 'role-tag-ico')}${escapeHtml(crole.name)}</span>` : '';
+    row.innerHTML = `${avatarHTML(m, 36, m.status || 'offline')}<div class="member-body"><span class="mname">${escapeHtml(m.display_name || m.username)}${crown}${roleTag}${croleTag}</span>${badgeChips(m, { compact: true })}</div>`;
     row.addEventListener('click', () => openProfile(m));
     return row;
   };
@@ -5409,6 +5427,7 @@ function renderOwnProfile(user) {
             <div class="pnav-text">
               <div class="n1">${escapeHtml(displayName)}</div>
               <div class="n2">${escapeHtml(fullTag(user))}</div>
+              ${badgeChips(user)}
             </div>
           </div>
         </div>
@@ -5435,6 +5454,7 @@ function renderOwnProfile(user) {
           <div class="pic-avatar">${avatarHTML(user, 116, user.status || 'offline')}</div>
           <div class="pic-name">${escapeHtml(displayName)}</div>
           <div class="pic-tag">${escapeHtml(fullTag(user))}</div>
+          ${badgeChips(user)}
           <div class="pic-status"><span class="dot ${user.status || 'online'}"></span>${escapeHtml(user.custom_status || statusLabel(user.status))}</div>
           ${user.pronouns ? `<div class="pic-date">${escapeHtml(user.pronouns)}</div>` : ''}
           <div class="pic-date">Member since ${memberSince}</div>
@@ -5526,6 +5546,7 @@ function renderOtherProfile(user, ctx) {
         <div class="dp-identity">
           <div class="dp-name">${escapeHtml(displayName)}</div>
           <div class="dp-handle">${escapeHtml(fullTag(user))}${user.pronouns ? ` <span class="dp-pronoun">\u00b7 ${escapeHtml(user.pronouns)}</span>` : ''}</div>
+          ${badgeChips(user)}
           ${user.custom_status ? `<div class="dp-custom">${escapeHtml(user.custom_status)}</div>` : ''}
         </div>
         <div class="dp-actions">
@@ -6953,6 +6974,7 @@ const ADMIN_TABS = [
   { id: 'dashboard', label: 'Dashboard', icon: 'grid' },
   { id: 'users', label: 'Users', icon: 'users' },
   { id: 'servers', label: 'Servers', icon: 'server' },
+  { id: 'badges', label: 'Profile Badges', icon: 'id-badge' },
   { id: 'announcements', label: 'Announcements', icon: 'megaphone' },
   { id: 'staff', label: 'Staff Access', icon: 'key', ownerOnly: true },
   { id: 'system', label: 'System', icon: 'sliders' },
@@ -7019,6 +7041,7 @@ async function renderAdminTab(tab) {
     dashboard: 'Platform overview, activity and quick actions',
     users: 'Search, inspect and moderate every account',
     servers: 'Manage every server on the platform',
+    badges: 'Create custom image badges and assign them to users',
     announcements: 'Send global messages to all users',
     staff: 'Grant or revoke admin console access',
     system: 'Registration, maintenance and platform settings',
@@ -7029,6 +7052,7 @@ async function renderAdminTab(tab) {
     if (tab === 'dashboard') return await admRenderDashboard(body);
     if (tab === 'users') return await admRenderUsers(body);
     if (tab === 'servers') return await admRenderServers(body);
+    if (tab === 'badges') return await admRenderBadges(body);
     if (tab === 'announcements') return await admRenderAnnouncements(body);
     if (tab === 'staff') return await admRenderStaff(body);
     if (tab === 'system') return await admRenderSystem(body);
@@ -7249,7 +7273,7 @@ async function admRenderUsers(body) {
           <tr>
             <td><div class="adm-user-cell">${avatarHTML({ id: u.id, username: u.username, avatar_url: u.avatar_url, discriminator: u.discriminator, display_name: u.display_name }, 30, u.status)}
               <div><div class="adm-user-name">${escapeHtml(u.display_name || u.username)}${u.verified ? '<span class="adm-badge verified">✓</span>' : ''}${u.platform_admin ? '<span class="adm-badge admin">ADMIN</span>' : ''}</div>
-              <div class="adm-user-tag">${escapeHtml(u.tag)}</div></div></div></td>
+              <div class="adm-user-tag">${escapeHtml(u.tag)}</div>${badgeChips(u, { compact: true })}</div></div></td>
             <td><span class="adm-dot ${u.status}"></span>${escapeHtml(u.status)}</td>
             <td>${u.servers}</td><td>${u.messages}</td>
             <td><div class="adm-flags">${u.banned ? '<span class="adm-badge red">BANNED</span>' : ''}${u.muted ? '<span class="adm-badge amber">MUTED</span>' : ''}${u.disabled ? '<span class="adm-badge red">DISABLED</span>' : ''}</div></td>
@@ -7273,6 +7297,8 @@ async function admRenderUsers(body) {
 async function openAdminUser(u) {
   let notes = [];
   try { notes = (await api('/api/admin/users/' + u.id + '/notes')).notes; } catch (e) {}
+  let allBadges = [], assignedBadges = [];
+  try { const bd = await api('/api/admin/users/' + u.id + '/badges'); allBadges = bd.badges || []; assignedBadges = bd.assigned || []; } catch (e) {}
   const ownerBlocked = u.platform_owner;
   const disabledAttr = ownerBlocked ? 'disabled title="The owner account is protected"' : '';
   openModal(`
@@ -7282,6 +7308,7 @@ async function openAdminUser(u) {
         <div>
           <h3>${escapeHtml(u.display_name || u.username)} ${u.verified ? '<span class="adm-badge verified">✓</span>' : ''}</h3>
           <div class="adm-user-tag">${escapeHtml(u.tag)} · ${escapeHtml(u.id)}</div>
+          ${badgeChips(u)}
           <div class="adm-flags">
             ${u.platform_owner ? '<span class="adm-badge admin">OWNER</span>' : ''}
             ${u.platform_admin && !u.platform_owner ? '<span class="adm-badge admin">STAFF</span>' : ''}
@@ -7336,6 +7363,16 @@ async function openAdminUser(u) {
         <button class="adm-action" data-ua="message">${icon('comment')} Direct message</button>
       </div>
 
+      <div class="adm-section-title">Profile badges</div>
+      <div class="adm-badge-assign">
+        ${allBadges.length ? allBadges.map(b => `
+          <label class="adm-badge-assign-row">
+            <img src="${escapeHtml(b.icon_url)}" alt="${escapeHtml(b.name)}">
+            <span class="aba-name">${escapeHtml(b.name)}</span>
+            <input type="checkbox" data-badge="${b.id}" ${assignedBadges.includes(b.id) ? 'checked' : ''}>
+          </label>`).join('') : `<div class="adm-badge-empty">No badges yet. Create them in the Profile Badges tab.</div>`}
+      </div>
+
       <div class="adm-section-title">Staff access</div>
       <div class="adm-action-grid">
         ${u.platform_owner
@@ -7360,6 +7397,14 @@ async function openAdminUser(u) {
     </div>`, { modalClass: 'adm-user-modal-wrap' });
   $('adm-user-back').addEventListener('click', () => openAdminPanel('users'));
   document.querySelectorAll('[data-ua]').forEach(b => b.addEventListener('click', () => admUserAction(u, b.dataset.ua)));
+  document.querySelectorAll('[data-badge]').forEach(cb => cb.addEventListener('change', async () => {
+    cb.disabled = true;
+    try {
+      await api('/api/admin/users/' + u.id + '/badges', { method: 'POST', body: JSON.stringify({ badge_id: cb.dataset.badge, assigned: cb.checked }) });
+      toast(cb.checked ? 'Badge assigned' : 'Badge removed', 'success');
+    } catch (e) { cb.checked = !cb.checked; toast(e.message, 'error'); }
+    cb.disabled = false;
+  }));
 }
 async function admUserAction(u, action) {
   const needsValue = ['set_username', 'set_display_name', 'set_discriminator', 'set_bio', 'set_pronouns',
@@ -7407,6 +7452,92 @@ async function admUserAction(u, action) {
     toast('Action applied: ' + action.replace(/_/g, ' '), 'success');
     openAdminPanel('users');
   } catch (e) { toast(e.message, 'error'); }
+}
+
+/* ---- Profile badges ---- */
+async function admRenderBadges(body) {
+  const data = await api('/api/admin/badges');
+  body.innerHTML = `
+    <div class="adm-toolbar">
+      <div class="adm-count">${data.badges.length} badge${data.badges.length === 1 ? '' : 's'}</div>
+      <button class="btn" id="adm-new-badge">${icon('plus')} New Badge</button>
+    </div>
+    ${data.badges.length ? `<div class="adm-badge-grid">${data.badges.map(b => `
+      <div class="adm-badge-card">
+        <img src="${escapeHtml(b.icon_url)}" alt="${escapeHtml(b.name)}">
+        <div class="adm-badge-info"><b>${escapeHtml(b.name)}</b><span>${b.assigned_count} member${b.assigned_count === 1 ? '' : 's'}</span></div>
+        <div class="adm-badge-actions">
+          <button data-edit-badge="${b.id}" title="Edit">${icon('pencil')}</button>
+          <button class="danger" data-del-badge="${b.id}" title="Delete">${icon('trash')}</button>
+        </div>
+      </div>`).join('')}</div>`
+      : `<div class="adm-badge-empty">${icon('id-badge')}<div style="margin-top:8px">No profile badges yet. Create one with a custom image and a name.</div></div>`}
+    <div class="adm-note" style="margin-top:16px">${icon('circle-info')} Assign badges to a user from <b>Users &rarr; Manage</b>. Badges show under the username on profiles and in the member list.</div>`;
+  hydrateIcons(body);
+  const nb = $('adm-new-badge');
+  if (nb) nb.addEventListener('click', () => admBadgeDialog(null));
+  body.querySelectorAll('[data-edit-badge]').forEach(b => b.addEventListener('click', () => {
+    const badge = data.badges.find(x => x.id === b.dataset.editBadge);
+    if (badge) admBadgeDialog(badge);
+  }));
+  body.querySelectorAll('[data-del-badge]').forEach(b => b.addEventListener('click', async () => {
+    const badge = data.badges.find(x => x.id === b.dataset.delBadge);
+    const ok = await confirmDialog({ title: 'Delete Badge', body: `Delete <b>${escapeHtml(badge ? badge.name : 'this badge')}</b>? It will be removed from every user who has it.`, confirmText: 'Delete', danger: true });
+    if (!ok) return;
+    try { await api('/api/admin/badges/' + b.dataset.delBadge, { method: 'DELETE' }); toast('Badge deleted', 'success'); renderAdminTab('badges'); }
+    catch (e) { toast(e.message, 'error'); }
+  }));
+}
+
+function admBadgeDialog(badge) {
+  const wrap = document.createElement('div');
+  wrap.className = 'confirm-overlay';
+  wrap.innerHTML = `<div class="confirm-box">
+    <h3>${badge ? 'Edit Badge' : 'New Profile Badge'}</h3>
+    <p>Badges appear under a user's username on their profile and in the member list.</p>
+    <div class="field"><label>Badge Name</label><input id="ab-name" maxlength="40" value="${escapeHtml(badge ? badge.name : '')}" placeholder="e.g. Founder, Verified, Artist"></div>
+    <div class="field"><label>Badge Image</label>
+      <div class="re-icon-picker">
+        <div class="re-icon-preview" id="ab-preview">${badge && badge.icon_url ? `<img src="${escapeHtml(badge.icon_url)}" alt="">` : icon('image')}</div>
+        <div class="re-icon-actions">
+          <button type="button" class="re-icon-btn" id="ab-upload">${icon('upload')} Upload image</button>
+        </div>
+        <input type="file" id="ab-file" accept="image/*" hidden>
+      </div>
+    </div>
+    <div class="confirm-actions"><button class="btn ghost" id="ab-cancel">Cancel</button><button class="btn" id="ab-save">${badge ? 'Save Changes' : 'Create Badge'}</button></div>
+  </div>`;
+  document.body.appendChild(wrap);
+  hydrateIcons(wrap);
+  let iconUrl = badge ? badge.icon_url : '';
+  const preview = wrap.querySelector('#ab-preview');
+  const file = wrap.querySelector('#ab-file');
+  const setPreview = () => {
+    preview.innerHTML = iconUrl ? `<img src="${escapeHtml(iconUrl)}" alt="">` : icon('image');
+    if (!iconUrl) hydrateIcons(preview);
+  };
+  wrap.querySelector('#ab-upload').addEventListener('click', () => file.click());
+  file.addEventListener('change', async (e) => {
+    const f = e.target.files[0]; if (!f) return;
+    try { const d = await uploadImage(f); iconUrl = d.url; setPreview(); }
+    catch (err) { toast(err.message, 'error'); }
+    e.target.value = '';
+  });
+  const done = () => wrap.remove();
+  wrap.querySelector('#ab-cancel').addEventListener('click', done);
+  wrap.addEventListener('click', (e) => { if (e.target === wrap) done(); });
+  wrap.querySelector('#ab-save').addEventListener('click', async () => {
+    const name = wrap.querySelector('#ab-name').value.trim();
+    if (!name) { toast('Badge name required', 'error'); return; }
+    if (!iconUrl) { toast('Badge image required', 'error'); return; }
+    try {
+      if (badge) await api('/api/admin/badges/' + badge.id, { method: 'PATCH', body: JSON.stringify({ name, icon_url: iconUrl }) });
+      else await api('/api/admin/badges', { method: 'POST', body: JSON.stringify({ name, icon_url: iconUrl }) });
+      done();
+      toast(badge ? 'Badge updated' : 'Badge created', 'success');
+      renderAdminTab('badges');
+    } catch (e) { toast(e.message, 'error'); }
+  });
 }
 
 async function admRenderServers(body) {
@@ -8215,9 +8346,9 @@ function renderRolesTab(body, s) {
   const roles = (state.roles || []).slice().sort((a, b) => (b.position || 0) - (a.position || 0));
   const members = state.members || [];
   const builtins = [
-    { name: 'Owner', color: '#f0b232', desc: 'Full access. The owner cannot be removed or demoted.', count: 1, locked: true },
-    { name: 'Admin', color: '#f23f43', desc: 'Can manage channels, roles, members and moderation.', count: members.filter(m => m.role === 'admin' && m.id !== s.owner_id).length },
-    { name: 'Member', color: '#949ba4', desc: 'Standard access to channels and conversations.', count: members.filter(m => m.id !== s.owner_id && (m.role || 'member') === 'member').length }
+    { id: 'owner', name: 'Owner', color: '#f0b232', desc: 'Full access. The owner cannot be removed or demoted.', count: 1, locked: true },
+    { id: 'admin', name: 'Admin', color: '#f23f43', desc: 'Can manage channels, roles, members and moderation.', count: members.filter(m => m.role === 'admin' && m.id !== s.owner_id).length, manageable: true },
+    { id: 'member', name: 'Member', color: '#949ba4', desc: 'Standard access to channels and conversations.', count: members.filter(m => m.id !== s.owner_id && (m.role || 'member') === 'member').length, manageable: true }
   ];
   const roleRow = (r, i) => {
     const perms = parseRolePerms(r);
@@ -8234,11 +8365,11 @@ function renderRolesTab(body, s) {
       </div>
       <span class="role-dot" style="background:${roleGradient(r)}"></span>
       <div class="ss-role-info">
-        <div class="ss-role-name" style="color:${r.color}">${r.icon ? `<span class="role-ico">${escapeHtml(r.icon)}</span>` : ''}${escapeHtml(r.name)}</div>
+        <div class="ss-role-name" style="color:${r.color}">${roleIconHTML(r.icon)}${escapeHtml(r.name)}</div>
         <div class="ss-role-desc">${r.member_count || 0} member${(r.member_count || 0) === 1 ? '' : 's'} &middot; ${permCount} permission${permCount === 1 ? '' : 's'}</div>
         <div class="role-flags">${badges}</div>
       </div>
-      ${admin ? `<div class="ss-role-actions"><button class="ss-icon-btn" data-edit-role="${r.id}" title="Edit">${icon('pencil')}</button><button class="ss-icon-btn ban" data-del-role="${r.id}" title="Delete">${icon('trash')}</button></div>` : ''}
+      ${admin ? `<div class="ss-role-actions"><button class="ss-icon-btn" data-assign-role="${r.id}" title="Assign members">${icon('user-plus')}</button><button class="ss-icon-btn" data-edit-role="${r.id}" title="Edit">${icon('pencil')}</button><button class="ss-icon-btn ban" data-del-role="${r.id}" title="Delete">${icon('trash')}</button></div>` : ''}
     </div>`;
   };
   body.innerHTML = `
@@ -8249,6 +8380,7 @@ function renderRolesTab(body, s) {
           <div class="role-order placeholder"></div>
           <span class="role-dot" style="background:${r.color}"></span>
           <div class="ss-role-info"><div class="ss-role-name">${r.name}${r.locked ? ` ${icon('lock')}` : ''}</div><div class="ss-role-desc">${r.desc}</div></div>
+          ${admin && r.manageable ? `<button class="ss-icon-btn" data-assign-builtin="${r.id}" title="Manage members">${icon('users')}</button>` : ''}
           <span class="ss-role-count">${r.count}</span>
         </div>`).join('')}
       </div>
@@ -8266,6 +8398,8 @@ function renderRolesTab(body, s) {
   body.querySelectorAll('[data-edit-role]').forEach(b => b.addEventListener('click', () => { const r = (state.roles || []).find(x => x.id === b.dataset.editRole); if (r) openRoleEditor(s, r); }));
   body.querySelectorAll('[data-move-up]').forEach(b => b.addEventListener('click', () => moveServerRole(s, b.dataset.moveUp, 'up')));
   body.querySelectorAll('[data-move-down]').forEach(b => b.addEventListener('click', () => moveServerRole(s, b.dataset.moveDown, 'down')));
+  body.querySelectorAll('[data-assign-role]').forEach(b => b.addEventListener('click', () => openRoleAssign(s, b.dataset.assignRole)));
+  body.querySelectorAll('[data-assign-builtin]').forEach(b => b.addEventListener('click', () => openBuiltinAssign(s, b.dataset.assignBuiltin)));
 }
 
 async function moveServerRole(s, rid, dir) {
@@ -8276,53 +8410,205 @@ async function moveServerRole(s, rid, dir) {
   } catch (e) { toast(e.message, 'error'); }
 }
 
+/* Assign a custom role to members. Changes save instantly and the member list
+   (including any hoisted "display separately" group) refreshes when closed. */
+function openRoleAssign(s, roleId) {
+  const role = (state.roles || []).find(r => r.id === roleId);
+  if (!role) return;
+  const members = state.members || [];
+  const wrap = document.createElement('div');
+  wrap.className = 'confirm-overlay';
+  wrap.innerHTML = `<div class="confirm-box role-assign-box">
+    <div class="ra-head">
+      <div>
+        <h3>Assign \\u201c${escapeHtml(role.name)}\\u201d</h3>
+        <p class="ra-sub">Tick the members who should have this role. Changes save instantly.</p>
+      </div>
+      <span class="ra-role-chip" style="color:${role.color};border-color:${role.color}66;background:${role.color}18">${roleIconHTML(role.icon, 'role-tag-ico')}${escapeHtml(role.name)}</span>
+    </div>
+    <div class="ra-search">${icon('search')}<input id="ra-search" placeholder="Search members\\u2026"></div>
+    <div class="ra-list" id="ra-list"></div>
+    <div class="confirm-actions"><button class="btn" id="ra-done">Done</button></div>
+  </div>`;
+  document.body.appendChild(wrap);
+  hydrateIcons(wrap);
+  const list = wrap.querySelector('#ra-list');
+  const renderList = (q = '') => {
+    const needle = q.toLowerCase();
+    const filtered = members.filter(m => !needle ||
+      (m.display_name || m.username || '').toLowerCase().includes(needle) ||
+      (m.username || '').toLowerCase().includes(needle));
+    list.innerHTML = filtered.map(m => {
+      const isOwner = m.id === s.owner_id;
+      const checked = m.custom_role_id === role.id;
+      return `<label class="ra-row">
+        ${avatarHTML(m, 32, m.status || 'offline')}
+        <div class="ra-name"><b>${escapeHtml(m.display_name || m.username)}</b><span>${escapeHtml(fullTag(m))}</span></div>
+        ${isOwner
+          ? `<span class="ra-owner-tag">${icon('crown')} Owner</span>`
+          : `<input type="checkbox" data-uid="${m.id}" ${checked ? 'checked' : ''}>`}
+      </label>`;
+    }).join('') || '<div class="inv-empty">No members found.</div>';
+    hydrateIcons(list);
+    list.querySelectorAll('input[data-uid]').forEach(cb => cb.addEventListener('change', async () => {
+      const uid = cb.dataset.uid;
+      cb.disabled = true;
+      try {
+        await api('/api/servers/' + s.id + '/members/' + uid, { method: 'PATCH', body: JSON.stringify({ custom_role_id: cb.checked ? role.id : null }) });
+        const m = members.find(x => x.id === uid);
+        if (m) m.custom_role_id = cb.checked ? role.id : null;
+        role.member_count = Math.max(0, (role.member_count || 0) + (cb.checked ? 1 : -1));
+        renderMembers();
+      } catch (e) { cb.checked = !cb.checked; toast(e.message, 'error'); }
+      cb.disabled = false;
+    }));
+  };
+  renderList();
+  wrap.querySelector('#ra-search').addEventListener('input', e => renderList(e.target.value.trim()));
+  const done = () => { wrap.remove(); refreshRoles().then(() => { renderServerTab('roles', state.server, state.server.owner_id === me.id); renderMembers(); }); };
+  wrap.querySelector('#ra-done').addEventListener('click', done);
+  wrap.addEventListener('click', e => { if (e.target === wrap) done(); });
+}
+
+/* Manage the built-in Owner / Admin / Member role for each member. */
+function openBuiltinAssign(s) {
+  const members = state.members || [];
+  const wrap = document.createElement('div');
+  wrap.className = 'confirm-overlay';
+  wrap.innerHTML = `<div class="confirm-box role-assign-box">
+    <div class="ra-head">
+      <div>
+        <h3>Server roles</h3>
+        <p class="ra-sub">Choose Admin or Member for each person. The owner is always locked.</p>
+      </div>
+    </div>
+    <div class="ra-search">${icon('search')}<input id="ra-search" placeholder="Search members\\u2026"></div>
+    <div class="ra-list" id="ra-list"></div>
+    <div class="confirm-actions"><button class="btn" id="ra-done">Done</button></div>
+  </div>`;
+  document.body.appendChild(wrap);
+  hydrateIcons(wrap);
+  const list = wrap.querySelector('#ra-list');
+  const renderList = (q = '') => {
+    const needle = q.toLowerCase();
+    const filtered = members.filter(m => !needle ||
+      (m.display_name || m.username || '').toLowerCase().includes(needle) ||
+      (m.username || '').toLowerCase().includes(needle));
+    list.innerHTML = filtered.map(m => {
+      const isOwner = m.id === s.owner_id;
+      const role = isOwner ? 'owner' : (m.role || 'member');
+      return `<div class="ra-row">
+        ${avatarHTML(m, 32, m.status || 'offline')}
+        <div class="ra-name"><b>${escapeHtml(m.display_name || m.username)}</b><span>${escapeHtml(fullTag(m))}</span></div>
+        ${isOwner
+          ? `<span class="ra-owner-tag">${icon('crown')} Owner</span>`
+          : `<select class="ra-role-select" data-uid="${m.id}">
+               <option value="member"${role === 'member' ? ' selected' : ''}>Member</option>
+               <option value="admin"${role === 'admin' ? ' selected' : ''}>Admin</option>
+             </select>`}
+      </div>`;
+    }).join('') || '<div class="inv-empty">No members found.</div>';
+    list.querySelectorAll('select[data-uid]').forEach(sel => sel.addEventListener('change', async () => {
+      const uid = sel.dataset.uid;
+      sel.disabled = true;
+      try {
+        await api('/api/servers/' + s.id + '/members/' + uid, { method: 'PATCH', body: JSON.stringify({ role: sel.value }) });
+        const m = members.find(x => x.id === uid);
+        if (m) m.role = sel.value;
+        toast(sel.value === 'admin' ? 'Member promoted to admin' : 'Admin demoted to member', 'success');
+        renderMembers();
+      } catch (e) { toast(e.message, 'error'); }
+      sel.disabled = false;
+    }));
+  };
+  renderList();
+  wrap.querySelector('#ra-search').addEventListener('input', e => renderList(e.target.value.trim()));
+  const done = () => { wrap.remove(); refreshRoles().then(() => { renderServerTab('roles', state.server, state.server.owner_id === me.id); renderMembers(); }); };
+  wrap.querySelector('#ra-done').addEventListener('click', done);
+  wrap.addEventListener('click', e => { if (e.target === wrap) done(); });
+}
+
 function openRoleEditor(s, role) {
   const colors = PALETTE;
   const cur = role ? role.color : '#5865F2';
   const cur2 = (role && role.color2) || '';
   const perms = parseRolePerms(role);
+  const iconIsImage = role && role.icon && (/^(https?:)?\/\//i.test(role.icon) || role.icon.startsWith('/uploads/') || role.icon.startsWith('data:'));
   const wrap = document.createElement('div');
   wrap.className = 'confirm-overlay';
   wrap.innerHTML = `<div class="confirm-box role-editor">
     <h3>${role ? 'Edit Role' : 'Create Role'}</h3>
     <div class="re-preview" id="re-preview">
-      <span class="re-preview-chip" id="re-preview-chip">${escapeHtml(role ? role.name : 'New Role')}</span>
+      <span class="re-preview-chip" id="re-preview-chip"></span>
       <span class="re-preview-hint">Live preview</span>
     </div>
     <div class="re-grid">
       <div class="field"><label>Role Name</label><input id="role-name" maxlength="32" value="${escapeHtml(role ? role.name : '')}" placeholder="e.g. Moderator, VIP, Artist"></div>
-      <div class="field"><label>Icon <span class="opt">optional</span></label><input id="role-icon" maxlength="2" value="${escapeHtml((role && role.icon) || '')}" placeholder="e.g. \u2605"></div>
+      <div class="field"><label>Icon <span class="opt">image</span></label>
+        <div class="re-icon-picker">
+          <div class="re-icon-preview" id="role-icon-preview">${iconIsImage ? `<img src="${escapeHtml(role.icon)}" alt="">` : (role && role.icon ? `<span>${escapeHtml(role.icon)}</span>` : icon('image'))}</div>
+          <div class="re-icon-actions">
+            <button type="button" class="re-icon-btn" id="role-icon-upload">${icon('upload')} Upload</button>
+            <button type="button" class="re-icon-clear" id="role-icon-clear" title="Remove icon">${icon('xmark')}</button>
+          </div>
+          <input type="file" id="role-icon-file" accept="image/*" hidden>
+        </div>
+      </div>
     </div>
     <div class="field"><label>Primary Colour</label><div class="role-color-row" id="role-color-row">
-      ${colors.map(c => `<button class="role-swatch${c === cur ? ' sel' : ''}" data-color="${c}" style="background:${c}"></button>`).join('')}
+      ${colors.map(c => `<button type="button" class="role-swatch${c === cur ? ' sel' : ''}" data-color="${c}" style="background:${c}"></button>`).join('')}
     </div></div>
     <div class="field"><label>Gradient <span class="opt">optional second colour</span></label><div class="role-color-row" id="role-color2-row">
-      <button class="role-swatch none${cur2 ? '' : ' sel'}" data-color="">None</button>
-      ${colors.map(c => `<button class="role-swatch${c === cur2 ? ' sel' : ''}" data-color="${c}" style="background:${c}"></button>`).join('')}
+      <button type="button" class="role-swatch none${cur2 ? '' : ' sel'}" data-color="">None</button>
+      ${colors.map(c => `<button type="button" class="role-swatch${c === cur2 ? ' sel' : ''}" data-color="${c}" style="background:${c}"></button>`).join('')}
     </div></div>
     <div class="re-toggles">
       <label class="re-toggle"><input type="checkbox" id="role-hoist" ${role && role.hoist ? 'checked' : ''}><div><b>Display separately</b><span>Show members with this role in their own group in the member list.</span></div></label>
       <label class="re-toggle"><input type="checkbox" id="role-mention" ${!role || role.mentionable ? 'checked' : ''}><div><b>Allow anyone to mention</b><span>Members can @mention this role in messages.</span></div></label>
     </div>
-    <div class="field"><label>Permissions</label><div class="re-perms" id="re-perms">
-      ${ROLE_PERMISSIONS.map(([key, label, desc]) => `<label class="re-perm"><input type="checkbox" data-perm="${key}" ${perms[key] ? 'checked' : ''}><div><b>${label}</b><span>${desc}</span></div></label>`).join('')}
-    </div></div>
+    <div class="field re-perms-field">
+      <div class="re-perms-head"><label>Permissions</label><span class="re-perm-count" id="re-perm-count"></span></div>
+      <div class="re-perms" id="re-perms">
+        ${ROLE_PERMISSIONS.map(([key, label, desc]) => `<label class="re-perm"><input type="checkbox" data-perm="${key}" ${perms[key] ? 'checked' : ''}><div class="re-perm-text"><b>${label}</b><span>${desc}</span></div></label>`).join('')}
+      </div>
+    </div>
     <div class="confirm-actions"><button class="btn ghost" id="role-cancel">Cancel</button><button class="btn" id="role-save">${role ? 'Save Changes' : 'Create Role'}</button></div>
   </div>`;
   document.body.appendChild(wrap);
+  hydrateIcons(wrap);
   let chosen = cur;
   let chosen2 = cur2;
+  let iconUrl = iconIsImage ? role.icon : '';
   const previewChip = wrap.querySelector('#re-preview-chip');
   const nameInput = wrap.querySelector('#role-name');
-  const iconInput = wrap.querySelector('#role-icon');
+  const iconPreview = wrap.querySelector('#role-icon-preview');
+  const iconFile = wrap.querySelector('#role-icon-file');
   const refreshPreview = () => {
     const nm = nameInput.value.trim() || 'New Role';
-    const ic = iconInput.value.trim();
-    previewChip.textContent = (ic ? ic + ' ' : '') + nm;
+    previewChip.innerHTML = (iconUrl ? `<img class="role-ico-img" src="${escapeHtml(iconUrl)}" alt="">` : '') + escapeHtml(nm);
     previewChip.style.color = chosen;
     previewChip.style.background = chosen2 ? `linear-gradient(135deg, ${chosen}22, ${chosen2}22)` : `${chosen}22`;
     previewChip.style.borderColor = chosen2 ? chosen2 : chosen;
   };
+  const setIconPreview = () => {
+    iconPreview.innerHTML = iconUrl ? `<img src="${escapeHtml(iconUrl)}" alt="">` : icon('image');
+    if (!iconUrl) hydrateIcons(iconPreview);
+  };
+  wrap.querySelector('#role-icon-upload').addEventListener('click', () => iconFile.click());
+  iconFile.addEventListener('change', async (e) => {
+    const f = e.target.files[0]; if (!f) return;
+    try { const d = await uploadImage(f); iconUrl = d.url; setIconPreview(); refreshPreview(); }
+    catch (err) { toast(err.message, 'error'); }
+    e.target.value = '';
+  });
+  wrap.querySelector('#role-icon-clear').addEventListener('click', () => { iconUrl = ''; setIconPreview(); refreshPreview(); });
+  const updatePermCount = () => {
+    const total = wrap.querySelectorAll('[data-perm]').length;
+    const on = wrap.querySelectorAll('[data-perm]:checked').length;
+    const el = wrap.querySelector('#re-perm-count');
+    if (el) el.textContent = on + ' of ' + total + ' enabled';
+  };
+  wrap.querySelectorAll('[data-perm]').forEach(cb => cb.addEventListener('change', updatePermCount));
   wrap.querySelectorAll('#role-color-row .role-swatch').forEach(b => b.addEventListener('click', () => {
     chosen = b.dataset.color;
     wrap.querySelectorAll('#role-color-row .role-swatch').forEach(x => x.classList.toggle('sel', x === b));
@@ -8334,8 +8620,9 @@ function openRoleEditor(s, role) {
     refreshPreview();
   }));
   nameInput.addEventListener('input', refreshPreview);
-  iconInput.addEventListener('input', refreshPreview);
   refreshPreview();
+  setIconPreview();
+  updatePermCount();
   const done = () => wrap.remove();
   wrap.querySelector('#role-cancel').addEventListener('click', done);
   wrap.addEventListener('click', (e) => { if (e.target === wrap) done(); });
@@ -8351,7 +8638,7 @@ function openRoleEditor(s, role) {
       hoist: wrap.querySelector('#role-hoist').checked,
       mentionable: wrap.querySelector('#role-mention').checked,
       permissions: permObj,
-      icon: iconInput.value.trim()
+      icon: iconUrl
     };
     try {
       if (role) await api('/api/servers/' + s.id + '/roles/' + role.id, { method: 'PATCH', body: JSON.stringify(payload) });

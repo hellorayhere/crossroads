@@ -282,6 +282,16 @@ function newTotpSecret() {
   return base32Encode(crypto.randomBytes(20));
 }
 
+/* Badges assigned to a user, newest assignment first. Kept tiny so it can be
+   embedded in every public user payload without extra round-trips. */
+function badgesForUser(userId) {
+  try {
+    return db.prepare(`SELECT b.id, b.name, b.icon_url
+                       FROM user_badges ub JOIN profile_badges b ON b.id = ub.badge_id
+                       WHERE ub.user_id = ? ORDER BY ub.assigned_at DESC`).all(userId);
+  } catch (e) { return []; }
+}
+
 function publicUser(u, opts = {}) {
   if (!u) return null;
   /* Report the *effective* status (which may be a transient "offline" after a
@@ -309,6 +319,7 @@ function publicUser(u, opts = {}) {
     muted: !!u.muted,
     platform_admin: isGlobalAdmin(u),
     platform_owner: isOwner(u),
+    badges: badgesForUser(u.id),
     created_at: u.created_at
   };
   if (opts.self) out.twofa_enabled = !!u.twofa_enabled;
@@ -1729,7 +1740,7 @@ app.post('/api/servers/:id/roles', auth, (req, res) => {
   const hoist = (req.body && req.body.hoist) ? 1 : 0;
   const mentionable = (req.body && req.body.mentionable === false) ? 0 : 1;
   const permissions = JSON.stringify((req.body && req.body.permissions) || {});
-  const icon = String((req.body && req.body.icon) || '').slice(0, 16) || null;
+  const icon = String((req.body && req.body.icon) || '').slice(0, 500) || null;
   const maxPos = db.prepare('SELECT MAX(position) AS p FROM server_roles WHERE server_id = ?').get(srv.id).p || 0;
   const id = newId();
   db.prepare('INSERT INTO server_roles (id, server_id, name, color, color2, hoist, mentionable, permissions, icon, position, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)')
@@ -1754,7 +1765,7 @@ app.patch('/api/servers/:id/roles/:rid', auth, (req, res) => {
   if (req.body && 'hoist' in req.body) { updates.push('hoist = ?'); values.push(req.body.hoist ? 1 : 0); }
   if (req.body && 'mentionable' in req.body) { updates.push('mentionable = ?'); values.push(req.body.mentionable ? 1 : 0); }
   if (req.body && 'permissions' in req.body) { updates.push('permissions = ?'); values.push(JSON.stringify(req.body.permissions || {})); }
-  if (req.body && 'icon' in req.body) { updates.push('icon = ?'); values.push(String(req.body.icon || '').slice(0, 16) || null); }
+  if (req.body && 'icon' in req.body) { updates.push('icon = ?'); values.push(String(req.body.icon || '').slice(0, 500) || null); }
   if (updates.length) { values.push(role.id); db.prepare(`UPDATE server_roles SET ${updates.join(', ')} WHERE id = ?`).run(...values); }
   io.emit('server_roles_update', { server_id: srv.id });
   res.json({ role: db.prepare('SELECT * FROM server_roles WHERE id = ?').get(role.id) });
@@ -2419,6 +2430,7 @@ function adminUserRow(u) {
     verified: !!u.verified, muted: !!u.muted, disabled: !!u.disabled,
     banned, platform_admin: isGlobalAdmin(u), platform_owner: isOwner(u),
     whitelisted: adminWhitelist.has(u.id), note_count: noteCount,
+    badges: badgesForUser(u.id),
     servers, owned_servers: owned, messages
   };
 }
@@ -2927,6 +2939,76 @@ admin.get('/users/:id/notes', (req, res) => {
                            FROM admin_notes n LEFT JOIN users u ON u.id = n.author_id
                            WHERE n.user_id = ? ORDER BY n.created_at DESC LIMIT 100`).all(req.params.id);
   res.json({ notes: rows });
+});
+
+/* ---- Profile badges ----
+   Admins create a badge (name + custom image), then assign it to any user.
+   Assigned badges are embedded in publicUser and shown under the username. */
+admin.get('/badges', (req, res) => {
+  const badges = db.prepare(`SELECT b.*,
+      (SELECT COUNT(*) FROM user_badges ub WHERE ub.badge_id = b.id) AS assigned_count
+      FROM profile_badges b ORDER BY b.created_at DESC`).all();
+  res.json({ badges });
+});
+
+admin.post('/badges', (req, res) => {
+  const name = String((req.body && req.body.name) || '').trim().slice(0, 40);
+  const icon_url = String((req.body && req.body.icon_url) || '').trim().slice(0, 500);
+  if (!name) return res.status(400).json({ error: 'Badge name required' });
+  if (!icon_url) return res.status(400).json({ error: 'Badge image required' });
+  const id = newId();
+  db.prepare('INSERT INTO profile_badges (id, name, icon_url, created_at) VALUES (?,?,?,?)')
+    .run(id, name, icon_url, Date.now());
+  adminAudit(req, 'badge.create', 'badge', id, name);
+  res.json({ badge: db.prepare('SELECT * FROM profile_badges WHERE id = ?').get(id) });
+});
+
+admin.patch('/badges/:id', (req, res) => {
+  const b = db.prepare('SELECT * FROM profile_badges WHERE id = ?').get(req.params.id);
+  if (!b) return res.status(404).json({ error: 'Badge not found' });
+  const updates = []; const values = [];
+  if (req.body && typeof req.body.name === 'string' && req.body.name.trim()) {
+    updates.push('name = ?'); values.push(req.body.name.trim().slice(0, 40));
+  }
+  if (req.body && typeof req.body.icon_url === 'string' && req.body.icon_url.trim()) {
+    updates.push('icon_url = ?'); values.push(req.body.icon_url.trim().slice(0, 500));
+  }
+  if (updates.length) {
+    values.push(b.id);
+    db.prepare(`UPDATE profile_badges SET ${updates.join(', ')} WHERE id = ?`).run(...values);
+  }
+  adminAudit(req, 'badge.update', 'badge', b.id, '');
+  res.json({ badge: db.prepare('SELECT * FROM profile_badges WHERE id = ?').get(b.id) });
+});
+
+admin.delete('/badges/:id', (req, res) => {
+  db.prepare('DELETE FROM user_badges WHERE badge_id = ?').run(req.params.id);
+  const n = db.prepare('DELETE FROM profile_badges WHERE id = ?').run(req.params.id).changes;
+  adminAudit(req, 'badge.delete', 'badge', req.params.id, '');
+  res.json({ ok: true, deleted: n });
+});
+
+admin.get('/users/:id/badges', (req, res) => {
+  const badges = db.prepare('SELECT * FROM profile_badges ORDER BY created_at DESC').all();
+  const assigned = db.prepare('SELECT badge_id FROM user_badges WHERE user_id = ?')
+    .all(req.params.id).map(r => r.badge_id);
+  res.json({ badges, assigned });
+});
+
+admin.post('/users/:id/badges', (req, res) => {
+  const uid = req.params.id;
+  const badgeId = String((req.body && req.body.badge_id) || '');
+  const assigned = !!(req.body && req.body.assigned);
+  const badge = db.prepare('SELECT * FROM profile_badges WHERE id = ?').get(badgeId);
+  if (!badge) return res.status(404).json({ error: 'Badge not found' });
+  if (assigned) {
+    db.prepare('INSERT OR IGNORE INTO user_badges (user_id, badge_id, assigned_at) VALUES (?,?,?)')
+      .run(uid, badgeId, Date.now());
+  } else {
+    db.prepare('DELETE FROM user_badges WHERE user_id = ? AND badge_id = ?').run(uid, badgeId);
+  }
+  adminAudit(req, assigned ? 'badge.assign' : 'badge.unassign', 'user', uid, badge.name);
+  res.json({ ok: true, badges: badgesForUser(uid) });
 });
 
 /* ---- Bulk / platform-wide operations ---- */
