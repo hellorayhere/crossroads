@@ -530,11 +530,22 @@ button:active, .rail-item:active, .channel:active, .dm-item:active, .member:acti
   --accent-ink: #fff; --accent-ink-2: rgba(255,255,255,.78);
   --accent-edge: rgba(255,255,255,.18); --accent-shade: #000;
   --pf-base: #232428;
-  --pf-bg: color-mix(in srgb, var(--accent) 26%, var(--pf-base));
-  --pf-card: color-mix(in srgb, var(--accent) 36%, var(--pf-base));
-  --pf-hover: color-mix(in srgb, var(--accent) 46%, var(--pf-base));
+  /* Strong enough that the accent is unmistakable - a 20-30% mix still reads
+     as "grey" on a dark surface, which is exactly what people complained
+     about. Discord's popout is a visible shade of the banner colour. */
+  --pf-bg: color-mix(in srgb, var(--accent) 38%, var(--pf-base));
+  --pf-card: color-mix(in srgb, var(--accent) 50%, var(--pf-base));
+  --pf-hover: color-mix(in srgb, var(--accent) 62%, var(--pf-base));
   width: 100%; max-width: 620px; padding: 0; overflow: hidden;
-  background: var(--pf-bg); color: #dbdee1;
+  background:
+    /* A dark scrim over the lower half keeps body text legible while the top
+       of the card stays vividly accent-coloured. */
+    linear-gradient(180deg, rgba(0,0,0,0) 0%, rgba(0,0,0,.20) 55%, rgba(0,0,0,.38) 100%),
+    linear-gradient(180deg,
+      color-mix(in srgb, var(--accent) 50%, var(--pf-base)) 0%,
+      color-mix(in srgb, var(--accent) 36%, var(--pf-base)) 40%,
+      color-mix(in srgb, var(--accent) 26%, var(--pf-base)) 100%);
+  color: #dbdee1;
   border-radius: 10px; border: 1px solid rgba(0,0,0,.4);
   display: flex; flex-direction: column; max-height: 90vh;
   box-shadow: 0 8px 32px rgba(0,0,0,.55);
@@ -544,7 +555,7 @@ button:active, .rail-item:active, .channel:active, .dm-item:active, .member:acti
 .oprofile-modal::before {
   content: ''; position: absolute; inset: 0; pointer-events: none; z-index: 0;
   background:
-    radial-gradient(130% 65% at 50% 0%, color-mix(in srgb, var(--accent) 40%, transparent) 0%, transparent 72%);
+    radial-gradient(130% 65% at 50% 0%, color-mix(in srgb, var(--accent) 30%, transparent) 0%, transparent 72%);
 }
 .oprofile-modal { position: relative; }
 .oprofile-banner {
@@ -2009,13 +2020,17 @@ body[data-theme="light"] .channel-intro .big-avatar { background: #d7d9dd; color
 
 body[data-theme="light"] .oprofile-modal {
   --pf-base: #f2f3f5;
-  --pf-bg: color-mix(in srgb, var(--accent) 14%, var(--pf-base));
-  --pf-card: color-mix(in srgb, var(--accent) 20%, var(--pf-base));
-  --pf-hover: color-mix(in srgb, var(--accent) 27%, var(--pf-base));
-  background: var(--pf-bg); color: #313338; border-color: rgba(0,0,0,.1);
+  --pf-bg: color-mix(in srgb, var(--accent) 24%, var(--pf-base));
+  --pf-card: color-mix(in srgb, var(--accent) 33%, var(--pf-base));
+  --pf-hover: color-mix(in srgb, var(--accent) 43%, var(--pf-base));
+  background: linear-gradient(180deg,
+    color-mix(in srgb, var(--accent) 38%, var(--pf-base)) 0%,
+    color-mix(in srgb, var(--accent) 26%, var(--pf-base)) 42%,
+    color-mix(in srgb, var(--accent) 19%, var(--pf-base)) 100%);
+  color: #313338; border-color: rgba(0,0,0,.1);
 }
 body[data-theme="light"] .oprofile-modal::before {
-  background: radial-gradient(120% 60% at 50% 0%, color-mix(in srgb, var(--accent) 22%, transparent) 0%, transparent 70%);
+  background: radial-gradient(120% 60% at 50% 0%, color-mix(in srgb, var(--accent) 20%, transparent) 0%, transparent 70%);
 }
 body[data-theme="light"] .dp-name,
 body[data-theme="light"] .dp-label,
