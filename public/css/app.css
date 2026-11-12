@@ -522,19 +522,31 @@ button:active, .rail-item:active, .channel:active, .dm-item:active, .member:acti
 /* ---------- Other-user profile (with banner on top of avatar) ---------- */
 /* ---------- Other-user profile: Discord's profile popout ---------- */
 /* ---------- Other-user profile: Discord's profile popout ---------- */
+/* The popout surfaces are tinted with the profile's accent colour instead of
+   sitting flat grey - Discord does the same, and it makes two people's cards
+   instantly distinguishable. `--accent` is set inline by applyAccent(). */
 .oprofile-modal {
   --accent: var(--brand);
   --accent-ink: #fff; --accent-ink-2: rgba(255,255,255,.78);
   --accent-edge: rgba(255,255,255,.18); --accent-shade: #000;
-  --pf-bg: #232428;
-  --pf-card: #2b2d31;
-  --pf-hover: #35373c;
+  --pf-base: #232428;
+  --pf-bg: color-mix(in srgb, var(--accent) 26%, var(--pf-base));
+  --pf-card: color-mix(in srgb, var(--accent) 36%, var(--pf-base));
+  --pf-hover: color-mix(in srgb, var(--accent) 46%, var(--pf-base));
   width: 100%; max-width: 620px; padding: 0; overflow: hidden;
   background: var(--pf-bg); color: #dbdee1;
   border-radius: 10px; border: 1px solid rgba(0,0,0,.4);
   display: flex; flex-direction: column; max-height: 90vh;
   box-shadow: 0 8px 32px rgba(0,0,0,.55);
 }
+/* A soft accent wash behind the content so the tint reads as a gradient rather
+   than a flat block. Sits under the body (z-index 0) and above the banner. */
+.oprofile-modal::before {
+  content: ''; position: absolute; inset: 0; pointer-events: none; z-index: 0;
+  background:
+    radial-gradient(130% 65% at 50% 0%, color-mix(in srgb, var(--accent) 40%, transparent) 0%, transparent 72%);
+}
+.oprofile-modal { position: relative; }
 .oprofile-banner {
   position: relative; z-index: 0; height: 140px; width: 100%; flex: 0 0 auto;
   background: var(--accent); background-size: cover; background-position: center;
@@ -1996,8 +2008,14 @@ body[data-theme="light"] .msg-group .author:hover { color: #060607; }
 body[data-theme="light"] .channel-intro .big-avatar { background: #d7d9dd; color: #4e5058; }
 
 body[data-theme="light"] .oprofile-modal {
-  --pf-bg: #f2f3f5; --pf-card: #e3e5e8; --pf-hover: #d7d9dd;
+  --pf-base: #f2f3f5;
+  --pf-bg: color-mix(in srgb, var(--accent) 14%, var(--pf-base));
+  --pf-card: color-mix(in srgb, var(--accent) 20%, var(--pf-base));
+  --pf-hover: color-mix(in srgb, var(--accent) 27%, var(--pf-base));
   background: var(--pf-bg); color: #313338; border-color: rgba(0,0,0,.1);
+}
+body[data-theme="light"] .oprofile-modal::before {
+  background: radial-gradient(120% 60% at 50% 0%, color-mix(in srgb, var(--accent) 22%, transparent) 0%, transparent 70%);
 }
 body[data-theme="light"] .dp-name,
 body[data-theme="light"] .dp-label,
