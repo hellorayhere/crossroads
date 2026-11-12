@@ -206,6 +206,7 @@ const REL_LABEL = {
 const ICONS = {
   'message-circle': '<path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/>',
   'plus': '<line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>',
+  'minus': '<line x1="5" y1="12" x2="19" y2="12"/>',
   'compass': '<circle cx="12" cy="12" r="10"/><polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76"/>',
   'chevron-down': '<polyline points="6 9 12 15 18 9"/>',
   'chevron-right': '<polyline points="9 18 15 12 9 6"/>',
@@ -544,14 +545,34 @@ function cbNum(v, def, min, max) {
 }
 /* Adjustments are stored alongside the image so they survive a reload:
    scale (1 = fit), opacity (0-1), blur (px) and background position. */
+const CB_FITS = ['cover', 'contain', 'stretch', 'tile'];
 function cbOptions(cfg) {
   cfg = cfg || {};
+  const fit = CB_FITS.includes(cfg.fit) ? cfg.fit : 'cover';
+  /* Legacy configs stored a single `position` string - map it onto x/y. */
+  let x = cfg.x, y = cfg.y;
+  if (x == null || y == null) {
+    const pos = typeof cfg.position === 'string' ? cfg.position : 'center center';
+    const [px, py] = pos.split(' ');
+    const map = { left: 0, center: 50, right: 100, top: 0, bottom: 100 };
+    x = x == null ? (map[px] != null ? map[px] : 50) : x;
+    y = y == null ? (map[py] != null ? map[py] : 50) : y;
+  }
   return {
     scale: cbNum(cfg.scale, 1, 1, 3),
     opacity: cbNum(cfg.opacity, 1, 0.05, 1),
     blur: cbNum(cfg.blur, 0, 0, 30),
-    position: typeof cfg.position === 'string' ? cfg.position : 'center center'
+    brightness: cbNum(cfg.brightness, 1, 0.4, 1.6),
+    fit,
+    x: cbNum(x, 50, 0, 100),
+    y: cbNum(y, 50, 0, 100)
   };
+}
+function cbSizeValue(fit) {
+  if (fit === 'contain') return 'contain';
+  if (fit === 'stretch') return '100% 100%';
+  if (fit === 'tile') return 'auto';
+  return 'cover';
 }
 function applyCustomBg() {
   const layer = document.getElementById('app-bg-layer');
@@ -560,14 +581,17 @@ function applyCustomBg() {
   if (cfg && cfg.url) {
     const o = cbOptions(cfg);
     layer.style.backgroundImage = `url("${String(cfg.url).replace(/"/g, '%22')}")`;
-    layer.style.backgroundSize = 'cover';
-    layer.style.backgroundPosition = o.position;
-    layer.style.backgroundRepeat = 'no-repeat';
+    layer.style.backgroundSize = cbSizeValue(o.fit);
+    layer.style.backgroundPosition = `${o.x}% ${o.y}%`;
+    layer.style.backgroundRepeat = o.fit === 'tile' ? 'repeat' : 'no-repeat';
     /* Zoom with transform (not background-size) so the artwork always keeps
        covering the viewport, whatever its aspect ratio. */
     layer.style.transform = `scale(${o.scale})`;
-    layer.style.transformOrigin = 'center center';
-    layer.style.filter = o.blur > 0 ? `blur(${o.blur}px)` : '';
+    layer.style.transformOrigin = `${o.x}% ${o.y}%`;
+    const filters = [];
+    if (o.blur > 0) filters.push(`blur(${o.blur}px)`);
+    if (o.brightness !== 1) filters.push(`brightness(${o.brightness})`);
+    layer.style.filter = filters.join(' ');
     layer.style.opacity = String(o.opacity);
     document.body.classList.add('has-custom-bg');
     document.body.style.setProperty('--cb-img-opacity', String(o.opacity));
@@ -961,7 +985,7 @@ function connectSocket() {
       const who = fullTag(data.message.author);
       bumpDmUnread(data.dm_id);
       maybeDesktopNotify('New message from ' + who, data.message.content || '');
-      if (setting('notifSounds') !== false) beep();
+      if (setting('notifSounds') !== false) playPing();
     }
   });
   socket.on('message_deleted', (data) => {
@@ -1089,7 +1113,9 @@ function connectSocket() {
     const d = n.data || {};
     if ((n.type === 'mention' || n.type === 'reply') && d.channel_id) bumpMentionUnread(d.channel_id);
     maybeDesktopNotify('Crossroads', info.plain);
-    if (setting('notifSounds') !== false) beep();
+    if (setting('notifSounds') !== false) {
+      if (PING_NOTIF_TYPES.includes(n.type)) playPing(); else beep();
+    }
     if ($('notif-panel')) renderNotifList();
   });
 
@@ -1130,6 +1156,39 @@ function maybeDesktopNotify(title, body) {
 
 /* Short WebAudio blip for pings (no external asset). */
 let audioCtx = null;
+/* Real ping sound (public/sounds/ping.mp3) for mentions, @everyone/@here and
+   friend requests. Falls back to the synthesised beep if playback is blocked
+   (e.g. before the user has interacted with the page). */
+let pingEl = null;
+function playPing() {
+  try {
+    if (!pingEl) {
+      pingEl = new Audio('/sounds/ping.mp3');
+      pingEl.preload = 'auto';
+      pingEl.volume = 0.85;
+    }
+    try { pingEl.currentTime = 0; } catch (e) { /* not seekable yet */ }
+    const p = pingEl.play();
+    if (p && typeof p.catch === 'function') p.catch(() => beep());
+  } catch (e) { beep(); }
+}
+/* Browsers block audio until a gesture; prime the element on first click/key. */
+function unlockPingAudio() {
+  try {
+    if (!pingEl) { pingEl = new Audio('/sounds/ping.mp3'); pingEl.preload = 'auto'; pingEl.volume = 0.85; }
+    const wasMuted = pingEl.muted;
+    pingEl.muted = true;
+    const p = pingEl.play();
+    if (p && typeof p.then === 'function') p.then(() => { pingEl.pause(); pingEl.currentTime = 0; pingEl.muted = wasMuted; }).catch(() => { pingEl.muted = wasMuted; });
+    else { pingEl.pause(); pingEl.currentTime = 0; pingEl.muted = wasMuted; }
+  } catch (e) { /* ignore */ }
+  document.removeEventListener('pointerdown', unlockPingAudio);
+  document.removeEventListener('keydown', unlockPingAudio);
+}
+document.addEventListener('pointerdown', unlockPingAudio, { once: true });
+document.addEventListener('keydown', unlockPingAudio, { once: true });
+
+const PING_NOTIF_TYPES = ['mention', 'reply', 'everyone', 'here', 'friend_request'];
 function beep() {
   try {
     audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
@@ -1503,7 +1562,6 @@ function renderFriendsView() {
   if (tab === 'add') {
     body = `<div class="fr-add-wrap">
       <div class="fr-add-hero">
-        <div class="fr-add-hero-ico">${icon('user-plus')}</div>
         <div class="fr-add-hero-txt">
           <h3>Add Friend</h3>
           <p>You can add friends with their Discord tag. It's the fastest way to grow your circle on Crossroads.</p>
@@ -1513,7 +1571,6 @@ function renderFriendsView() {
       <div class="fr-add-card">
         <div class="fr-add-card-head">
           <span class="fr-add-eyebrow">ADD FRIEND</span>
-          <span class="fr-add-badge">${icon('shield')} Safe & private</span>
         </div>
         <p class="fr-add-lead">Add friends by entering their <b>full tag</b> \u2014 a username followed by the four-digit number after the <b>#</b>. For example, <b>test#6842</b>.</p>
         <div class="fr-add-row">
@@ -4840,9 +4897,23 @@ function settingsPanelHTML(section) {
             <input type="file" id="cb-file" accept="image/*" class="hidden">
           </div>
           <div class="cb-controls" id="cb-controls">
-            <div class="cb-ctl">
+            <div class="cb-ctl cb-ctl-wide">
               <div class="cb-ctl-head"><label for="cb-scale">Scale</label><span class="cb-val" id="cb-scale-val">100%</span></div>
-              <input type="range" id="cb-scale" min="100" max="250" step="5" value="100" aria-label="Background scale">
+              <div class="cb-zoom">
+                <button class="cb-zoom-btn" id="cb-zoom-out" type="button" title="Zoom out" aria-label="Zoom out">${icon('minus')}</button>
+                <input type="range" id="cb-scale" min="100" max="300" step="5" value="100" aria-label="Background scale">
+                <button class="cb-zoom-btn" id="cb-zoom-in" type="button" title="Zoom in" aria-label="Zoom in">${icon('plus')}</button>
+                <button class="cb-zoom-btn cb-fit-btn" id="cb-fit-toggle" type="button" title="Toggle fill / fit">Fill</button>
+              </div>
+            </div>
+            <div class="cb-ctl">
+              <div class="cb-ctl-head"><label for="cb-fit">Sizing</label></div>
+              <select id="cb-fit" aria-label="Background sizing">
+                <option value="cover">Fill (crop to fit)</option>
+                <option value="contain">Fit (show all)</option>
+                <option value="stretch">Stretch</option>
+                <option value="tile">Tile</option>
+              </select>
             </div>
             <div class="cb-ctl">
               <div class="cb-ctl-head"><label for="cb-opacity">Transparency</label><span class="cb-val" id="cb-opacity-val">0%</span></div>
@@ -4853,14 +4924,23 @@ function settingsPanelHTML(section) {
               <input type="range" id="cb-blur" min="0" max="30" step="1" value="0" aria-label="Background blur">
             </div>
             <div class="cb-ctl">
-              <div class="cb-ctl-head"><label for="cb-position">Position</label></div>
-              <select id="cb-position" aria-label="Background position">
-                <option value="center center">Center</option>
-                <option value="center top">Top</option>
-                <option value="center bottom">Bottom</option>
-                <option value="left center">Left</option>
-                <option value="right center">Right</option>
-              </select>
+              <div class="cb-ctl-head"><label for="cb-brightness">Brightness</label><span class="cb-val" id="cb-brightness-val">100%</span></div>
+              <input type="range" id="cb-brightness" min="40" max="160" step="5" value="100" aria-label="Background brightness">
+            </div>
+            <div class="cb-ctl">
+              <div class="cb-ctl-head"><label for="cb-x">Horizontal offset</label><span class="cb-val" id="cb-x-val">50%</span></div>
+              <input type="range" id="cb-x" min="0" max="100" step="1" value="50" aria-label="Background horizontal offset">
+            </div>
+            <div class="cb-ctl">
+              <div class="cb-ctl-head"><label for="cb-y">Vertical offset</label><span class="cb-val" id="cb-y-val">50%</span></div>
+              <input type="range" id="cb-y" min="0" max="100" step="1" value="50" aria-label="Background vertical offset">
+            </div>
+            <div class="cb-quick">
+              <button class="cb-quick-btn" data-cb-align="50,50" type="button">Center</button>
+              <button class="cb-quick-btn" data-cb-align="50,0" type="button">Top</button>
+              <button class="cb-quick-btn" data-cb-align="50,100" type="button">Bottom</button>
+              <button class="cb-quick-btn" data-cb-align="0,50" type="button">Left</button>
+              <button class="cb-quick-btn" data-cb-align="100,50" type="button">Right</button>
             </div>
             <button class="btn ghost cb-reset" id="cb-reset">${icon('refresh')} Reset adjustments</button>
           </div>
@@ -5109,9 +5189,13 @@ function wireAppearance() {
   const cbUrl = $('cb-url');
   const cbEmpty = cbPreview ? cbPreview.querySelector('.cb-preview-empty') : null;
   const cbInputs = {
-    scale: $('cb-scale'), opacity: $('cb-opacity'), blur: $('cb-blur'), position: $('cb-position')
+    scale: $('cb-scale'), opacity: $('cb-opacity'), blur: $('cb-blur'),
+    brightness: $('cb-brightness'), x: $('cb-x'), y: $('cb-y'), fit: $('cb-fit')
   };
-  const cbVals = { scale: $('cb-scale-val'), opacity: $('cb-opacity-val'), blur: $('cb-blur-val') };
+  const cbVals = {
+    scale: $('cb-scale-val'), opacity: $('cb-opacity-val'), blur: $('cb-blur-val'),
+    brightness: $('cb-brightness-val'), x: $('cb-x-val'), y: $('cb-y-val')
+  };
   const cbControls = $('cb-controls');
 
   /* Paint the little preview with the exact same scale / transparency / blur /
@@ -5125,10 +5209,16 @@ function wireAppearance() {
     if (has) {
       const o = cbOptions(cfg);
       cbPreviewImg.style.backgroundImage = `url("${String(cfg.url).replace(/"/g, '%22')}")`;
-      cbPreviewImg.style.backgroundPosition = o.position;
+      cbPreviewImg.style.backgroundSize = cbSizeValue(o.fit);
+      cbPreviewImg.style.backgroundRepeat = o.fit === 'tile' ? 'repeat' : 'no-repeat';
+      cbPreviewImg.style.backgroundPosition = `${o.x}% ${o.y}%`;
       cbPreviewImg.style.transform = `scale(${o.scale})`;
+      cbPreviewImg.style.transformOrigin = `${o.x}% ${o.y}%`;
       cbPreviewImg.style.opacity = String(o.opacity);
-      cbPreviewImg.style.filter = o.blur > 0 ? `blur(${o.blur}px)` : '';
+      const pf = [];
+      if (o.blur > 0) pf.push(`blur(${o.blur}px)`);
+      if (o.brightness !== 1) pf.push(`brightness(${o.brightness})`);
+      cbPreviewImg.style.filter = pf.join(' ');
     } else {
       cbPreviewImg.style.backgroundImage = '';
       cbPreviewImg.style.transform = '';
@@ -5140,10 +5230,18 @@ function wireAppearance() {
     if (cbInputs.scale) cbInputs.scale.value = String(Math.round(o.scale * 100));
     if (cbInputs.opacity) cbInputs.opacity.value = String(Math.round((1 - o.opacity) * 100));
     if (cbInputs.blur) cbInputs.blur.value = String(Math.round(o.blur));
-    if (cbInputs.position) cbInputs.position.value = o.position;
+    if (cbInputs.brightness) cbInputs.brightness.value = String(Math.round(o.brightness * 100));
+    if (cbInputs.x) cbInputs.x.value = String(Math.round(o.x));
+    if (cbInputs.y) cbInputs.y.value = String(Math.round(o.y));
+    if (cbInputs.fit) cbInputs.fit.value = o.fit;
     if (cbVals.scale) cbVals.scale.textContent = Math.round(o.scale * 100) + '%';
     if (cbVals.opacity) cbVals.opacity.textContent = Math.round((1 - o.opacity) * 100) + '%';
     if (cbVals.blur) cbVals.blur.textContent = Math.round(o.blur) + 'px';
+    if (cbVals.brightness) cbVals.brightness.textContent = Math.round(o.brightness * 100) + '%';
+    if (cbVals.x) cbVals.x.textContent = Math.round(o.x) + '%';
+    if (cbVals.y) cbVals.y.textContent = Math.round(o.y) + '%';
+    const fitBtn = $('cb-fit-toggle');
+    if (fitBtn) fitBtn.textContent = o.fit === 'contain' ? 'Fit' : (o.fit === 'tile' ? 'Tile' : (o.fit === 'stretch' ? 'Stretch' : 'Fill'));
     if (cbControls) cbControls.classList.toggle('disabled', !has);
   };
   const cbMsg = (text, kind) => {
@@ -5225,12 +5323,54 @@ function wireAppearance() {
       applyAdjust({ blur: b });
     });
   }
-  if (cbInputs.position) {
-    cbInputs.position.addEventListener('change', () => applyAdjust({ position: cbInputs.position.value }));
+  if (cbInputs.brightness) {
+    cbInputs.brightness.addEventListener('input', () => {
+      const b = Number(cbInputs.brightness.value) || 100;
+      if (cbVals.brightness) cbVals.brightness.textContent = b + '%';
+      applyAdjust({ brightness: b / 100 });
+    });
   }
+  const bindOffset = (key) => {
+    const el = cbInputs[key]; if (!el) return;
+    el.addEventListener('input', () => {
+      const v = Number(el.value);
+      if (cbVals[key]) cbVals[key].textContent = v + '%';
+      const patch = {}; patch[key] = v; applyAdjust(patch);
+    });
+  };
+  bindOffset('x'); bindOffset('y');
+  if (cbInputs.fit) cbInputs.fit.addEventListener('change', () => applyAdjust({ fit: cbInputs.fit.value }));
+
+  /* Zoom buttons: 5% steps, clamped to the slider range. */
+  const nudgeZoom = (delta) => {
+    if (!cbInputs.scale) return;
+    const v = Math.min(300, Math.max(100, Number(cbInputs.scale.value) + delta));
+    cbInputs.scale.value = String(v);
+    if (cbVals.scale) cbVals.scale.textContent = v + '%';
+    applyAdjust({ scale: v / 100 });
+  };
+  const zin = $('cb-zoom-in'), zout = $('cb-zoom-out');
+  if (zin) zin.addEventListener('click', () => nudgeZoom(10));
+  if (zout) zout.addEventListener('click', () => nudgeZoom(-10));
+
+  /* Fill / Fit quick toggle. */
+  const fitBtn = $('cb-fit-toggle');
+  if (fitBtn) fitBtn.addEventListener('click', () => {
+    const cur = cbOptions(getCustomBg() || {}).fit;
+    applyAdjust({ fit: cur === 'cover' ? 'contain' : 'cover' });
+  });
+
+  /* One-click alignment presets. */
+  document.querySelectorAll('#cb-controls [data-cb-align]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const [x, y] = btn.dataset.cbAlign.split(',').map(Number);
+      applyAdjust({ x, y });
+    });
+  });
+
   const resetBtn = $('cb-reset');
   if (resetBtn) resetBtn.addEventListener('click', () => {
-    applyAdjust({ scale: 1, opacity: 1, blur: 0, position: 'center center' }, 'Adjustments reset.');
+    applyAdjust({ scale: 1, opacity: 1, blur: 0, brightness: 1, fit: 'cover', x: 50, y: 50 }, 'Adjustments reset.');
   });
 }
 

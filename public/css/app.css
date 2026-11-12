@@ -119,8 +119,10 @@ button:active, .rail-item:active, .channel:active, .dm-item:active, .member:acti
 
 @keyframes fade { from { opacity: 0; } to { opacity: 1; } }
 @keyframes pop { from { transform: scale(.97); opacity: 0; } to { transform: scale(1); opacity: 1; } }
-@keyframes msgIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+@keyframes msgIn { from { opacity: 0; } to { opacity: 1; } }
 @keyframes viewEnter { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+/* Discord's own channel switch is a quick opacity fade with no movement. */
+@keyframes discordFade { from { opacity: 0; } to { opacity: 1; } }
 @keyframes navPop { 0% { transform: scale(.9); } 55% { transform: scale(1.06); } 100% { transform: scale(1); } }
 @keyframes bounce { 0%,60%,100% { transform: translateY(0); } 30% { transform: translateY(-4px); } }
 @keyframes pulseRed { 0% { box-shadow: 0 0 0 0 rgba(242,63,67,.55); } 100% { box-shadow: 0 0 0 12px rgba(242,63,67,0); } }
@@ -176,15 +178,13 @@ button:active, .rail-item:active, .channel:active, .dm-item:active, .member:acti
 /* Server banner strip — sits directly under the server name in the sidebar */
 .sidebar-banner {
   flex: 0 0 auto;
-  width: calc(100% - 16px);
+  width: 100%;
   height: 190px;
-  margin-right: 16px;
   background-size: cover;
   background-position: center;
   background-repeat: no-repeat;
   background-color: var(--sidebar-bg);
   border-bottom: 1px solid var(--divider);
-  border-radius: 0 10px 10px 0;
   position: relative;
   overflow: hidden;
 }
@@ -297,7 +297,7 @@ button:active, .rail-item:active, .channel:active, .dm-item:active, .member:acti
 .msg-group.compact .gutter .mini-time { font-size: 11px; color: var(--text-muted); opacity: 0; padding-right: 6px; }
 .msg-group.compact:hover .gutter .mini-time { opacity: 1; }
 .msg-group.compact .head { display: none; }
-.msg-group.fade-in { animation: msgIn .22s ease; }
+.msg-group.fade-in { animation: msgIn .1s linear; }
 .msg-group.flash { animation: flashHighlight 1.4s ease; }
 @keyframes flashHighlight { 0%,100% { background: transparent; } 15% { background: rgba(88,101,242,.22); } }
 
@@ -458,7 +458,7 @@ button:active, .rail-item:active, .channel:active, .dm-item:active, .member:acti
   flex-basis: 0; width: 0; padding-left: 0; padding-right: 0;
   opacity: 0; transform: translateX(24px); overflow: hidden; pointer-events: none;
 }
-.members .member { animation: memberIn .28s cubic-bezier(.22,.61,.36,1) both; }
+.members .member { animation: none; }
 @keyframes memberIn { from { opacity: 0; transform: translateX(14px); } to { opacity: 1; transform: none; } }
 .member-cat { font-size: 11px; font-weight: 700; text-transform: uppercase; color: var(--text-faint); padding: 8px; letter-spacing: .02em; }
 .member { display: flex; align-items: center; gap: 12px; padding: 6px 8px; border-radius: var(--radius-sm); cursor: pointer; }
@@ -809,6 +809,7 @@ button:active, .rail-item:active, .channel:active, .dm-item:active, .member:acti
 /* ---------- Add Friend: revamped 2020-Discord style ---------- */
 .fr-add-wrap { max-width: 720px; }
 .fr-add-hero { display: flex; align-items: center; gap: 16px; padding: 26px 0 18px; }
+.fr-add-hero-txt { min-width: 0; }
 .fr-add-hero-ico {
   width: 56px; height: 56px; flex: 0 0 auto; border-radius: 16px; display: grid; place-items: center; color: #fff;
   background: linear-gradient(135deg, var(--brand), color-mix(in srgb, var(--brand) 50%, #000));
@@ -1557,8 +1558,7 @@ input:focus::placeholder, textarea:focus::placeholder { color: color-mix(in srgb
 .ss-banner-hint .gif-badge { font-size: 10px; font-weight: 800; letter-spacing: .04em; padding: 2px 6px; border-radius: 4px; background: var(--brand); color: #fff; }
 
 /* ---------- Animated settings tab switching ---------- */
-.ss-body.anim-in, .settings-panel.anim-in { animation: ssBodyIn .26s cubic-bezier(.22,.61,.36,1) both; }
-@keyframes ssBodyIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+.ss-body.anim-in, .settings-panel.anim-in { animation: discordFade .1s linear both; }
 .ss-tab { position: relative; }
 .ss-tab::after {
   content: ''; position: absolute; left: 12px; right: 12px; bottom: -1px; height: 2px; border-radius: 2px;
@@ -1568,12 +1568,10 @@ input:focus::placeholder, textarea:focus::placeholder { color: color-mix(in srgb
 .ss-tab.active { border-bottom-color: transparent; }
 
 /* ---------- View / panel transitions ---------- */
-.channel-list .channel, .dm-list .dm-item { animation: listIn .26s cubic-bezier(.22,.61,.36,1) both; }
-@keyframes listIn { from { opacity: 0; transform: translateX(-8px); } to { opacity: 1; transform: none; } }
-.rail-item { animation: railIn .3s cubic-bezier(.22,.61,.36,1) both; }
-@keyframes railIn { from { opacity: 0; transform: scale(.85); } to { opacity: 1; transform: none; } }
-.modal { animation: modalIn .24s cubic-bezier(.22,.61,.36,1) both; }
-@keyframes modalIn { from { opacity: 0; transform: translateY(14px) scale(.97); } to { opacity: 1; transform: none; } }
+/* No slide-in for channel / DM / rail lists - Discord just paints them. */
+.channel-list .channel, .dm-list .dm-item, .rail-item { animation: none; }
+.modal { animation: modalIn .12s cubic-bezier(.2,.8,.3,1) both; }
+@keyframes modalIn { from { opacity: 0; transform: scale(.98); } to { opacity: 1; transform: none; } }
 .overlay { animation: fade .18s ease both; }
 
 /* ---------- General polish ---------- */
@@ -1583,6 +1581,8 @@ input:focus::placeholder, textarea:focus::placeholder { color: color-mix(in srgb
 .btn.primary:hover, .btn.brand:hover { background: var(--brand-hover); }
 .msg-group .text a { word-break: break-word; }
 .chat-header { backdrop-filter: blur(2px); }
+/* Channel / DM / Friends view switch: Discord's instant-ish fade. */
+#messages.view-enter { animation: discordFade .12s ease-out both; }
 .rail-item.active { box-shadow: none; }
 .channel.active { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--brand) 22%, transparent); }
 
@@ -1644,7 +1644,7 @@ input, textarea, select { transition: border-color .15s ease, box-shadow .15s ea
 .dropdown-menu, .ctx-menu, .ctx { animation: pop .12s ease; }
 
 /* ---------- Empty states ---------- */
-.empty-state .inner { animation: viewEnter .3s ease both; }
+.empty-state .inner { animation: discordFade .1s linear both; }
 
 /* ---------- Light theme tweaks for new bits ---------- */
 body[data-theme="light"] .ss-role-card,
@@ -2221,6 +2221,27 @@ body.has-custom-bg .server-rail {
   width: 15px; height: 15px; border-radius: 50%; background: var(--brand);
   border: 2px solid var(--chat-bg); cursor: grab;
 }
+.cb-ctl-wide { grid-column: 1 / -1; }
+.cb-zoom { display: flex; align-items: center; gap: 8px; }
+.cb-zoom input[type="range"] { flex: 1; min-width: 0; }
+.cb-zoom-btn {
+  flex: 0 0 auto; width: 26px; height: 26px; border-radius: 6px; display: grid; place-items: center;
+  background: var(--input-bg); border: 1px solid var(--divider); color: var(--text-normal);
+  transition: background .12s, color .12s, border-color .12s;
+}
+.cb-zoom-btn:hover { background: var(--brand); border-color: var(--brand); color: #fff; }
+.cb-zoom-btn .ic { width: 14px; height: 14px; }
+.cb-fit-btn {
+  width: auto; min-width: 48px; padding: 0 10px; font-size: 11.5px; font-weight: 700;
+  letter-spacing: .02em; text-transform: uppercase;
+}
+.cb-quick { grid-column: 1 / -1; display: flex; gap: 6px; flex-wrap: wrap; }
+.cb-quick-btn {
+  padding: 5px 11px; border-radius: 999px; font-size: 11.5px; font-weight: 600;
+  background: var(--input-bg); border: 1px solid var(--divider); color: var(--text-muted);
+  transition: background .12s, color .12s, border-color .12s;
+}
+.cb-quick-btn:hover { background: var(--brand); border-color: var(--brand); color: #fff; }
 .cb-reset { grid-column: 1 / -1; justify-self: start; display: inline-flex; align-items: center; gap: 7px; padding: 7px 12px; font-size: 12.5px; }
 .cb-reset .ic { width: 13px; height: 13px; }
 @media (max-width: 640px) { .cb-controls { grid-template-columns: 1fr; } }
