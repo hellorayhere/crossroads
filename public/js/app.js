@@ -675,7 +675,23 @@ function logout() {
    The grey notification strip at the bottom of the chat column has been
    removed entirely. `toast()` is kept as a no-op so the many call sites that
    report success/failure keep working without spamming the interface. */
-function toast() {}
+let _toastEl = null, _toastTimer = 0;
+function toast(msg, kind) {
+  /* Success chatter stays silent (the UI already reflects it), but errors must
+     be visible - a silent failure is indistinguishable from "nothing works". */
+  if (kind !== 'error' || !msg) return;
+  try {
+    if (!_toastEl) {
+      _toastEl = document.createElement('div');
+      _toastEl.className = 'err-toast';
+      document.body.appendChild(_toastEl);
+    }
+    _toastEl.textContent = String(msg);
+    _toastEl.classList.add('show');
+    clearTimeout(_toastTimer);
+    _toastTimer = setTimeout(() => _toastEl && _toastEl.classList.remove('show'), 4200);
+  } catch (e) { /* ignore */ }
+}
 
 /* ---------------- Custom confirm / prompt ---------------- */
 function confirmDialog(opts = {}) {
@@ -1049,6 +1065,9 @@ function connectSocket() {
   socket.on('channels_update', (data) => {
     if (!data || !state.server || data.server_id !== state.server.id) return;
     state.channels = data.channels || [];
+    /* Categories are broadcast alongside channels - without this the sidebar
+       kept a stale category list, so create / rename / delete looked broken. */
+    if (Array.isArray(data.categories)) state.categories = data.categories;
     /* If the voice channel we're connected to was deleted, disconnect. */
     if (voice.channel && !state.channels.some(c => c.id === voice.channel.id)) leaveVoiceChannel();
     if (state.channel && !state.channels.some(c => c.id === state.channel.id)) {
@@ -1391,11 +1410,8 @@ function renderDMList() {
     /* Intentionally no empty-state copy here — the + button in the
        "Direct Messages" header is the single, always-visible way to start one. */
   }
-  const add = document.createElement('div');
-  add.className = 'dm-item dm-add';
-  add.innerHTML = `<span class="dm-add-ic">${icon('plus')}</span><span class="dm-name">${t('Start a conversation')}</span>`;
-  add.addEventListener('click', openNewDM);
-  list.appendChild(add);
+  /* The "Start a conversation" row was removed on request; the always-visible
+     + button in the "Direct Messages" header is the way to start one. */
 }
 
 async function openDM(d) {
@@ -4110,7 +4126,14 @@ async function createCategory() {
   const clean = name.trim();
   if (!clean) { toast('Category name cannot be empty', 'error'); return; }
   try {
-    await api('/api/servers/' + state.server.id + '/categories', { method: 'POST', body: JSON.stringify({ name: clean }) });
+    const r = await api('/api/servers/' + state.server.id + '/categories', { method: 'POST', body: JSON.stringify({ name: clean }) });
+    if (r && r.category) {
+      /* The socket broadcast may already have delivered this category, so
+         only append when it is genuinely new (avoids duplicates). */
+      const exists = (state.categories || []).some(k => k.id === r.category.id);
+      if (!exists) state.categories = (state.categories || []).concat([r.category]);
+      renderChannelList();
+    }
     toast('Category created', 'success');
   } catch (e) { toast(e.message, 'error'); }
 }
@@ -4121,7 +4144,10 @@ async function renameCategory(cat) {
   const clean = name.trim();
   if (!clean) { toast('Category name cannot be empty', 'error'); return; }
   try {
-    await api('/api/servers/' + state.server.id + '/categories/' + cat.id, { method: 'PATCH', body: JSON.stringify({ name: clean }) });
+    const r = await api('/api/servers/' + state.server.id + '/categories/' + cat.id, { method: 'PATCH', body: JSON.stringify({ name: clean }) });
+    const fresh = (r && r.category) || Object.assign({}, cat, { name: clean });
+    state.categories = (state.categories || []).map(k => k.id === cat.id ? fresh : k);
+    renderChannelList();
     toast('Category renamed', 'success');
   } catch (e) { toast(e.message, 'error'); }
 }
@@ -4132,6 +4158,10 @@ async function deleteCategory(cat) {
   if (!ok) return;
   try {
     await api('/api/servers/' + state.server.id + '/categories/' + cat.id, { method: 'DELETE' });
+    state.categories = (state.categories || []).filter(k => k.id !== cat.id);
+    state.channels = (state.channels || []).map(c => c.category_id === cat.id ? Object.assign({}, c, { category_id: null }) : c);
+    delete state.collapsedCats[cat.id];
+    renderChannelList();
     toast('Category deleted', 'success');
   } catch (e) { toast(e.message, 'error'); }
 }
@@ -5277,7 +5307,11 @@ function wireAppearance() {
       if (!/^image\//.test(f.type)) { cbMsg('Please choose an image or GIF file.', 'bad'); return; }
       const reader = new FileReader();
       reader.onload = () => {
-        if (setCustomBg(Object.assign({ url: reader.result }, cbOptions(getCustomBg() || {})))) {
+        /* A freshly uploaded image gets a slight blur by default so the UI
+           stays readable; the Blur slider can dial it up or back to 0. */
+        const prevOpts = cbOptions(getCustomBg() || {});
+        if (!prevOpts.blur) prevOpts.blur = 6;
+        if (setCustomBg(Object.assign({ url: reader.result }, prevOpts))) {
           cbMsg(`Applied ${f.name} — animated GIFs play automatically.`, 'ok');
           paintCbPreview();
         } else {
@@ -6115,7 +6149,11 @@ async function renameChannel(c) {
   const clean = name.trim();
   if (!clean) { toast('Channel name cannot be empty', 'error'); return; }
   try {
-    await api('/api/servers/' + state.server.id + '/channels/' + c.id, { method: 'PATCH', body: JSON.stringify({ name: clean }) });
+    const r = await api('/api/servers/' + state.server.id + '/channels/' + c.id, { method: 'PATCH', body: JSON.stringify({ name: clean }) });
+    const fresh = (r && r.channel) || Object.assign({}, c, { name: clean });
+    state.channels = (state.channels || []).map(x => x.id === c.id ? fresh : x);
+    if (state.channel && state.channel.id === c.id) { state.channel = fresh; $('chat-title').textContent = fresh.name; }
+    renderChannelList();
     toast('Channel renamed', 'success');
   } catch (e) { toast(e.message, 'error'); }
 }
@@ -6124,7 +6162,11 @@ async function editChannelTopic(c) {
   const topic = await promptDialog({ title: 'Edit Channel Topic', body: 'Set a short topic that appears under the channel name.', label: 'Topic', value: c.topic || '', confirmText: 'Save Topic', maxlength: 200, placeholder: 'What is this channel about?' });
   if (topic === null) return;
   try {
-    await api('/api/servers/' + state.server.id + '/channels/' + c.id, { method: 'PATCH', body: JSON.stringify({ topic }) });
+    const r = await api('/api/servers/' + state.server.id + '/channels/' + c.id, { method: 'PATCH', body: JSON.stringify({ topic }) });
+    const fresh = (r && r.channel) || Object.assign({}, c, { topic });
+    state.channels = (state.channels || []).map(x => x.id === c.id ? fresh : x);
+    if (state.channel && state.channel.id === c.id) { state.channel = fresh; $('chat-topic').textContent = fresh.topic || ''; }
+    renderChannelList();
     toast('Channel topic updated', 'success');
   } catch (e) { toast(e.message, 'error'); }
 }
@@ -6134,6 +6176,14 @@ async function deleteChannel(c) {
   if (!ok) return;
   try {
     await api('/api/servers/' + state.server.id + '/channels/' + c.id, { method: 'DELETE' });
+    state.channels = (state.channels || []).filter(x => x.id !== c.id);
+    if (state.channel && state.channel.id === c.id) {
+      state.channel = null;
+      const first = state.channels.find(x => x.type === 'text') || state.channels[0];
+      if (first) openChannel(first.id);
+      else { state.messages = []; renderEmptyChat('This server has no channels yet.'); }
+    }
+    renderChannelList();
     toast('Channel deleted', 'success');
   } catch (e) { toast(e.message, 'error'); }
 }
