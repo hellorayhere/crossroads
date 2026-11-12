@@ -1058,7 +1058,6 @@ function renderRail() {
     if (s.icon_url) d.innerHTML = `<img src="${escapeHtml(s.icon_url)}" alt="">`;
     else if (s.icon) d.textContent = s.icon;
     else d.textContent = s.name.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase();
-    d.innerHTML += '<span class="pill"></span>';
     const mentions = serverMentionCount(s.id);
     if (mentions) d.innerHTML += `<span class="badge">${mentions > 99 ? '99+' : mentions}</span>`;
     d.addEventListener('click', () => openServer(s.id));
@@ -4022,71 +4021,70 @@ function renderOtherProfile(user, ctx) {
   else moreItems.push({ action: 'block', label: 'Block', icon: 'ban', danger: true });
   moreItems.push({ action: 'dm', label: 'Message', icon: 'comment' });
 
+  const mutualServersHTML = mutualServers.length ? `
+    <div class="dp-section">
+      <div class="dp-mutual-label">Mutual Servers \u2014 ${mutualServers.length}</div>
+      <div class="dp-mutual">${mutualServers.slice(0, 8).map(sv => `
+        <div class="dp-server-ico" data-srv="${escapeHtml(sv.id)}" title="${escapeHtml(sv.name || '')}">${sv.icon_url ? `<img src="${escapeHtml(sv.icon_url)}" alt="">` : escapeHtml((sv.name || '?')[0].toUpperCase())}</div>`).join('')}</div>
+    </div>` : '';
+
+  const mutualFriendsHTML = mutualFriends.length ? `
+    <div class="dp-section">
+      <div class="dp-mutual-label">Mutual Friends \u2014 ${mutualFriends.length}</div>
+      ${mutualFriends.slice(0, 4).map(u => `<div class="dp-friend-row" data-uid="${escapeHtml(u.id)}">${avatarHTML(u, 24, u.status || 'offline')}<div><div class="dp-friend-name">${escapeHtml(u.display_name || u.username)}</div><div class="dp-friend-tag">${escapeHtml(fullTag(u))}</div></div></div>`).join('')}
+    </div>` : '';
+
   openModal(`
     <div class="oprofile-banner" style="${bannerStyle}">
-      <button class="ob-close" id="pf-x">${icon('xmark')}</button>
-    </div>
-    <div class="oprofile-body">
-      <div class="oprofile-left">
-        <div class="op-avatar">${avatarHTML(user, 120, user.status || 'offline')}</div>
-        <div class="op-name">${escapeHtml(displayName)}</div>
-        <div class="op-sub">${escapeHtml(user.custom_status || fullTag(user))}</div>
-        <div class="op-actions">
-          ${addBtn}
-          <button class="op-more" id="pf-more" title="More Options">${icon('ellipsis-vertical')}</button>
-        </div>
-        ${user.bio ? `<div class="op-section">
-          <div class="op-label">${icon('note')} About Me</div>
-          <div class="op-bio">${linkifyBio(user.bio)}</div>
-        </div>` : ''}
-        <div class="op-section">
-          <div class="op-label">${icon('calendar-days')} Member Since</div>
-          <div class="op-dates"><div class="op-date">${accountCreated}</div></div>
-        </div>
-        <div class="op-section">
-          <div class="op-label">${icon('note')} Note</div>
-          <div class="op-note" id="pf-note">
-            ${note ? `<div class="op-note-text">${escapeHtml(note)}</div>` : `<div class="op-note-empty">${icon('plus')} Click to add a note</div>`}
-            <div class="op-note-hint">Note only visible to you</div>
-          </div>
-        </div>
+      <div class="dp-topbtns">
+        <button class="dp-icon-btn" id="pf-more" title="More Options">${icon('ellipsis-vertical')}</button>
+        <button class="dp-icon-btn" id="pf-x" title="Close">${icon('xmark')}</button>
       </div>
-      <div class="oprofile-right">
-        <div class="op-tabs">
-          <div class="op-tab active" data-tab="activity">Activity</div>
-          <div class="op-tab" data-tab="friends">${mutualFriends.length ? `${mutualFriends.length} Mutual Friend${mutualFriends.length > 1 ? 's' : ''}` : 'No Mutual Friends'}</div>
-          <div class="op-tab" data-tab="servers">${mutualServers.length} Mutual Server${mutualServers.length === 1 ? '' : 's'}</div>
-        </div>
-        <div class="op-content" id="op-content"></div>
-        <div class="op-footer">
-          <button class="op-message" id="pf-dm">${icon('comment')} Message</button>
+    </div>
+    <div class="dp-body">
+      <div class="dp-avatar">${avatarHTML(user, 80, user.status || 'offline')}</div>
+      <div class="dp-identity">
+        <div class="dp-name">${escapeHtml(displayName)}</div>
+        <div class="dp-handle">${escapeHtml(fullTag(user))}${user.pronouns ? ` <span class="dp-pronoun">\u00b7 ${escapeHtml(user.pronouns)}</span>` : ''}</div>
+      </div>
+      <div class="dp-actions">
+        <button class="dp-btn primary" id="pf-dm">${icon('comment')} <span>Message</span></button>
+        ${addBtn.replace('op-add', 'dp-btn')}
+        <button class="dp-more" id="pf-more-2" title="More Options">${icon('ellipsis-vertical')}</button>
+      </div>
+      ${user.custom_status ? `<div class="dp-section" style="margin-top:14px"><div class="dp-bio">${escapeHtml(user.custom_status)}</div></div>` : ''}
+      <div class="dp-divider"></div>
+      ${user.bio ? `<div class="dp-section">
+        <div class="dp-label">About Me</div>
+        <div class="dp-bio">${linkifyBio(user.bio)}</div>
+      </div>` : ''}
+      <div class="dp-section">
+        <div class="dp-label">Member Since</div>
+        <div class="dp-value">${accountCreated}</div>
+      </div>
+      ${mutualServersHTML}
+      ${mutualFriendsHTML}
+      <div class="dp-section">
+        <div class="dp-label">Note</div>
+        <div class="dp-note" id="pf-note">
+          ${note ? `<div class="dp-note-text">${escapeHtml(note)}</div>` : `<div class="dp-note-empty">${icon('plus')} Click to add a note</div>`}
+          <div class="dp-note-hint">Note only visible to you</div>
         </div>
       </div>
     </div>`, { modalClass: 'oprofile-modal' });
 
   applyAccent($('modal'), user.accent_color);
 
-  const renderTab = (tab) => {
-    const content = $('op-content');
-    if (tab === 'friends') {
-      content.innerHTML = mutualFriends.length
-        ? mutualFriends.map(u => `<div class="op-list-row">${avatarHTML(u, 32, u.status || 'offline')}<div><div class="olr-name">${escapeHtml(u.display_name || u.username)}</div><div class="olr-tag">${escapeHtml(fullTag(u))}</div></div></div>`).join('')
-        : `<div class="op-empty"><div class="op-empty-ico">${icon('user-group')}</div><h4>No Mutual Friends</h4><p>You and ${escapeHtml(displayName)} do not have any friends in common.</p></div>`;
-    } else if (tab === 'servers') {
-      content.innerHTML = mutualServers.length
-        ? mutualServers.map(s => `<div class="op-list-row"><div class="op-server-ico">${s.icon_url ? `<img src="${escapeHtml(s.icon_url)}" alt="">` : escapeHtml((s.name || '?')[0].toUpperCase())}</div><div><div class="olr-name">${escapeHtml(s.name)}</div><div class="olr-tag">Mutual Server</div></div></div>`).join('')
-        : `<div class="op-empty"><div class="op-empty-ico">${icon('server')}</div><h4>No Mutual Servers</h4><p>You and ${escapeHtml(displayName)} are not in any servers together.</p></div>`;
-    } else {
-      content.innerHTML = `<div class="op-empty"><div class="op-empty-ico">${icon('ghost')}</div><h4>${escapeHtml(displayName)} doesn't have any activity to share here</h4><p>When they start playing a game or listening to music, it will show up here.</p></div>`;
-    }
-  };
-  renderTab('activity');
+  document.querySelectorAll('.dp-server-ico').forEach(el => el.addEventListener('click', () => {
+    closeModal();
+    openServer(el.dataset.srv);
+  }));
+  document.querySelectorAll('.dp-friend-row').forEach(el => el.addEventListener('click', () => {
+    const u = mutualFriends.find(x => String(x.id) === el.dataset.uid);
+    if (u) { closeModal(); openProfile(u); }
+  }));
 
   $('pf-x').addEventListener('click', closeModal);
-  document.querySelectorAll('.op-tab').forEach(t => t.addEventListener('click', () => {
-    document.querySelectorAll('.op-tab').forEach(x => x.classList.toggle('active', x === t));
-    renderTab(t.dataset.tab);
-  }));
   $('pf-dm').addEventListener('click', () => { closeModal(); startDM(user.id); });
   $('pf-add').addEventListener('click', async () => {
     if (rel === 'friends') { closeModal(); startDM(user.id); return; }
@@ -4100,16 +4098,19 @@ function renderOtherProfile(user, ctx) {
       closeModal(); openProfile(user);
     } catch (e) { toast(e.message, 'error'); }
   });
-  $('pf-more').addEventListener('click', (e) => {
+  const openMoreMenu = (e) => {
     e.stopPropagation();
-    dropdownMenu($('pf-more'), moreItems.map(it => Object.assign({}, it, {
+    dropdownMenu(e.currentTarget || $('pf-more'), moreItems.map(it => Object.assign({}, it, {
       onClick: async () => {
         if (it.action === 'dm') { closeModal(); startDM(user.id); return; }
         await friendAction(it.action, user.id);
         closeModal(); openProfile(user);
       }
     })));
-  });
+  };
+  $('pf-more').addEventListener('click', openMoreMenu);
+  const more2 = $('pf-more-2');
+  if (more2) more2.addEventListener('click', openMoreMenu);
   $('pf-note').addEventListener('click', () => openNoteEditor(user, note));
 }
 
