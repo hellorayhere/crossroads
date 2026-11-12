@@ -5404,6 +5404,10 @@ async function openProfile(user, opts = {}) {
     note = data.note || '';
   } catch (e) { /* fall back to the object we were given */ }
 
+  /* Cache the caller's own server roles so a later refreshOpenProfile() rebuild
+     (triggered by a status update) keeps the role pills on the profile. */
+  if (isMe && Array.isArray(user.server_roles)) me.server_roles = user.server_roles;
+
   if (isMe) return renderOwnProfile(user);
   return renderOtherProfile(user, { relationship, mutualServers, mutualFriends, note });
 }
