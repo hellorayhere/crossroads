@@ -327,6 +327,73 @@ function migrate() {
     }
   }
 
+  /* ---------------- Two-step login (TOTP) ----------------
+     Purely additive. twofa_secret holds a base32 shared secret; the six-digit
+     code is derived from it and the current time, so no external service is
+     needed. twofa_enabled gates whether login requires the code. */
+  const twofaCols = {
+    twofa_enabled: 'INTEGER DEFAULT 0',
+    twofa_secret: 'TEXT'
+  };
+  for (const [col, def] of Object.entries(twofaCols)) {
+    if (!names.includes(col)) {
+      try { db.exec(`ALTER TABLE users ADD COLUMN ${col} ${def}`); } catch (e) {}
+    }
+  }
+
+  /* ---------------- Device / session tracking ----------------
+     One row per successful sign-in. The JWT carries the session id, so a
+     device can be listed on the Authorized Devices page and revoked
+     individually. Purely additive; old tokens without a session id keep
+     working. */
+  try {
+    db.exec(`CREATE TABLE IF NOT EXISTS sessions (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      user_agent TEXT DEFAULT '',
+      ip TEXT DEFAULT '',
+      created_at INTEGER NOT NULL,
+      last_seen_at INTEGER NOT NULL
+    )`);
+    db.exec('CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id)');
+  } catch (e) {}
+
+  /* ---------------- Performance indexes ----------------
+     These keep message pagination, member lookups and DM lists fast as the
+     database grows. All are IF NOT EXISTS so they are safe to re-run. */
+  try {
+    db.exec(`
+      CREATE INDEX IF NOT EXISTS idx_messages_channel_created ON messages(channel_id, created_at);
+      CREATE INDEX IF NOT EXISTS idx_messages_dm_created ON messages(dm_id, created_at);
+      CREATE INDEX IF NOT EXISTS idx_server_members_server ON server_members(server_id);
+      CREATE INDEX IF NOT EXISTS idx_server_members_user ON server_members(user_id);
+      CREATE INDEX IF NOT EXISTS idx_server_members_role ON server_members(server_id, custom_role_id);
+      CREATE INDEX IF NOT EXISTS idx_dm_channels_a ON dm_channels(user_a);
+      CREATE INDEX IF NOT EXISTS idx_dm_channels_b ON dm_channels(user_b);
+      CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);
+      CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
+      CREATE INDEX IF NOT EXISTS idx_server_roles_pos ON server_roles(server_id, position);
+    `);
+  } catch (e) {}
+
+  /* ---------------- Richer server roles ----------------
+     hoist: show this role's members as their own group in the member list
+            (separate from the online/offline grouping), like Discord.
+     mentionable / permissions / color2 / icon round out the role editor. */
+  const roleCols = db.prepare('PRAGMA table_info(server_roles)').all().map(c => c.name);
+  const roleAdds = {
+    hoist: 'INTEGER DEFAULT 0',
+    mentionable: 'INTEGER DEFAULT 1',
+    color2: "TEXT DEFAULT ''",
+    permissions: "TEXT DEFAULT '{}'",
+    icon: 'TEXT'
+  };
+  for (const [col, def] of Object.entries(roleAdds)) {
+    if (!roleCols.includes(col)) {
+      try { db.exec(`ALTER TABLE server_roles ADD COLUMN ${col} ${def}`); } catch (e) {}
+    }
+  }
+
   // Server-level flags used by the admin panel.
   const adminSrvCols = { locked: 'INTEGER DEFAULT 0', featured: 'INTEGER DEFAULT 0' };
   for (const [col, def] of Object.entries(adminSrvCols)) {

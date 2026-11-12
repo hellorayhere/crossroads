@@ -173,8 +173,211 @@ const I18N = {
     'Profiles': 'Profile', 'Privacy & Safety': 'Datenschutz & Sicherheit', 'Authorized Apps': 'Autorisierte Apps',
     'Devices': 'Geräte', 'Connections': 'Verbindungen', 'Appearance': 'Erscheinungsbild',
     'Notifications': 'Benachrichtigungen', 'Voice & Video': 'Sprache & Video', 'Keybinds': 'Tastenkürzel', 'Language': 'Sprache'
+  },
+  'Italiano': {
+    'Direct Messages': 'Messaggi diretti', 'Friends': 'Amici', 'Text Channels': 'Canali di testo',
+    'Voice Channels': 'Canali vocali', 'Create Channel': 'Crea canale', 'Add Friend': 'Aggiungi amico',
+    'Send Friend Request': 'Invia richiesta', 'Online': 'In linea', 'All': 'Tutti', 'Pending': 'In sospeso',
+    'Blocked': 'Bloccati', 'Save': 'Salva', 'Log Out': 'Disconnetti', 'Start a conversation': 'Inizia una conversazione',
+    'User Settings': 'Impostazioni utente', 'App Settings': "Impostazioni dell'app", 'My Account': 'Il mio account',
+    'Profiles': 'Profili', 'Privacy & Safety': 'Privacy e sicurezza', 'Authorized Devices': 'Dispositivi autorizzati',
+    'Devices': 'Dispositivi', 'Connections': 'Connessioni', 'Appearance': 'Aspetto',
+    'Notifications': 'Notifiche', 'Voice & Video': 'Voce e video', 'Keybinds': 'Scorciatoie', 'Language': 'Lingua'
+  },
+  'Português, BR': {
+    'Direct Messages': 'Mensagens diretas', 'Friends': 'Amigos', 'Text Channels': 'Canais de texto',
+    'Voice Channels': 'Canais de voz', 'Create Channel': 'Criar canal', 'Add Friend': 'Adicionar amigo',
+    'Send Friend Request': 'Enviar pedido', 'Online': 'On-line', 'All': 'Todos', 'Pending': 'Pendente',
+    'Blocked': 'Bloqueados', 'Save': 'Salvar', 'Log Out': 'Sair', 'Start a conversation': 'Iniciar uma conversa',
+    'User Settings': 'Configurações do usuário', 'App Settings': 'Configurações do app', 'My Account': 'Minha conta',
+    'Profiles': 'Perfis', 'Privacy & Safety': 'Privacidade e segurança', 'Authorized Devices': 'Dispositivos autorizados',
+    'Devices': 'Dispositivos', 'Connections': 'Conexões', 'Appearance': 'Aparência',
+    'Notifications': 'Notificações', 'Voice & Video': 'Voz e vídeo', 'Keybinds': 'Atalhos', 'Language': 'Idioma'
+  },
+  'Português, PT': {
+    'Direct Messages': 'Mensagens diretas', 'Friends': 'Amigos', 'Text Channels': 'Canais de texto',
+    'Voice Channels': 'Canais de voz', 'Create Channel': 'Criar canal', 'Add Friend': 'Adicionar amigo',
+    'Send Friend Request': 'Enviar pedido', 'Online': 'Online', 'All': 'Todos', 'Pending': 'Pendente',
+    'Blocked': 'Bloqueados', 'Save': 'Guardar', 'Log Out': 'Terminar sessão', 'Start a conversation': 'Iniciar uma conversa',
+    'User Settings': 'Definições do utilizador', 'App Settings': 'Definições da app', 'My Account': 'A minha conta',
+    'Profiles': 'Perfis', 'Privacy & Safety': 'Privacidade e segurança', 'Authorized Devices': 'Dispositivos autorizados',
+    'Devices': 'Dispositivos', 'Connections': 'Ligações', 'Appearance': 'Aspeto',
+    'Notifications': 'Notificações', 'Voice & Video': 'Voz e vídeo', 'Keybinds': 'Atalhos', 'Language': 'Idioma'
+  },
+  'Nederlands': {
+    'Direct Messages': 'Directe berichten', 'Friends': 'Vrienden', 'Text Channels': 'Tekstkanalen',
+    'Voice Channels': 'Spraakkanalen', 'Create Channel': 'Kanaal maken', 'Add Friend': 'Vriend toevoegen',
+    'Send Friend Request': 'Verzoek sturen', 'Online': 'Online', 'All': 'Alle', 'Pending': 'In afwachting',
+    'Blocked': 'Geblokkeerd', 'Save': 'Opslaan', 'Log Out': 'Afmelden', 'Start a conversation': 'Begin een gesprek',
+    'User Settings': 'Gebruikersinstellingen', 'App Settings': 'App-instellingen', 'My Account': 'Mijn account',
+    'Profiles': 'Profielen', 'Privacy & Safety': 'Privacy en veiligheid', 'Authorized Devices': 'Geautoriseerde apparaten',
+    'Devices': 'Apparaten', 'Connections': 'Verbindingen', 'Appearance': 'Weergave',
+    'Notifications': 'Meldingen', 'Voice & Video': 'Spraak en video', 'Keybinds': 'Sneltoetsen', 'Language': 'Taal'
+  },
+  'Polski': {
+    'Direct Messages': 'Wiadomości prywatne', 'Friends': 'Znajomi', 'Text Channels': 'Kanały tekstowe',
+    'Voice Channels': 'Kanały głosowe', 'Create Channel': 'Utwórz kanał', 'Add Friend': 'Dodaj znajomego',
+    'Send Friend Request': 'Wyślij zaproszenie', 'Online': 'Online', 'All': 'Wszyscy', 'Pending': 'Oczekujące',
+    'Blocked': 'Zablokowani', 'Save': 'Zapisz', 'Log Out': 'Wyloguj', 'Start a conversation': 'Rozpocznij rozmowę',
+    'User Settings': 'Ustawienia użytkownika', 'App Settings': 'Ustawienia aplikacji', 'My Account': 'Moje konto',
+    'Profiles': 'Profile', 'Privacy & Safety': 'Prywatność i bezpieczeństwo', 'Authorized Devices': 'Autoryzowane urządzenia',
+    'Devices': 'Urządzenia', 'Connections': 'Połączenia', 'Appearance': 'Wygląd',
+    'Notifications': 'Powiadomienia', 'Voice & Video': 'Głos i wideo', 'Keybinds': 'Skróty', 'Language': 'Język'
+  },
+  'Русский': {
+    'Direct Messages': 'Личные сообщения', 'Friends': 'Друзья', 'Text Channels': 'Текстовые каналы',
+    'Voice Channels': 'Голосовые каналы', 'Create Channel': 'Создать канал', 'Add Friend': 'Добавить друга',
+    'Send Friend Request': 'Отправить запрос', 'Online': 'В сети', 'All': 'Все', 'Pending': 'Ожидание',
+    'Blocked': 'Заблокированные', 'Save': 'Сохранить', 'Log Out': 'Выйти', 'Start a conversation': 'Начать разговор',
+    'User Settings': 'Настройки пользователя', 'App Settings': 'Настройки приложения', 'My Account': 'Мой аккаунт',
+    'Profiles': 'Профили', 'Privacy & Safety': 'Конфиденциальность и безопасность', 'Authorized Devices': 'Авторизованные устройства',
+    'Devices': 'Устройства', 'Connections': 'Подключения', 'Appearance': 'Внешний вид',
+    'Notifications': 'Уведомления', 'Voice & Video': 'Голос и видео', 'Keybinds': 'Горячие клавиши', 'Language': 'Язык'
+  },
+  'Українська': {
+    'Direct Messages': 'Особисті повідомлення', 'Friends': 'Друзі', 'Text Channels': 'Текстові канали',
+    'Voice Channels': 'Голосові канали', 'Create Channel': 'Створити канал', 'Add Friend': 'Додати друга',
+    'Send Friend Request': 'Надіслати запит', 'Online': 'У мережі', 'All': 'Усі', 'Pending': 'Очікує',
+    'Blocked': 'Заблоковані', 'Save': 'Зберегти', 'Log Out': 'Вийти', 'Start a conversation': 'Почати розмову',
+    'User Settings': 'Налаштування користувача', 'App Settings': 'Налаштування застосунку', 'My Account': 'Мій акаунт',
+    'Profiles': 'Профілі', 'Privacy & Safety': 'Приватність і безпека', 'Authorized Devices': 'Авторизовані пристрої',
+    'Devices': 'Пристрої', 'Connections': "З'єднання", 'Appearance': 'Вигляд',
+    'Notifications': 'Сповіщення', 'Voice & Video': 'Голос і відео', 'Keybinds': 'Гарячі клавіші', 'Language': 'Мова'
+  },
+  'Türkçe': {
+    'Direct Messages': 'Doğrudan Mesajlar', 'Friends': 'Arkadaşlar', 'Text Channels': 'Metin Kanalları',
+    'Voice Channels': 'Ses Kanalları', 'Create Channel': 'Kanal Oluştur', 'Add Friend': 'Arkadaş Ekle',
+    'Send Friend Request': 'İstek Gönder', 'Online': 'Çevrimiçi', 'All': 'Tümü', 'Pending': 'Beklemede',
+    'Blocked': 'Engellenenler', 'Save': 'Kaydet', 'Log Out': 'Çıkış Yap', 'Start a conversation': 'Sohbet başlat',
+    'User Settings': 'Kullanıcı Ayarları', 'App Settings': 'Uygulama Ayarları', 'My Account': 'Hesabım',
+    'Profiles': 'Profiller', 'Privacy & Safety': 'Gizlilik ve Güvenlik', 'Authorized Devices': 'Yetkili Cihazlar',
+    'Devices': 'Cihazlar', 'Connections': 'Bağlantılar', 'Appearance': 'Görünüm',
+    'Notifications': 'Bildirimler', 'Voice & Video': 'Ses ve Video', 'Keybinds': 'Kısayollar', 'Language': 'Dil'
+  },
+  'العربية': {
+    'Direct Messages': 'الرسائل المباشرة', 'Friends': 'الأصدقاء', 'Text Channels': 'قنوات نصية',
+    'Voice Channels': 'قنوات صوتية', 'Create Channel': 'إنشاء قناة', 'Add Friend': 'إضافة صديق',
+    'Send Friend Request': 'إرسال طلب', 'Online': 'متصل', 'All': 'الكل', 'Pending': 'قيد الانتظار',
+    'Blocked': 'المحظورون', 'Save': 'حفظ', 'Log Out': 'تسجيل الخروج', 'Start a conversation': 'ابدأ محادثة',
+    'User Settings': 'إعدادات المستخدم', 'App Settings': 'إعدادات التطبيق', 'My Account': 'حسابي',
+    'Profiles': 'الملفات الشخصية', 'Privacy & Safety': 'الخصوصية والأمان', 'Authorized Devices': 'الأجهزة المصرح بها',
+    'Devices': 'الأجهزة', 'Connections': 'الاتصالات', 'Appearance': 'المظهر',
+    'Notifications': 'الإشعارات', 'Voice & Video': 'الصوت والفيديو', 'Keybinds': 'اختصارات', 'Language': 'اللغة'
+  },
+  'हिन्दी': {
+    'Direct Messages': 'सीधे संदेश', 'Friends': 'मित्र', 'Text Channels': 'टेक्स्ट चैनल',
+    'Voice Channels': 'वॉइस चैनल', 'Create Channel': 'चैनल बनाएँ', 'Add Friend': 'मित्र जोड़ें',
+    'Send Friend Request': 'अनुरोध भेजें', 'Online': 'ऑनलाइन', 'All': 'सभी', 'Pending': 'लंबित',
+    'Blocked': 'अवरुद्ध', 'Save': 'सहेजें', 'Log Out': 'साइन आउट', 'Start a conversation': 'बातचीत शुरू करें',
+    'User Settings': 'उपयोगकर्ता सेटिंग्स', 'App Settings': 'ऐप सेटिंग्स', 'My Account': 'मेरा खाता',
+    'Profiles': 'प्रोफ़ाइल', 'Privacy & Safety': 'गोपनीयता और सुरक्षा', 'Authorized Devices': 'अधिकृत डिवाइस',
+    'Devices': 'डिवाइस', 'Connections': 'कनेक्शन', 'Appearance': 'रूप',
+    'Notifications': 'सूचनाएँ', 'Voice & Video': 'आवाज़ और वीडियो', 'Keybinds': 'शॉर्टकट', 'Language': 'भाषा'
+  },
+  '日本語': {
+    'Direct Messages': 'ダイレクトメッセージ', 'Friends': 'フレンド', 'Text Channels': 'テキストチャンネル',
+    'Voice Channels': 'ボイスチャンネル', 'Create Channel': 'チャンネルを作成', 'Add Friend': 'フレンドを追加',
+    'Send Friend Request': 'フレンド申請を送信', 'Online': 'オンライン', 'All': 'すべて', 'Pending': '保留中',
+    'Blocked': 'ブロック中', 'Save': '保存', 'Log Out': 'ログアウト', 'Start a conversation': '会話を始める',
+    'User Settings': 'ユーザー設定', 'App Settings': 'アプリ設定', 'My Account': 'マイアカウント',
+    'Profiles': 'プロフィール', 'Privacy & Safety': 'プライバシーと安全', 'Authorized Devices': '認証済みデバイス',
+    'Devices': 'デバイス', 'Connections': '連携', 'Appearance': '外観',
+    'Notifications': '通知', 'Voice & Video': '音声とビデオ', 'Keybinds': 'キーバインド', 'Language': '言語'
+  },
+  '한국어': {
+    'Direct Messages': '다이렉트 메시지', 'Friends': '친구', 'Text Channels': '텍스트 채널',
+    'Voice Channels': '음성 채널', 'Create Channel': '채널 만들기', 'Add Friend': '친구 추가',
+    'Send Friend Request': '친구 요청 보내기', 'Online': '온라인', 'All': '전체', 'Pending': '대기 중',
+    'Blocked': '차단됨', 'Save': '저장', 'Log Out': '로그아웃', 'Start a conversation': '대화 시작하기',
+    'User Settings': '사용자 설정', 'App Settings': '앱 설정', 'My Account': '내 계정',
+    'Profiles': '프로필', 'Privacy & Safety': '개인정보 및 보안', 'Authorized Devices': '승인된 기기',
+    'Devices': '기기', 'Connections': '연결', 'Appearance': '화면',
+    'Notifications': '알림', 'Voice & Video': '음성 및 비디오', 'Keybinds': '단축키', 'Language': '언어'
+  },
+  '中文, 简体': {
+    'Direct Messages': '私信', 'Friends': '好友', 'Text Channels': '文字频道',
+    'Voice Channels': '语音频道', 'Create Channel': '创建频道', 'Add Friend': '添加好友',
+    'Send Friend Request': '发送好友请求', 'Online': '在线', 'All': '全部', 'Pending': '待处理',
+    'Blocked': '已屏蔽', 'Save': '保存', 'Log Out': '退出登录', 'Start a conversation': '开始对话',
+    'User Settings': '用户设置', 'App Settings': '应用设置', 'My Account': '我的账户',
+    'Profiles': '个人资料', 'Privacy & Safety': '隐私与安全', 'Authorized Devices': '已授权设备',
+    'Devices': '设备', 'Connections': '连接', 'Appearance': '外观',
+    'Notifications': '通知', 'Voice & Video': '语音与视频', 'Keybinds': '快捷键', 'Language': '语言'
+  },
+  '中文, 繁體': {
+    'Direct Messages': '私訊', 'Friends': '好友', 'Text Channels': '文字頻道',
+    'Voice Channels': '語音頻道', 'Create Channel': '建立頻道', 'Add Friend': '新增好友',
+    'Send Friend Request': '傳送好友邀請', 'Online': '線上', 'All': '全部', 'Pending': '待處理',
+    'Blocked': '已封鎖', 'Save': '儲存', 'Log Out': '登出', 'Start a conversation': '開始對話',
+    'User Settings': '使用者設定', 'App Settings': '應用程式設定', 'My Account': '我的帳戶',
+    'Profiles': '個人檔案', 'Privacy & Safety': '隱私與安全', 'Authorized Devices': '已授權裝置',
+    'Devices': '裝置', 'Connections': '連結', 'Appearance': '外觀',
+    'Notifications': '通知', 'Voice & Video': '語音與視訊', 'Keybinds': '快速鍵', 'Language': '語言'
+  },
+  'Bahasa Indonesia': {
+    'Direct Messages': 'Pesan Langsung', 'Friends': 'Teman', 'Text Channels': 'Saluran Teks',
+    'Voice Channels': 'Saluran Suara', 'Create Channel': 'Buat Saluran', 'Add Friend': 'Tambah Teman',
+    'Send Friend Request': 'Kirim Permintaan', 'Online': 'Daring', 'All': 'Semua', 'Pending': 'Tertunda',
+    'Blocked': 'Diblokir', 'Save': 'Simpan', 'Log Out': 'Keluar', 'Start a conversation': 'Mulai percakapan',
+    'User Settings': 'Pengaturan Pengguna', 'App Settings': 'Pengaturan Aplikasi', 'My Account': 'Akun Saya',
+    'Profiles': 'Profil', 'Privacy & Safety': 'Privasi & Keamanan', 'Authorized Devices': 'Perangkat Resmi',
+    'Devices': 'Perangkat', 'Connections': 'Koneksi', 'Appearance': 'Tampilan',
+    'Notifications': 'Notifikasi', 'Voice & Video': 'Suara & Video', 'Keybinds': 'Pintasan', 'Language': 'Bahasa'
+  },
+  'Tiếng Việt': {
+    'Direct Messages': 'Tin nhắn riêng', 'Friends': 'Bạn bè', 'Text Channels': 'Kênh văn bản',
+    'Voice Channels': 'Kênh thoại', 'Create Channel': 'Tạo kênh', 'Add Friend': 'Thêm bạn',
+    'Send Friend Request': 'Gửi lời mời', 'Online': 'Trực tuyến', 'All': 'Tất cả', 'Pending': 'Đang chờ',
+    'Blocked': 'Đã chặn', 'Save': 'Lưu', 'Log Out': 'Đăng xuất', 'Start a conversation': 'Bắt đầu trò chuyện',
+    'User Settings': 'Cài đặt người dùng', 'App Settings': 'Cài đặt ứng dụng', 'My Account': 'Tài khoản của tôi',
+    'Profiles': 'Hồ sơ', 'Privacy & Safety': 'Quyền riêng tư & An toàn', 'Authorized Devices': 'Thiết bị được ủy quyền',
+    'Devices': 'Thiết bị', 'Connections': 'Kết nối', 'Appearance': 'Giao diện',
+    'Notifications': 'Thông báo', 'Voice & Video': 'Thoại & Video', 'Keybinds': 'Phím tắt', 'Language': 'Ngôn ngữ'
+  },
+  'Ελληνικά': {
+    'Direct Messages': 'Άμεσα μηνύματα', 'Friends': 'Φίλοι', 'Text Channels': 'Κανάλια κειμένου',
+    'Voice Channels': 'Κανάλια φωνής', 'Create Channel': 'Δημιουργία καναλιού', 'Add Friend': 'Προσθήκη φίλου',
+    'Send Friend Request': 'Αποστολή αιτήματος', 'Online': 'Σε σύνδεση', 'All': 'Όλα', 'Pending': 'Σε αναμονή',
+    'Blocked': 'Αποκλεισμένοι', 'Save': 'Αποθήκευση', 'Log Out': 'Αποσύνδεση', 'Start a conversation': 'Ξεκινήστε συνομιλία',
+    'User Settings': 'Ρυθμίσεις χρήστη', 'App Settings': 'Ρυθμίσεις εφαρμογής', 'My Account': 'Ο λογαριασμός μου',
+    'Profiles': 'Προφίλ', 'Privacy & Safety': 'Απόρρητο & Ασφάλεια', 'Authorized Devices': 'Εξουσιοδοτημένες συσκευές',
+    'Devices': 'Συσκευές', 'Connections': 'Συνδέσεις', 'Appearance': 'Εμφάνιση',
+    'Notifications': 'Ειδοποιήσεις', 'Voice & Video': 'Φωνή & Βίντεο', 'Keybinds': 'Συντομεύσεις', 'Language': 'Γλώσσα'
+  },
+  'עברית': {
+    'Direct Messages': 'הודעות ישירות', 'Friends': 'חברים', 'Text Channels': 'ערוצי טקסט',
+    'Voice Channels': 'ערוצי קול', 'Create Channel': 'צור ערוץ', 'Add Friend': 'הוסף חבר',
+    'Send Friend Request': 'שלח בקשת חברות', 'Online': 'מקוון', 'All': 'הכול', 'Pending': 'ממתין',
+    'Blocked': 'חסומים', 'Save': 'שמור', 'Log Out': 'התנתק', 'Start a conversation': 'התחל שיחה',
+    'User Settings': 'הגדרות משתמש', 'App Settings': 'הגדרות האפליקציה', 'My Account': 'החשבון שלי',
+    'Profiles': 'פרופילים', 'Privacy & Safety': 'פרטיות ובטיחות', 'Authorized Devices': 'מכשירים מורשים',
+    'Devices': 'מכשירים', 'Connections': 'חיבורים', 'Appearance': 'מראה',
+    'Notifications': 'התראות', 'Voice & Video': 'קול ווידאו', 'Keybinds': 'קיצורי דרך', 'Language': 'שפה'
   }
 };
+
+/* Full list of selectable display languages: [label, html lang code]. The first
+   five have complete nav dictionaries; the rest fall back to English for any
+   string that has not been translated yet, which keeps the UI readable. */
+const LANGUAGES = [
+  ['English, US', 'en-US'], ['English, UK', 'en-GB'],
+  ['Español', 'es'], ['Français', 'fr'], ['Deutsch', 'de'],
+  ['Italiano', 'it'], ['Português, BR', 'pt-BR'], ['Português, PT', 'pt-PT'],
+  ['Nederlands', 'nl'], ['Svenska', 'sv'], ['Norsk', 'no'], ['Dansk', 'da'], ['Suomi', 'fi'],
+  ['Polski', 'pl'], ['Čeština', 'cs'], ['Slovenčina', 'sk'], ['Magyar', 'hu'], ['Română', 'ro'],
+  ['Български', 'bg'], ['Українська', 'uk'], ['Русский', 'ru'],
+  ['Ελληνικά', 'el'], ['Türkçe', 'tr'],
+  ['العربية', 'ar'], ['עברית', 'he'], ['فارسی', 'fa'],
+  ['हिन्दी', 'hi'], ['বাংলা', 'bn'], ['தமிழ்', 'ta'],
+  ['తెలుగు', 'te'], ['മലയാളം', 'ml'], ['ไทย', 'th'],
+  ['Tiếng Việt', 'vi'], ['Bahasa Indonesia', 'id'], ['Bahasa Melayu', 'ms'],
+  ['日本語', 'ja'], ['한국어', 'ko'],
+  ['中文, 简体', 'zh-CN'], ['中文, 繁體', 'zh-TW'],
+  ['Filipino', 'fil'], ['Kiswahili', 'sw'], ['Afrikaans', 'af'], ['Català', 'ca'],
+  ['Eesti', 'et'], ['Latviešu', 'lv'], ['Lietuvių', 'lt'], ['Hrvatski', 'hr'],
+  ['Srpski', 'sr'], ['Slovenščina', 'sl']
+];
+const LANG_CODE = Object.fromEntries(LANGUAGES);
 
 function t(key) {
   if (key == null) return '';
@@ -185,7 +388,7 @@ function t(key) {
 
 /* Re-render the surfaces that contain translated strings. */
 function applyLanguage() {
-  document.documentElement.lang = ({ 'English, US': 'en-US', 'English, UK': 'en-GB', 'Español': 'es', 'Français': 'fr', 'Deutsch': 'de' })[setting('language')] || 'en';
+  document.documentElement.lang = LANG_CODE[setting('language')] || 'en';
   /* `openServer` also uses view 'home' (Discord's naming for the main view),
      so only touch the DM sidebar when we are genuinely not inside a server -
      otherwise restoring a server on refresh got its sidebar reset to DMs. */
@@ -212,6 +415,7 @@ const ICONS = {
   'plus': '<line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>',
   'minus': '<line x1="5" y1="12" x2="19" y2="12"/>',
   'compass': '<circle cx="12" cy="12" r="10"/><polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76"/>',
+  'chevron-up': '<polyline points="18 15 12 9 6 15"/>',
   'chevron-down': '<polyline points="6 9 12 15 18 9"/>',
   'chevron-right': '<polyline points="9 18 15 12 9 6"/>',
   'chevron-left': '<polyline points="15 18 9 12 15 6"/>',
@@ -258,6 +462,8 @@ const ICONS = {
   'plug': '<path d="M9 2v6M15 2v6M6 8h12v3a6 6 0 0 1-12 0V8zM12 17v5"/>',
   'link': '<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>',
   'mobile': '<rect x="5" y="2" width="14" height="20" rx="2" ry="2"/><line x1="12" y1="18" x2="12.01" y2="18"/>',
+  'tablet': '<rect x="4" y="2" width="16" height="20" rx="2" ry="2"/><line x1="12" y1="18" x2="12.01" y2="18"/>',
+  'monitor': '<rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/>',
   'volume-high': '<polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"/>',
   'id-badge': '<rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="2"/><path d="M15 8h4M15 12h4M7 16h10"/>',
   'download': '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>',
@@ -672,12 +878,15 @@ async function api(path, opts = {}) {
         continue;
       }
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || 'Request failed');
+      if (!res.ok) { const err = new Error(data.error || 'Request failed'); err.status = res.status; throw err; }
       return data;
     } catch (e) {
       lastErr = e;
-      if (e.message === 'Session expired' || i >= tries) throw e;
-      await new Promise(r => setTimeout(r, 1200 * (i + 1)));
+      /* Only retry transient failures (network / 5xx). A 4xx will never
+         succeed on a retry, so fail fast instead of stalling the UI. */
+      const retriable = !e.status || e.status >= 500;
+      if (e.message === 'Session expired' || i >= tries || !retriable) throw e;
+      await new Promise(r => setTimeout(r, 900 * (i + 1)));
     }
   }
   throw lastErr || new Error('Request failed');
@@ -942,7 +1151,7 @@ function promptDialog(opts = {}) {
       <h3>${escapeHtml(opts.title || '')}</h3>
       ${opts.body ? `<p>${opts.body}</p>` : ''}
       <div class="field"><label>${escapeHtml(opts.label || '')}</label>
-        <input id="pd-input" value="${escapeHtml(opts.value || '')}" placeholder="${escapeHtml(opts.placeholder || '')}" maxlength="${opts.maxlength || 256}"></div>
+        <input id="pd-input" type="${opts.input === 'password' ? 'password' : 'text'}" value="${escapeHtml(opts.value || '')}" placeholder="${escapeHtml(opts.placeholder || '')}" maxlength="${opts.maxlength || 256}"></div>
       <div class="confirm-actions">
         <button class="btn ghost" id="pd-cancel">Cancel</button>
         <button class="btn" id="pd-ok">${escapeHtml(opts.confirmText || 'Save')}</button>
@@ -1263,10 +1472,10 @@ function connectSocket() {
   socket.on('dm_message', async (m) => {
     await e2eDecryptMessage(m);
     if (state.dm && m.dm_id === state.dm.id) { state.messages.push(m); appendMessage(m); }
-    loadDMs();
+    scheduleDMsReload();
   });
   socket.on('dm_notify', async (data) => {
-    loadDMs();
+    scheduleDMsReload();
     if (!state.dm || state.dm.id !== data.dm_id) {
       const who = fullTag(data.message.author);
       bumpDmUnread(data.dm_id);
@@ -1364,7 +1573,7 @@ function connectSocket() {
       updateTitle();
     }
     renderRail();
-    const activeTab = document.querySelector('.ss-tab.active');
+    const activeTab = document.querySelector('.ss-nav-item.active');
     if (activeTab && activeTab.dataset.tab === 'overview' && state.server && state.server.id === s.id) {
       renderServerTab('overview', state.server, state.server.owner_id === me.id);
     }
@@ -1372,19 +1581,19 @@ function connectSocket() {
   /* Member roles changed: refresh the member list + open members tab. */
   socket.on('server_members_update', (data) => {
     if (!data || !state.server || data.server_id !== state.server.id) return;
-    reloadServerMembers();
+    scheduleMembersReload();
   });
   /* Server safety settings changed. */
   socket.on('server_settings_update', (data) => {
     if (!data || !state.server || data.server_id !== state.server.id) return;
     state.serverSettings = data.settings || state.serverSettings;
-    if (document.querySelector('.ss-tab.active')?.dataset.tab === 'safety') renderServerTab('safety', state.server, state.server.owner_id === me.id);
+    if (document.querySelector('.ss-nav-item.active')?.dataset.tab === 'safety') renderServerTab('safety', state.server, state.server.owner_id === me.id);
   });
   /* Custom roles changed. */
   socket.on('server_roles_update', (data) => {
     if (!data || !state.server || data.server_id !== state.server.id) return;
     refreshRoles().then(() => {
-      const t = document.querySelector('.ss-tab.active')?.dataset.tab;
+      const t = document.querySelector('.ss-nav-item.active')?.dataset.tab;
       if (t === 'roles') renderServerTab('roles', state.server, state.server.owner_id === me.id);
       else renderMembers();
     });
@@ -1596,6 +1805,9 @@ async function loadDMs() {
   for (const d of dms) if (d.user) state.usersCache[d.user.id] = d.user;
   if (!state.server && state.view !== 'friends') renderDMList();
 }
+/* Bursts of DM activity (several messages at once) should trigger a single
+   refresh instead of one full /api/dms round-trip per message. */
+const scheduleDMsReload = debounce(() => { loadDMs().catch(() => {}); }, 350);
 
 /* ---------------- Discord-style unread badges ---------------- */
 function dmUnreadCount(dmId) { return state.dmUnread[dmId] || 0; }
@@ -2963,28 +3175,48 @@ function renderMembers() {
   if (!state.server) { wrap.classList.add('closed'); wrap.innerHTML = ''; return; }
   wrap.classList.toggle('closed', !state.showMembers);
   wrap.innerHTML = '';
-  const online = state.members.filter(m => m.status !== 'offline');
-  const offline = state.members.filter(m => m.status === 'offline');
-  const addCat = (label, arr) => {
+  const roles = state.roles || [];
+  const hoisted = roles.filter(r => r.hoist).sort((a, b) => (b.position || 0) - (a.position || 0));
+  const roleById = {};
+  roles.forEach(r => { roleById[r.id] = r; });
+  const placed = new Set();
+
+  const makeRow = (m) => {
+    const row = document.createElement('div');
+    row.className = 'member' + (m.status === 'offline' ? ' offline' : '');
+    row.dataset.uid = m.id;
+    const crown = (state.server.owner_id === m.id) ? `<span class="owner-crown">${icon('crown')}</span>` : '';
+    const role = state.server.owner_id === m.id ? 'owner' : (m.role || 'member');
+    const roleTag = role === 'admin' ? '<span class="member-role-tag admin">ADMIN</span>' : '';
+    const crole = (m.custom_role_id && roleById[m.custom_role_id]) || null;
+    const croleTag = crole ? `<span class="member-role-tag" style="color:${crole.color};border-color:${crole.color}">${escapeHtml(crole.name)}</span>` : '';
+    row.innerHTML = `${avatarHTML(m, 36, m.status || 'offline')}<span class="mname">${escapeHtml(m.display_name || m.username)}${crown}${roleTag}${croleTag}</span>`;
+    row.addEventListener('click', () => openProfile(m));
+    return row;
+  };
+  const addCat = (label, arr, color) => {
     if (!arr.length) return;
     const cat = document.createElement('div');
     cat.className = 'member-cat';
-    cat.textContent = `${label} \u2014 ${arr.length}`;
+    cat.innerHTML = `${color ? `<span class="member-cat-dot" style="background:${color}"></span>` : ''}<span>${escapeHtml(label)}</span><span class="member-cat-count">${arr.length}</span>`;
     wrap.appendChild(cat);
-    for (const m of arr) {
-      const row = document.createElement('div');
-      row.className = 'member' + (m.status === 'offline' ? ' offline' : '');
-      row.dataset.uid = m.id;
-      const crown = (state.server.owner_id === m.id) ? `<span class="owner-crown">${icon('crown')}</span>` : '';
-      const role = state.server.owner_id === m.id ? 'owner' : (m.role || 'member');
-      const roleTag = role === 'admin' ? '<span class="member-role-tag admin">ADMIN</span>' : '';
-      const crole = (m.custom_role_id && state.roles) ? state.roles.find(r => r.id === m.custom_role_id) : null;
-      const croleTag = crole ? `<span class="member-role-tag" style="color:${crole.color};border-color:${crole.color}">${escapeHtml(crole.name)}</span>` : '';
-      row.innerHTML = `${avatarHTML(m, 36, m.status || 'offline')}<span class="mname">${escapeHtml(m.display_name || m.username)}${crown}${roleTag}${croleTag}</span>`;
-      row.addEventListener('click', () => openProfile(m));
-      wrap.appendChild(row);
-    }
+    arr.forEach(m => wrap.appendChild(makeRow(m)));
   };
+
+  /* Display-role groups come first and are kept separate from the
+     online/offline grouping, so a hoisted role reads as its own section. */
+  for (const r of hoisted) {
+    const group = state.members
+      .filter(m => m.custom_role_id === r.id)
+      .sort((a, b) => (a.status === 'offline' ? 1 : 0) - (b.status === 'offline' ? 1 : 0));
+    if (!group.length) continue;
+    group.forEach(m => placed.add(m.id));
+    addCat(r.name, group, r.color);
+  }
+
+  const rest = state.members.filter(m => !placed.has(m.id));
+  const online = rest.filter(m => m.status !== 'offline');
+  const offline = rest.filter(m => m.status === 'offline');
   addCat('ONLINE', online);
   addCat('OFFLINE', offline);
 }
@@ -5404,8 +5636,7 @@ const SETTINGS_NAV = [
   { id: 'account', label: 'My Account' },
   { id: 'profiles', label: 'Profiles' },
   { id: 'privacy', label: 'Privacy & Safety' },
-  { id: 'apps', label: 'Authorized Apps' },
-  { id: 'devices', label: 'Devices' },
+  { id: 'apps', label: 'Authorized Devices' },
   { id: 'connections', label: 'Connections' },
   { cat: 'App Settings' },
   { id: 'appearance', label: 'Appearance' },
@@ -5593,11 +5824,190 @@ function renderSettings(section) {
   hydrateIcons(panel);
   if (section === 'account') wireAccountPanel();
   if (section === 'profiles') wireProfilesPanel();
-  if (section === 'privacy') wirePrivacyPanel();
+  if (section === 'privacy') { wirePrivacyPanel(); wireTwoFactor(); }
+  if (section === 'apps') wireDevicesPanel();
   if (section === 'privacy' || section === 'appearance' || section === 'notifications' || section === 'voice') wireToggles();
   if (section === 'appearance') wireAppearance();
   if (section === 'voice') wireVoicePanel();
   if (section === 'language') wireLanguage();
+}
+
+/* Authorized Devices: list every session (device) signed in to this account and
+   let the user revoke any of them. Data comes from /api/sessions. */
+async function wireDevicesPanel() {
+  const listEl = $('dev-list');
+  if (!listEl) return;
+  const deviceIcon = (kind) => kind === 'Mobile' ? 'mobile' : (kind === 'Tablet' ? 'tablet' : 'monitor');
+  const fmt = (ts) => {
+    if (!ts) return 'Unknown';
+    const d = new Date(ts);
+    return d.toLocaleDateString([], { year: 'numeric', month: 'short', day: 'numeric' }) + ' \u00b7 ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  };
+  const render = (sessions) => {
+    if (!sessions.length) { listEl.innerHTML = '<div class="dev-loading">No active devices.</div>'; return; }
+    listEl.innerHTML = sessions.map(s => `
+      <div class="dev-row${s.current ? ' current' : ''}">
+        <div class="dev-ico">${icon(deviceIcon(s.kind))}</div>
+        <div class="dev-info">
+          <div class="dev-name">${escapeHtml(s.label)}${s.current ? '<span class="dev-badge">This device</span>' : ''}</div>
+          <div class="dev-meta">${escapeHtml(s.os)} \u00b7 ${escapeHtml(s.browser)}${s.ip ? ' \u00b7 ' + escapeHtml(s.ip) : ''}</div>
+          <div class="dev-meta">Last active ${fmt(s.last_seen_at)} \u00b7 Signed in ${fmt(s.created_at)}</div>
+        </div>
+        <div class="dev-actions">
+          ${s.current
+            ? '<span class="dev-current-tag">Active</span>'
+            : `<button class="ss-icon-btn ban" data-revoke="${s.id}" title="Sign out this device">${icon('xmark')}</button>`}
+        </div>
+      </div>`).join('');
+    hydrateIcons(listEl);
+    listEl.querySelectorAll('[data-revoke]').forEach(b => b.addEventListener('click', async () => {
+      const ok = await confirmDialog({ title: 'Sign out device', body: 'This device will be signed out immediately and will need to sign in again.', confirmText: 'Sign out', danger: true });
+      if (!ok) return;
+      try {
+        await api('/api/sessions/' + b.dataset.revoke, { method: 'DELETE' });
+        toast('Device signed out', 'success');
+        load();
+      } catch (e) { toast(e.message, 'error'); }
+    }));
+  };
+  const load = async () => {
+    try {
+      const { sessions } = await api('/api/sessions');
+      render(sessions || []);
+    } catch (e) { listEl.innerHTML = '<div class="dev-loading">' + escapeHtml(e.message) + '</div>'; }
+  };
+  const revokeOthers = $('dev-revoke-others');
+  if (revokeOthers) revokeOthers.addEventListener('click', async () => {
+    const ok = await confirmDialog({ title: 'Sign out other devices', body: 'Every other device will be signed out. This device stays signed in.', confirmText: 'Sign out others', danger: true });
+    if (!ok) return;
+    try {
+      const r = await api('/api/sessions/revoke-others', { method: 'POST' });
+      toast(r.revoked ? `Signed out ${r.revoked} device(s)` : 'No other devices to sign out', 'success');
+      load();
+    } catch (e) { toast(e.message, 'error'); }
+  });
+  load();
+}
+
+/* Two-step login: enable/disable + live rotating code display. */
+async function wireTwoFactor() {
+  const body = $('twofa-body');
+  const statusEl = $('twofa-status');
+  if (!body) return;
+  let enabled = false;
+  let codeTimer = null;
+  let setupSecret = null;
+
+  const stopTimer = () => { if (codeTimer) { clearInterval(codeTimer); codeTimer = null; } };
+
+  const showEnabled = (codeInfo) => {
+    statusEl.textContent = 'On';
+    statusEl.className = 'twofa-status on';
+    body.innerHTML = `
+      <div class="twofa-code-box">
+        <div class="twofa-code-label">Current sign-in code</div>
+        <div class="twofa-code" id="twofa-code">${codeInfo ? codeInfo.code : '\u2022\u2022\u2022\u2022\u2022\u2022'}</div>
+        <div class="twofa-code-hint">Refreshes in <span id="twofa-secs">${codeInfo ? codeInfo.seconds : 30}</span>s \u00b7 use this code on any device when signing in</div>
+      </div>
+      <div class="twofa-actions">
+        <button class="btn secondary" id="twofa-disable">Turn off two-step login</button>
+      </div>`;
+    const refresh = async () => {
+      try {
+        const c = await api('/api/2fa/code');
+        const codeEl = $('twofa-code'); const secsEl = $('twofa-secs');
+        if (codeEl) codeEl.textContent = c.code;
+        if (secsEl) secsEl.textContent = String(c.seconds);
+      } catch (e) { /* ignore */ }
+    };
+    stopTimer();
+    refresh();
+    codeTimer = setInterval(refresh, 5000);
+    $('twofa-disable').addEventListener('click', async () => {
+      const pw = await promptDialog({ title: 'Turn off two-step login', body: 'Enter your password to confirm.', input: 'password', placeholder: 'Password', confirmText: 'Turn off' });
+      if (pw == null) return;
+      try {
+        await api('/api/2fa/disable', { method: 'POST', body: JSON.stringify({ password: pw }) });
+        toast('Two-step login turned off', 'success');
+        stopTimer();
+        render();
+      } catch (e) { toast(e.message, 'error'); }
+    });
+  };
+
+  const showDisabled = () => {
+    statusEl.textContent = 'Off';
+    statusEl.className = 'twofa-status';
+    body.innerHTML = `
+      <p class="twofa-desc">Two-step login is currently off. Turn it on to require a rotating 6-digit code at sign-in.</p>
+      <div class="twofa-actions"><button class="btn" id="twofa-start">Set up two-step login</button></div>`;
+    $('twofa-start').addEventListener('click', async () => {
+      const pw = await promptDialog({ title: 'Set up two-step login', body: 'Enter your password to begin.', input: 'password', placeholder: 'Password', confirmText: 'Continue' });
+      if (pw == null) return;
+      try {
+        const d = await api('/api/2fa/setup', { method: 'POST', body: JSON.stringify({ password: pw }) });
+        setupSecret = d.secret;
+        showSetup(d);
+      } catch (e) { toast(e.message, 'error'); }
+    });
+  };
+
+  const showSetup = (d) => {
+    statusEl.textContent = 'Setup';
+    statusEl.className = 'twofa-status';
+    body.innerHTML = `
+      <p class="twofa-desc">Add this secret to your authenticator app, or simply use the live code below. Then enter the current 6-digit code to finish.</p>
+      <div class="twofa-secret"><span class="twofa-secret-label">Secret</span><code id="twofa-secret">${escapeHtml(d.secret)}</code></div>
+      <div class="twofa-code-box small">
+        <div class="twofa-code-label">Current code</div>
+        <div class="twofa-code" id="twofa-code">${d.code}</div>
+        <div class="twofa-code-hint">Refreshes in <span id="twofa-secs">${d.seconds}</span>s</div>
+      </div>
+      <div class="field"><label>Enter the 6-digit code</label>
+        <input id="twofa-input" inputmode="numeric" maxlength="6" placeholder="000000" autocomplete="one-time-code"></div>
+      <div class="twofa-actions">
+        <button class="btn secondary" id="twofa-cancel">Cancel</button>
+        <button class="btn" id="twofa-confirm">Enable two-step login</button>
+      </div>`;
+    const refresh = async () => {
+      try {
+        const c = await api('/api/2fa/code');
+        const codeEl = $('twofa-code'); const secsEl = $('twofa-secs');
+        if (codeEl) codeEl.textContent = c.code;
+        if (secsEl) secsEl.textContent = String(c.seconds);
+      } catch (e) { /* ignore */ }
+    };
+    stopTimer();
+    codeTimer = setInterval(refresh, 5000);
+    $('twofa-cancel').addEventListener('click', () => { stopTimer(); render(); });
+    $('twofa-confirm').addEventListener('click', async () => {
+      const code = ($('twofa-input').value || '').trim();
+      if (!/^\d{6}$/.test(code)) { toast('Enter the 6-digit code', 'error'); return; }
+      try {
+        await api('/api/2fa/enable', { method: 'POST', body: JSON.stringify({ code }) });
+        toast('Two-step login enabled', 'success');
+        stopTimer();
+        render();
+      } catch (e) { toast(e.message, 'error'); }
+    });
+  };
+
+  const render = async () => {
+    try {
+      const s = await api('/api/2fa/status');
+      enabled = !!s.enabled;
+      if (enabled) {
+        let info = null;
+        try { info = await api('/api/2fa/code'); } catch (e) { /* ignore */ }
+        showEnabled(info);
+      } else {
+        showDisabled();
+      }
+    } catch (e) {
+      body.innerHTML = '<div class="dev-loading">' + escapeHtml(e.message) + '</div>';
+    }
+  };
+  render();
 }
 
 function wirePrivacyPanel() {
@@ -5766,11 +6176,23 @@ function settingsPanelHTML(section) {
           <div class="field"><label>Confirm New Password</label>
             <input type="password" id="pw-confirm" autocomplete="new-password" placeholder="Re-enter your new password to confirm"></div>
           <div class="pw-actions"><button class="btn" id="pw-save">Update Password</button></div>
+        </div>
+        <div class="pw-section twofa-section" id="twofa-section">
+          <div class="pw-head">
+            <div>
+              <h5>Two-Step Login</h5>
+              <p class="pw-sub">Add a second step to sign-in. When enabled, you will need a 6-digit code from your authenticator app (or the code shown below on a signed-in device) in addition to your password.</p>
+            </div>
+            <span class="twofa-status" id="twofa-status">Checking\u2026</span>
+          </div>
+          <div id="twofa-body"><div class="dev-loading">Loading\u2026</div></div>
         </div>`;
     case 'apps':
-      return `<h4>Authorized Apps</h4><div class="empty-panel"><div class="ep-ico">${icon('plug')}</div><h5>No authorized apps</h5><p>When you connect an application to your account, it will appear here.</p></div>`;
-    case 'devices':
-      return `<h4>Devices</h4><div class="empty-panel"><div class="ep-ico">${icon('mobile')}</div><h5>No other devices</h5><p>You are only signed in on this device right now.</p></div>`;
+      return `
+        <h4>Authorized Devices</h4>
+        <p class="set-sub">These are the devices currently signed in to your account. If you see something you do not recognise, sign that device out and change your password.</p>
+        <div class="dev-list" id="dev-list"><div class="dev-loading">Loading devices\u2026</div></div>
+        <div class="ss-actions" style="margin-top:16px"><button class="btn secondary" id="dev-revoke-others">${icon('xmark')} Sign out all other devices</button></div>`;
     case 'connections':
       return `<h4>Connections</h4><div class="empty-panel"><div class="ep-ico">${icon('link')}</div><h5>No connections</h5><p>Connect accounts such as GitHub or Twitch to display them on your profile.</p></div>`;
     case 'appearance':
@@ -5902,10 +6324,9 @@ function settingsPanelHTML(section) {
         <h4>Language</h4>
         <div class="field"><label>Display Language</label>
           <select id="lang-select">
-            <option>English, US</option><option>English, UK</option><option>Espa\u00f1ol</option>
-            <option>Fran\u00e7ais</option><option>Deutsch</option>
+            ${LANGUAGES.map(([name]) => `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`).join('')}
           </select></div>
-        <p style="color:var(--text-muted);font-size:13px;line-height:1.5">Additional languages are being prepared and will appear here as they become available.</p>
+        <p style="color:var(--text-muted);font-size:13px;line-height:1.5">Choose the language used across the interface. Some newer translations are still being completed and fall back to English where needed.</p>
         ${isPlatformAdmin() ? `
         <div class="admin-entry">
           <div class="admin-entry-ico">CR</div>
@@ -7535,26 +7956,59 @@ function openServerSettings() {
      something tries to call this directly. */
   if (!amIAdmin()) { toast('Only server owners and admins can open Server Settings', 'error'); return; }
   const isOwner = s.owner_id === me.id;
+  const tabs = [
+    { id: 'overview', label: 'Overview', icon: 'server', group: 'Server' },
+    { id: 'roles', label: 'Roles', icon: 'shield', group: 'Server' },
+    { id: 'members', label: 'Members', icon: 'users', group: 'Server' },
+    { id: 'moderation', label: 'Moderation', icon: 'ban', group: 'Safety' },
+    { id: 'safety', label: 'Safety', icon: 'lock', group: 'Safety' },
+    { id: 'invites', label: 'Invites', icon: 'link', group: 'Access' }
+  ];
+  const groups = [...new Set(tabs.map(t => t.group))];
   openModal(`
-    <div class="ss-modal-head">
-      <h3>Server Settings</h3>
-      <button class="ss-close" id="ss-close-x">${icon('xmark')}</button>
-    </div>
-    <div class="ss-tabs">
-      <button class="ss-tab active" data-tab="overview">${icon('server')} Overview</button>
-      <button class="ss-tab" data-tab="roles">${icon('shield')} Roles</button>
-      <button class="ss-tab" data-tab="members">${icon('users')} Members</button>
-      <button class="ss-tab" data-tab="moderation">${icon('ban')} Moderation</button>
-      <button class="ss-tab" data-tab="safety">${icon('lock')} Safety</button>
-      <button class="ss-tab" data-tab="invites">${icon('link')} Invites</button>
-    </div>
-    <div class="ss-body" id="ss-body"></div>`, { modalClass: 'ss-modal' });
+    <div class="ss-shell">
+      <aside class="ss-side">
+        <div class="ss-side-brand">
+          <div class="ss-side-icon">${s.icon_url ? `<img src="${escapeHtml(s.icon_url)}" alt="">` : escapeHtml((s.name || '?')[0].toUpperCase())}</div>
+          <div class="ss-side-name"><span>${escapeHtml(s.name)}</span><small>Server Settings</small></div>
+        </div>
+        <nav class="ss-nav">
+          ${groups.map(g => `
+            <div class="ss-nav-group">${g}</div>
+            ${tabs.filter(t => t.group === g).map(t => `<button class="ss-nav-item${t.id === 'overview' ? ' active' : ''}" data-tab="${t.id}">${icon(t.icon)}<span>${t.label}</span></button>`).join('')}
+          `).join('')}
+        </nav>
+        <div class="ss-side-foot">Signed in as <b>${escapeHtml(me.display_name || me.username)}</b></div>
+      </aside>
+      <section class="ss-main">
+        <header class="ss-main-head">
+          <div>
+            <h3 id="ss-title">Overview</h3>
+            <p class="ss-main-sub" id="ss-sub">Manage how your server looks and who can join.</p>
+          </div>
+          <button class="ss-close" id="ss-close-x" title="Close">${icon('xmark')}</button>
+        </header>
+        <div class="ss-body" id="ss-body"></div>
+      </section>
+    </div>`, { modalClass: 'ss-modal' });
   $('ss-close-x').addEventListener('click', closeModal);
+  const subtitles = {
+    overview: 'Manage how your server looks and who can join.',
+    roles: 'Create roles, set their colour and decide how they appear.',
+    members: 'Review everyone in the server and assign roles.',
+    moderation: 'Bans and recent moderation actions.',
+    safety: 'Control who can join and how the server behaves.',
+    invites: 'Share invite links and track how people get in.'
+  };
   const showTab = (tab) => {
-    document.querySelectorAll('.ss-tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tab));
+    document.querySelectorAll('.ss-nav-item').forEach(t => t.classList.toggle('active', t.dataset.tab === tab));
+    const t = tabs.find(x => x.id === tab);
+    const titleEl = $('ss-title'), subEl = $('ss-sub');
+    if (titleEl && t) titleEl.textContent = t.label;
+    if (subEl) subEl.textContent = subtitles[tab] || '';
     renderServerTab(tab, state.server, isOwner);
   };
-  document.querySelectorAll('.ss-tab').forEach(t => t.addEventListener('click', () => showTab(t.dataset.tab)));
+  document.querySelectorAll('.ss-nav-item').forEach(t => t.addEventListener('click', () => showTab(t.dataset.tab)));
   showTab('overview');
 }
 
@@ -7736,68 +8190,177 @@ async function refreshRoles() {
   try { const { roles } = await api('/api/servers/' + state.server.id + '/roles'); state.roles = roles || []; } catch (e) { /* ignore */ }
 }
 
+function roleGradient(r) {
+  if (r && r.color2 && /^#[0-9a-fA-F]{6}$/.test(r.color2)) return `linear-gradient(135deg, ${r.color}, ${r.color2})`;
+  return r ? r.color : '#5865F2';
+}
+function parseRolePerms(r) {
+  try { const p = JSON.parse((r && r.permissions) || '{}'); return (p && typeof p === 'object') ? p : {}; } catch (e) { return {}; }
+}
+const ROLE_PERMISSIONS = [
+  ['administrator', 'Administrator', 'Grants every permission below and bypasses channel overrides.'],
+  ['manage_server', 'Manage Server', 'Change the server name, icon, banner and description.'],
+  ['manage_roles', 'Manage Roles', 'Create, edit and delete roles below their own rank.'],
+  ['manage_channels', 'Manage Channels', 'Create, edit and delete channels and categories.'],
+  ['manage_members', 'Manage Members', 'Promote, demote, time out and move members.'],
+  ['kick_members', 'Kick Members', 'Remove members from the server.'],
+  ['ban_members', 'Ban Members', 'Ban members and manage the ban list.'],
+  ['manage_messages', 'Manage Messages', 'Delete and pin messages from other members.'],
+  ['mention_everyone', 'Mention Everyone', 'Use @everyone and @here in messages.'],
+  ['create_invites', 'Create Invites', 'Generate new invite links for the server.']
+];
+
 function renderRolesTab(body, s) {
   const admin = amIAdmin();
-  const roles = state.roles || [];
+  const roles = (state.roles || []).slice().sort((a, b) => (b.position || 0) - (a.position || 0));
   const members = state.members || [];
   const builtins = [
-    { name: 'Owner', color: '#f0b232', desc: 'Full access. The owner cannot be removed or demoted.', count: 1 },
+    { name: 'Owner', color: '#f0b232', desc: 'Full access. The owner cannot be removed or demoted.', count: 1, locked: true },
     { name: 'Admin', color: '#f23f43', desc: 'Can manage channels, roles, members and moderation.', count: members.filter(m => m.role === 'admin' && m.id !== s.owner_id).length },
     { name: 'Member', color: '#949ba4', desc: 'Standard access to channels and conversations.', count: members.filter(m => m.id !== s.owner_id && (m.role || 'member') === 'member').length }
   ];
+  const roleRow = (r, i) => {
+    const perms = parseRolePerms(r);
+    const permCount = Object.keys(perms).filter(k => perms[k]).length;
+    const badges = [
+      r.hoist ? '<span class="role-flag hoist">Hoisted</span>' : '',
+      r.mentionable ? '<span class="role-flag">Mentionable</span>' : '<span class="role-flag muted">Silent</span>',
+      perms.administrator ? '<span class="role-flag danger">Admin</span>' : ''
+    ].join('');
+    return `<div class="ss-role-card">
+      <div class="role-order">
+        <button class="role-move" data-move-up="${r.id}" title="Move up" ${i === 0 ? 'disabled' : ''}>${icon('chevron-up')}</button>
+        <button class="role-move" data-move-down="${r.id}" title="Move down" ${i === roles.length - 1 ? 'disabled' : ''}>${icon('chevron-down')}</button>
+      </div>
+      <span class="role-dot" style="background:${roleGradient(r)}"></span>
+      <div class="ss-role-info">
+        <div class="ss-role-name" style="color:${r.color}">${r.icon ? `<span class="role-ico">${escapeHtml(r.icon)}</span>` : ''}${escapeHtml(r.name)}</div>
+        <div class="ss-role-desc">${r.member_count || 0} member${(r.member_count || 0) === 1 ? '' : 's'} &middot; ${permCount} permission${permCount === 1 ? '' : 's'}</div>
+        <div class="role-flags">${badges}</div>
+      </div>
+      ${admin ? `<div class="ss-role-actions"><button class="ss-icon-btn" data-edit-role="${r.id}" title="Edit">${icon('pencil')}</button><button class="ss-icon-btn ban" data-del-role="${r.id}" title="Delete">${icon('trash')}</button></div>` : ''}
+    </div>`;
+  };
   body.innerHTML = `
-    <div class="ss-section-title">Built-in Roles</div>
-    <div class="ss-roles">
-      ${builtins.map(r => `<div class="ss-role-card">
-        <span class="role-dot" style="background:${r.color}"></span>
-        <div class="ss-role-info"><div class="ss-role-name">${r.name}</div><div class="ss-role-desc">${r.desc}</div></div>
-        <span class="ss-role-count">${r.count}</span>
-      </div>`).join('')}
+    <div class="ss-panel">
+      <div class="ss-section-title">Role Hierarchy <span class="ss-section-hint">Higher roles appear first and outrank lower ones.</span></div>
+      <div class="ss-roles">
+        ${builtins.map(r => `<div class="ss-role-card builtin">
+          <div class="role-order placeholder"></div>
+          <span class="role-dot" style="background:${r.color}"></span>
+          <div class="ss-role-info"><div class="ss-role-name">${r.name}${r.locked ? ` ${icon('lock')}` : ''}</div><div class="ss-role-desc">${r.desc}</div></div>
+          <span class="ss-role-count">${r.count}</span>
+        </div>`).join('')}
+      </div>
+      <div class="ss-section-title">Custom Roles \u2014 ${roles.length}</div>
+      <div class="ss-roles" id="ss-custom-roles">
+        ${roles.map(roleRow).join('') || '<div class="inv-empty">No custom roles yet. Create one to tag members with a name, colour and permissions.</div>'}
+      </div>
+      ${admin ? `<div class="ss-actions"><button class="btn" id="ss-add-role">${icon('plus')} Create Role</button></div>` : '<div class="ss-note">Only the owner and admins can manage roles.</div>'}
     </div>
-    <div class="ss-section-title">Custom Roles \u2014 ${roles.length}</div>
-    <div class="ss-roles" id="ss-custom-roles">
-      ${roles.map(r => `<div class="ss-role-card">
-        <span class="role-dot" style="background:${r.color}"></span>
-        <div class="ss-role-info"><div class="ss-role-name" style="color:${r.color}">${escapeHtml(r.name)}</div><div class="ss-role-desc">${r.member_count || 0} member(s)</div></div>
-        ${admin ? `<div class="ss-role-actions"><button class="ss-icon-btn" data-edit-role="${r.id}" title="Edit">${icon('pencil')}</button><button class="ss-icon-btn ban" data-del-role="${r.id}" title="Delete">${icon('trash')}</button></div>` : ''}
-      </div>`).join('') || '<div class="inv-empty">No custom roles yet. Create one to tag members with a name and colour.</div>'}
-    </div>
-    ${admin ? `<div class="ss-actions"><button class="btn" id="ss-add-role">${icon('plus')} Create Role</button></div>` : '<div class="ss-note">Only the owner and admins can manage roles.</div>'}
   `;
   hydrateIcons(body);
   const addBtn = $('ss-add-role');
   if (addBtn) addBtn.addEventListener('click', () => openRoleEditor(s, null));
   body.querySelectorAll('[data-del-role]').forEach(b => b.addEventListener('click', () => deleteServerRole(s, b.dataset.delRole)));
   body.querySelectorAll('[data-edit-role]').forEach(b => b.addEventListener('click', () => { const r = (state.roles || []).find(x => x.id === b.dataset.editRole); if (r) openRoleEditor(s, r); }));
+  body.querySelectorAll('[data-move-up]').forEach(b => b.addEventListener('click', () => moveServerRole(s, b.dataset.moveUp, 'up')));
+  body.querySelectorAll('[data-move-down]').forEach(b => b.addEventListener('click', () => moveServerRole(s, b.dataset.moveDown, 'down')));
+}
+
+async function moveServerRole(s, rid, dir) {
+  try {
+    const d = await api('/api/servers/' + s.id + '/roles/' + rid + '/move', { method: 'POST', body: JSON.stringify({ dir }) });
+    if (d && d.roles) state.roles = d.roles;
+    renderServerTab('roles', state.server, state.server.owner_id === me.id);
+  } catch (e) { toast(e.message, 'error'); }
 }
 
 function openRoleEditor(s, role) {
   const colors = PALETTE;
   const cur = role ? role.color : '#5865F2';
+  const cur2 = (role && role.color2) || '';
+  const perms = parseRolePerms(role);
   const wrap = document.createElement('div');
   wrap.className = 'confirm-overlay';
-  wrap.innerHTML = `<div class="confirm-box">
+  wrap.innerHTML = `<div class="confirm-box role-editor">
     <h3>${role ? 'Edit Role' : 'Create Role'}</h3>
-    <div class="field"><label>Role Name</label><input id="role-name" maxlength="32" value="${escapeHtml(role ? role.name : '')}" placeholder="e.g. Moderator, VIP, Artist"></div>
-    <div class="field"><label>Role Colour</label><div class="role-color-row">${colors.map(c => `<button class="role-swatch${c === cur ? ' sel' : ''}" data-color="${c}" style="background:${c}"></button>`).join('')}</div></div>
-    <div class="confirm-actions"><button class="btn ghost" id="role-cancel">Cancel</button><button class="btn" id="role-save">${role ? 'Save' : 'Create'}</button></div>
+    <div class="re-preview" id="re-preview">
+      <span class="re-preview-chip" id="re-preview-chip">${escapeHtml(role ? role.name : 'New Role')}</span>
+      <span class="re-preview-hint">Live preview</span>
+    </div>
+    <div class="re-grid">
+      <div class="field"><label>Role Name</label><input id="role-name" maxlength="32" value="${escapeHtml(role ? role.name : '')}" placeholder="e.g. Moderator, VIP, Artist"></div>
+      <div class="field"><label>Icon <span class="opt">optional</span></label><input id="role-icon" maxlength="2" value="${escapeHtml((role && role.icon) || '')}" placeholder="e.g. \u2605"></div>
+    </div>
+    <div class="field"><label>Primary Colour</label><div class="role-color-row" id="role-color-row">
+      ${colors.map(c => `<button class="role-swatch${c === cur ? ' sel' : ''}" data-color="${c}" style="background:${c}"></button>`).join('')}
+    </div></div>
+    <div class="field"><label>Gradient <span class="opt">optional second colour</span></label><div class="role-color-row" id="role-color2-row">
+      <button class="role-swatch none${cur2 ? '' : ' sel'}" data-color="">None</button>
+      ${colors.map(c => `<button class="role-swatch${c === cur2 ? ' sel' : ''}" data-color="${c}" style="background:${c}"></button>`).join('')}
+    </div></div>
+    <div class="re-toggles">
+      <label class="re-toggle"><input type="checkbox" id="role-hoist" ${role && role.hoist ? 'checked' : ''}><div><b>Display separately</b><span>Show members with this role in their own group in the member list.</span></div></label>
+      <label class="re-toggle"><input type="checkbox" id="role-mention" ${!role || role.mentionable ? 'checked' : ''}><div><b>Allow anyone to mention</b><span>Members can @mention this role in messages.</span></div></label>
+    </div>
+    <div class="field"><label>Permissions</label><div class="re-perms" id="re-perms">
+      ${ROLE_PERMISSIONS.map(([key, label, desc]) => `<label class="re-perm"><input type="checkbox" data-perm="${key}" ${perms[key] ? 'checked' : ''}><div><b>${label}</b><span>${desc}</span></div></label>`).join('')}
+    </div></div>
+    <div class="confirm-actions"><button class="btn ghost" id="role-cancel">Cancel</button><button class="btn" id="role-save">${role ? 'Save Changes' : 'Create Role'}</button></div>
   </div>`;
   document.body.appendChild(wrap);
   let chosen = cur;
-  wrap.querySelectorAll('.role-swatch').forEach(b => b.addEventListener('click', () => { chosen = b.dataset.color; wrap.querySelectorAll('.role-swatch').forEach(x => x.classList.toggle('sel', x === b)); }));
+  let chosen2 = cur2;
+  const previewChip = wrap.querySelector('#re-preview-chip');
+  const nameInput = wrap.querySelector('#role-name');
+  const iconInput = wrap.querySelector('#role-icon');
+  const refreshPreview = () => {
+    const nm = nameInput.value.trim() || 'New Role';
+    const ic = iconInput.value.trim();
+    previewChip.textContent = (ic ? ic + ' ' : '') + nm;
+    previewChip.style.color = chosen;
+    previewChip.style.background = chosen2 ? `linear-gradient(135deg, ${chosen}22, ${chosen2}22)` : `${chosen}22`;
+    previewChip.style.borderColor = chosen2 ? chosen2 : chosen;
+  };
+  wrap.querySelectorAll('#role-color-row .role-swatch').forEach(b => b.addEventListener('click', () => {
+    chosen = b.dataset.color;
+    wrap.querySelectorAll('#role-color-row .role-swatch').forEach(x => x.classList.toggle('sel', x === b));
+    refreshPreview();
+  }));
+  wrap.querySelectorAll('#role-color2-row .role-swatch').forEach(b => b.addEventListener('click', () => {
+    chosen2 = b.dataset.color;
+    wrap.querySelectorAll('#role-color2-row .role-swatch').forEach(x => x.classList.toggle('sel', x === b));
+    refreshPreview();
+  }));
+  nameInput.addEventListener('input', refreshPreview);
+  iconInput.addEventListener('input', refreshPreview);
+  refreshPreview();
   const done = () => wrap.remove();
   wrap.querySelector('#role-cancel').addEventListener('click', done);
   wrap.addEventListener('click', (e) => { if (e.target === wrap) done(); });
   wrap.querySelector('#role-save').addEventListener('click', async () => {
-    const name = wrap.querySelector('#role-name').value.trim();
+    const name = nameInput.value.trim();
     if (!name) { toast('Role name required', 'error'); return; }
+    const permObj = {};
+    wrap.querySelectorAll('[data-perm]').forEach(cb => { if (cb.checked) permObj[cb.dataset.perm] = true; });
+    const payload = {
+      name,
+      color: chosen,
+      color2: chosen2 || '',
+      hoist: wrap.querySelector('#role-hoist').checked,
+      mentionable: wrap.querySelector('#role-mention').checked,
+      permissions: permObj,
+      icon: iconInput.value.trim()
+    };
     try {
-      if (role) await api('/api/servers/' + s.id + '/roles/' + role.id, { method: 'PATCH', body: JSON.stringify({ name, color: chosen }) });
-      else await api('/api/servers/' + s.id + '/roles', { method: 'POST', body: JSON.stringify({ name, color: chosen }) });
+      if (role) await api('/api/servers/' + s.id + '/roles/' + role.id, { method: 'PATCH', body: JSON.stringify(payload) });
+      else await api('/api/servers/' + s.id + '/roles', { method: 'POST', body: JSON.stringify(payload) });
       done();
       toast(role ? 'Role updated' : 'Role created', 'success');
       await refreshRoles();
       renderServerTab('roles', state.server, state.server.owner_id === me.id);
+      renderMembers();
     } catch (e) { toast(e.message, 'error'); }
   });
 }
@@ -7923,7 +8486,7 @@ async function unbanMember(s, uid) {
   try {
     await api('/api/servers/' + s.id + '/bans/' + uid, { method: 'DELETE' });
     toast('Member unbanned', 'success');
-    if (document.querySelector('.ss-tab.active')?.dataset.tab === 'moderation') renderServerTab('moderation', s, s.owner_id === me.id);
+    if (document.querySelector('.ss-nav-item.active')?.dataset.tab === 'moderation') renderServerTab('moderation', s, s.owner_id === me.id);
   } catch (e) { toast(e.message, 'error'); }
 }
 
@@ -7969,12 +8532,16 @@ async function reloadServerMembers() {
     if (data.settings) state.serverSettings = data.settings;
     if (data.roles) state.roles = data.roles;
     renderMembers();
-    const activeTab = document.querySelector('.ss-tab.active');
+    const activeTab = document.querySelector('.ss-nav-item.active');
     if (activeTab && ['members', 'roles', 'moderation'].includes(activeTab.dataset.tab)) {
       renderServerTab(activeTab.dataset.tab, state.server, state.server.owner_id === me.id);
     }
   } catch (e) { /* ignore */ }
 }
+
+/* Coalesce bursts of member updates (role changes, joins, presence) into one
+   refresh so the server is not re-fetched several times in a row. */
+const scheduleMembersReload = debounce(() => { reloadServerMembers(); }, 250);
 
 /* Owner-only: promote a member to admin or demote them back. */
 async function setMemberRole(s, uid, role) {
@@ -8436,35 +9003,50 @@ async function checkForUpdate() {
     if (updateBaseline === null) { updateBaseline = v.build; return; }
     if (v.build !== updateBaseline) {
       updateBaseline = v.build;
-      showUpdatePrompt();
+      showUpdatePrompt(v.build);
     }
   } catch (e) { /* ignore transient errors */ }
 }
 
-function showUpdatePrompt() {
+function showUpdatePrompt(build) {
   if (updateShown) return;
   updateShown = true;
   if (updateTimer) { clearInterval(updateTimer); updateTimer = null; }
 
+  const buildLabel = build ? String(build).slice(0, 7) : 'latest';
   let remaining = 20;
   const overlay = document.createElement('div');
   overlay.className = 'update-overlay';
   overlay.innerHTML = `
     <div class="update-card" role="dialog" aria-modal="true" aria-labelledby="update-title">
-      <div class="update-badge">${icon('refresh')}</div>
-      <h2 class="update-title" id="update-title">Update available</h2>
-      <p class="update-text">A new version of Crossroads has been deployed. Refresh to load the latest update.</p>
-      <div class="update-count">Refreshing automatically in <span class="update-secs">20</span>s</div>
+      <div class="update-head">
+        <span class="update-pill">New build available</span>
+        <h2 class="update-title" id="update-title">A new version of Crossroads is ready</h2>
+        <p class="update-text">Refresh to load the latest deployment. Everything you have open is saved on the server, so nothing is lost.</p>
+      </div>
+      <ul class="update-list">
+        <li><span class="update-tick" aria-hidden="true"></span>Performance and reliability improvements</li>
+        <li><span class="update-tick" aria-hidden="true"></span>Latest fixes and interface polish</li>
+        <li><span class="update-tick" aria-hidden="true"></span>Your messages, friends and settings stay intact</li>
+      </ul>
+      <div class="update-meta">
+        <span class="update-build">Build <code>${buildLabel}</code></span>
+        <span class="update-count">Refreshing in <span class="update-secs">20</span>s</span>
+      </div>
       <div class="update-actions">
+        <button type="button" class="update-btn ghost" id="update-later">Later</button>
         <button type="button" class="update-btn primary" id="update-refresh">Refresh now</button>
       </div>
     </div>`;
   document.body.appendChild(overlay);
-  hydrateIcons(overlay);
 
   const secsEl = overlay.querySelector('.update-secs');
   const refresh = () => { try { location.reload(); } catch (e) {} };
   overlay.querySelector('#update-refresh').addEventListener('click', refresh);
+  overlay.querySelector('#update-later').addEventListener('click', () => {
+    if (tick) clearInterval(tick);
+    overlay.remove();
+  });
 
   const tick = setInterval(() => {
     remaining -= 1;

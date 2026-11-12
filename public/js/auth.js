@@ -117,7 +117,11 @@
       body: JSON.stringify(body)
     });
     const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(data.error || 'Something went wrong');
+    if (!res.ok) {
+      const err = new Error(data.error || 'Something went wrong');
+      err.twofaRequired = !!data.twofa_required;
+      throw err;
+    }
     return data;
   }
 
@@ -174,6 +178,9 @@
     clearError();
     const identifier = document.getElementById('login-identifier').value.trim();
     const password = document.getElementById('login-password').value;
+    const codeField = document.getElementById('f-login-code');
+    const codeInput = document.getElementById('login-code');
+    const code = codeInput ? codeInput.value.trim() : '';
     let ok = true;
     if (!identifier) { markInvalid('f-login-id', true); ok = false; } else markInvalid('f-login-id', false);
     if (!password) { markInvalid('f-login-pass', true); ok = false; } else markInvalid('f-login-pass', false);
@@ -182,12 +189,18 @@
     const btn = document.getElementById('login-btn');
     setLoading(btn, true, 'Signing in…');
     try {
-      const data = await post('/api/login', { identifier, password });
+      const data = await post('/api/login', { identifier, password, code });
       localStorage.setItem('cr_token', data.token);
       localStorage.setItem('cr_user', JSON.stringify(data.user));
       window.location.href = '/app.html';
     } catch (err) {
-      showError(err.message);
+      if (err && err.twofaRequired) {
+        if (codeField) codeField.classList.remove('hidden');
+        if (codeInput) { codeInput.focus(); }
+        showError(err.message || 'Enter your two-step code to continue.');
+      } else {
+        showError(err.message);
+      }
       setLoading(btn, false);
     }
   });

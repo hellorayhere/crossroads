@@ -2,6 +2,7 @@ const express = require('express');
 const http = require('http');
 const path = require('path');
 const fs = require('fs');
+const crypto = require('crypto');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const multer = require('multer');
@@ -211,8 +212,74 @@ const upload = multer({
 });
 
 /* ---------------- Helpers ---------------- */
-function sign(user) {
-  return jwt.sign({ uid: user.id, tv: user.token_version || 0 }, JWT_SECRET, { expiresIn: '30d' });
+function sign(user, sid) {
+  const payload = { uid: user.id, tv: user.token_version || 0 };
+  if (sid) payload.sid = sid;
+  return jwt.sign(payload, JWT_SECRET, { expiresIn: '30d' });
+}
+
+/* ---------------- Device sessions ----------------
+   Every sign-in creates a session row. The JWT embeds the session id so the
+   Authorized Devices page can list and revoke individual devices. */
+function createSession(userId, req) {
+  const id = newId();
+  const ua = String((req && req.headers && req.headers['user-agent']) || '').slice(0, 400);
+  const ip = String((req && (req.headers['x-forwarded-for'] || req.socket && req.socket.remoteAddress)) || '')
+    .split(',')[0].trim().slice(0, 80);
+  const now = Date.now();
+  try {
+    db.prepare('INSERT INTO sessions (id, user_id, user_agent, ip, created_at, last_seen_at) VALUES (?,?,?,?,?,?)')
+      .run(id, userId, ua, ip, now, now);
+  } catch (e) { /* session tracking is best-effort */ }
+  return id;
+}
+
+/* ---------------- Two-step login (TOTP) ----------------
+   A dependency-free RFC 6238 implementation. The shared secret is stored on
+   the user row; the six-digit code rotates every 30 seconds. */
+const BASE32_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+function base32Encode(buf) {
+  let bits = 0, value = 0, out = '';
+  for (const byte of buf) {
+    value = (value << 8) | byte; bits += 8;
+    while (bits >= 5) { out += BASE32_ALPHABET[(value >>> (bits - 5)) & 31]; bits -= 5; }
+  }
+  if (bits > 0) out += BASE32_ALPHABET[(value << (5 - bits)) & 31];
+  return out;
+}
+function base32Decode(str) {
+  const clean = String(str || '').toUpperCase().replace(/[^A-Z2-7]/g, '');
+  let bits = 0, value = 0; const out = [];
+  for (const ch of clean) {
+    const idx = BASE32_ALPHABET.indexOf(ch);
+    if (idx === -1) continue;
+    value = (value << 5) | idx; bits += 5;
+    if (bits >= 8) { out.push((value >>> (bits - 8)) & 0xff); bits -= 8; }
+  }
+  return Buffer.from(out);
+}
+function totpCode(secret, step) {
+  const key = base32Decode(secret);
+  const counter = Math.floor((step != null ? step : Date.now() / 1000) / 30);
+  const buf = Buffer.alloc(8);
+  buf.writeUInt32BE(Math.floor(counter / 0x100000000), 0);
+  buf.writeUInt32BE(counter % 0x100000000, 4);
+  const hmac = crypto.createHmac('sha1', key).update(buf).digest();
+  const off = hmac[hmac.length - 1] & 0xf;
+  const bin = ((hmac[off] & 0x7f) << 24) | ((hmac[off + 1] & 0xff) << 16) | ((hmac[off + 2] & 0xff) << 8) | (hmac[off + 3] & 0xff);
+  return String(bin % 1000000).padStart(6, '0');
+}
+function verifyTotp(secret, code) {
+  if (!secret || !code) return false;
+  const c = String(code).replace(/\s+/g, '');
+  const now = Date.now() / 1000;
+  for (let d = -1; d <= 1; d++) {
+    if (totpCode(secret, now + d * 30) === c) return true;
+  }
+  return false;
+}
+function newTotpSecret() {
+  return base32Encode(crypto.randomBytes(20));
 }
 
 function publicUser(u, opts = {}) {
@@ -222,7 +289,7 @@ function publicUser(u, opts = {}) {
      user back to the status stored in the database. `opts.self` is used for
      /api/me, where the caller always wants the status they actually chose. */
   const status = opts.self ? (u.status || 'online') : effectiveStatus(u.id, u.status);
-  return {
+  const out = {
     id: u.id,
     username: u.username,
     discriminator: u.discriminator,
@@ -244,6 +311,8 @@ function publicUser(u, opts = {}) {
     platform_owner: isOwner(u),
     created_at: u.created_at
   };
+  if (opts.self) out.twofa_enabled = !!u.twofa_enabled;
+  return out;
 }
 
 /* A platform ban is checked on every authenticated request so a banned user is
@@ -267,6 +336,14 @@ function auth(req, res, next) {
     }
     if (user.disabled) return res.status(403).json({ error: 'This account has been disabled.' });
     if (isGloballyBanned(user.id)) return res.status(403).json({ error: 'This account has been banned.' });
+    /* If the token carries a session id, that session must still exist — this
+       is how revoking a device on the Authorized Devices page logs it out. */
+    if (payload.sid) {
+      const sess = db.prepare('SELECT id FROM sessions WHERE id = ? AND user_id = ?').get(payload.sid, user.id);
+      if (!sess) return res.status(401).json({ error: 'This device has been signed out. Please sign in again.' });
+      try { db.prepare('UPDATE sessions SET last_seen_at = ? WHERE id = ?').run(Date.now(), payload.sid); } catch (e) {}
+      req.sessionId = payload.sid;
+    }
     /* Best-effort last-seen tracking for the admin overview. */
     try { db.prepare('UPDATE users SET last_seen_at = ? WHERE id = ?').run(Date.now(), user.id); } catch (e) {}
     req.user = user;
@@ -813,12 +890,13 @@ app.post('/api/register', rateLimit({ windowMs: 60000, max: 10 }), (req, res) =>
               VALUES (?,?,?,?,?,?,?)`)
     .run(id, username, discriminator, hash, accent, 'online', now);
   const user = db.prepare('SELECT * FROM users WHERE id = ?').get(id);
-  const token = sign(user);
+  const sid = createSession(user.id, req);
+  const token = sign(user, sid);
   res.json({ token, user: publicUser(user) });
 });
 
 app.post('/api/login', rateLimit({ windowMs: 60000, max: 15 }), (req, res) => {
-  let { identifier, username, password } = req.body || {};
+  let { identifier, username, password, code } = req.body || {};
   const login = (identifier || username || '').trim();
   if (!login || !password) return res.status(400).json({ error: 'Credentials required' });
   let user;
@@ -833,7 +911,17 @@ app.post('/api/login', rateLimit({ windowMs: 60000, max: 15 }), (req, res) => {
   }
   if (user.disabled) return res.status(403).json({ error: 'This account has been disabled.' });
   if (isGloballyBanned(user.id)) return res.status(403).json({ error: 'This account has been banned.' });
-  const token = sign(user);
+  /* Two-step login: when enabled, a valid rotating code is required. */
+  if (user.twofa_enabled) {
+    if (!code) {
+      return res.status(401).json({ twofa_required: true, error: 'Enter the 6-digit code from your authenticator or the code shown in your settings.' });
+    }
+    if (!verifyTotp(user.twofa_secret, code)) {
+      return res.status(401).json({ twofa_required: true, error: 'That code is incorrect or has expired. Try the current code.' });
+    }
+  }
+  const sid = createSession(user.id, req);
+  const token = sign(user, sid);
   res.json({ token, user: publicUser(user) });
 });
 
@@ -869,6 +957,106 @@ app.post('/api/password/reset', rateLimit({ windowMs: 60000, max: 8 }), (req, re
   /* Bumping token_version invalidates every existing session after a reset. */
   db.prepare('UPDATE users SET password_hash = ?, token_version = COALESCE(token_version,0) + 1 WHERE id = ?').run(hash, user.id);
   res.json({ ok: true });
+});
+
+/* ---------------- Authorized devices (sessions) ---------------- */
+
+/* Turn a raw user-agent into a friendly device label. */
+function describeDevice(ua) {
+  const s = String(ua || '');
+  let browser = 'Unknown browser';
+  if (/Edg\//i.test(s)) browser = 'Microsoft Edge';
+  else if (/OPR\/|Opera/i.test(s)) browser = 'Opera';
+  else if (/Firefox\//i.test(s)) browser = 'Firefox';
+  else if (/Chrome\//i.test(s)) browser = 'Chrome';
+  else if (/Safari\//i.test(s)) browser = 'Safari';
+  let os = 'Unknown OS';
+  if (/Windows NT/i.test(s)) os = 'Windows';
+  else if (/iPhone|iPad|iPod/i.test(s)) os = 'iOS';
+  else if (/Android/i.test(s)) os = 'Android';
+  else if (/Mac OS X|Macintosh/i.test(s)) os = 'macOS';
+  else if (/Linux/i.test(s)) os = 'Linux';
+  let kind = 'Desktop';
+  if (/Mobile|iPhone|Android(?!.*Tablet)/i.test(s)) kind = 'Mobile';
+  else if (/iPad|Tablet/i.test(s)) kind = 'Tablet';
+  return { browser, os, kind, label: `${browser} on ${os}` };
+}
+
+app.get('/api/sessions', auth, (req, res) => {
+  const rows = db.prepare('SELECT * FROM sessions WHERE user_id = ? ORDER BY last_seen_at DESC').all(req.user.id);
+  const sessions = rows.map(r => Object.assign({
+    id: r.id,
+    current: r.id === req.sessionId,
+    created_at: r.created_at,
+    last_seen_at: r.last_seen_at,
+    ip: r.ip
+  }, describeDevice(r.user_agent)));
+  res.json({ sessions });
+});
+
+app.delete('/api/sessions/:id', auth, (req, res) => {
+  const row = db.prepare('SELECT * FROM sessions WHERE id = ? AND user_id = ?').get(req.params.id, req.user.id);
+  if (!row) return res.status(404).json({ error: 'Device not found' });
+  db.prepare('DELETE FROM sessions WHERE id = ?').run(row.id);
+  res.json({ ok: true, current: row.id === req.sessionId });
+});
+
+app.post('/api/sessions/revoke-others', auth, (req, res) => {
+  const info = db.prepare('DELETE FROM sessions WHERE user_id = ? AND id != ?').run(req.user.id, req.sessionId || '');
+  res.json({ ok: true, revoked: info.changes });
+});
+
+/* ---------------- Two-step login (TOTP) ---------------- */
+
+app.get('/api/2fa/status', auth, (req, res) => {
+  res.json({ enabled: !!req.user.twofa_enabled });
+});
+
+/* Return the current code so a user who is already signed in on one device can
+   read it and use it to sign in on another. */
+app.get('/api/2fa/code', auth, (req, res) => {
+  if (!req.user.twofa_enabled || !req.user.twofa_secret) return res.status(400).json({ error: 'Two-step login is not enabled' });
+  const now = Date.now() / 1000;
+  const seconds = 30 - Math.floor(now % 30);
+  res.json({ code: totpCode(req.user.twofa_secret, now), seconds });
+});
+
+/* Begin setup: generate a secret (not yet enabled) and return it + a live code. */
+app.post('/api/2fa/setup', auth, (req, res) => {
+  const { password } = req.body || {};
+  if (!password || !bcrypt.compareSync(password, req.user.password_hash)) {
+    return res.status(401).json({ error: 'Your password is incorrect' });
+  }
+  const secret = newTotpSecret();
+  db.prepare('UPDATE users SET twofa_secret = ?, twofa_enabled = 0 WHERE id = ?').run(secret, req.user.id);
+  const now = Date.now() / 1000;
+  const tag = `${req.user.username}#${req.user.discriminator}`;
+  res.json({
+    secret,
+    code: totpCode(secret, now),
+    seconds: 30 - Math.floor(now % 30),
+    otpauth: `otpauth://totp/Crossroads:${encodeURIComponent(tag)}?secret=${secret}&issuer=Crossroads&period=30&digits=6`
+  });
+});
+
+/* Confirm setup with a live code, which switches two-step login on. */
+app.post('/api/2fa/enable', auth, (req, res) => {
+  const { code } = req.body || {};
+  if (!req.user.twofa_secret) return res.status(400).json({ error: 'Start setup first' });
+  if (!verifyTotp(req.user.twofa_secret, code)) {
+    return res.status(400).json({ error: 'That code is incorrect or has expired. Enter the current code.' });
+  }
+  db.prepare('UPDATE users SET twofa_enabled = 1 WHERE id = ?').run(req.user.id);
+  res.json({ ok: true, enabled: true });
+});
+
+app.post('/api/2fa/disable', auth, (req, res) => {
+  const { password } = req.body || {};
+  if (!password || !bcrypt.compareSync(password, req.user.password_hash)) {
+    return res.status(401).json({ error: 'Your password is incorrect' });
+  }
+  db.prepare('UPDATE users SET twofa_enabled = 0, twofa_secret = NULL WHERE id = ?').run(req.user.id);
+  res.json({ ok: true, enabled: false });
 });
 
 app.get('/api/me', auth, (req, res) => {
@@ -1537,10 +1725,15 @@ app.post('/api/servers/:id/roles', auth, (req, res) => {
   const name = String((req.body && req.body.name) || '').trim().slice(0, 32);
   if (!name) return res.status(400).json({ error: 'Role name required' });
   const color = /^#[0-9a-fA-F]{6}$/.test((req.body && req.body.color) || '') ? req.body.color : '#5865F2';
+  const color2 = /^#[0-9a-fA-F]{6}$/.test((req.body && req.body.color2) || '') ? req.body.color2 : '';
+  const hoist = (req.body && req.body.hoist) ? 1 : 0;
+  const mentionable = (req.body && req.body.mentionable === false) ? 0 : 1;
+  const permissions = JSON.stringify((req.body && req.body.permissions) || {});
+  const icon = String((req.body && req.body.icon) || '').slice(0, 16) || null;
   const maxPos = db.prepare('SELECT MAX(position) AS p FROM server_roles WHERE server_id = ?').get(srv.id).p || 0;
   const id = newId();
-  db.prepare('INSERT INTO server_roles (id, server_id, name, color, position, created_at) VALUES (?,?,?,?,?,?)')
-    .run(id, srv.id, name, color, maxPos + 1, Date.now());
+  db.prepare('INSERT INTO server_roles (id, server_id, name, color, color2, hoist, mentionable, permissions, icon, position, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)')
+    .run(id, srv.id, name, color, color2, hoist, mentionable, permissions, icon, maxPos + 1, Date.now());
   addAudit(srv.id, req.user.id, 'role_create', id, name);
   const role = db.prepare('SELECT * FROM server_roles WHERE id = ?').get(id);
   io.emit('server_roles_update', { server_id: srv.id });
@@ -1557,6 +1750,11 @@ app.patch('/api/servers/:id/roles/:rid', auth, (req, res) => {
   const updates = []; const values = [];
   if (req.body && typeof req.body.name === 'string' && req.body.name.trim()) { updates.push('name = ?'); values.push(req.body.name.trim().slice(0, 32)); }
   if (req.body && /^#[0-9a-fA-F]{6}$/.test(req.body.color || '')) { updates.push('color = ?'); values.push(req.body.color); }
+  if (req.body && 'color2' in req.body) { updates.push('color2 = ?'); values.push(/^#[0-9a-fA-F]{6}$/.test(req.body.color2 || '') ? req.body.color2 : ''); }
+  if (req.body && 'hoist' in req.body) { updates.push('hoist = ?'); values.push(req.body.hoist ? 1 : 0); }
+  if (req.body && 'mentionable' in req.body) { updates.push('mentionable = ?'); values.push(req.body.mentionable ? 1 : 0); }
+  if (req.body && 'permissions' in req.body) { updates.push('permissions = ?'); values.push(JSON.stringify(req.body.permissions || {})); }
+  if (req.body && 'icon' in req.body) { updates.push('icon = ?'); values.push(String(req.body.icon || '').slice(0, 16) || null); }
   if (updates.length) { values.push(role.id); db.prepare(`UPDATE server_roles SET ${updates.join(', ')} WHERE id = ?`).run(...values); }
   io.emit('server_roles_update', { server_id: srv.id });
   res.json({ role: db.prepare('SELECT * FROM server_roles WHERE id = ?').get(role.id) });
@@ -1573,6 +1771,27 @@ app.delete('/api/servers/:id/roles/:rid', auth, (req, res) => {
   io.emit('server_roles_update', { server_id: srv.id });
   broadcastMembers(srv.id);
   res.json({ ok: true });
+});
+
+/* Move a role up or down the hierarchy (owner + admins).
+   Swaps its position with the neighbouring role so ordering stays stable. */
+app.post('/api/servers/:id/roles/:rid/move', auth, (req, res) => {
+  const srv = db.prepare('SELECT * FROM servers WHERE id = ?').get(req.params.id);
+  if (!srv) return res.status(404).json({ error: 'Server not found' });
+  if (!isServerAdmin(srv, req.user.id)) return res.status(403).json({ error: 'Only the owner and admins can manage roles' });
+  const dir = (req.body && req.body.dir === 'down') ? 'down' : 'up';
+  const roles = db.prepare('SELECT id, position FROM server_roles WHERE server_id = ? ORDER BY position ASC, created_at ASC').all(srv.id);
+  const idx = roles.findIndex(r => r.id === req.params.rid);
+  if (idx === -1) return res.status(404).json({ error: 'Role not found' });
+  const swapIdx = dir === 'up' ? idx + 1 : idx - 1; /* higher position = higher rank */
+  if (swapIdx < 0 || swapIdx >= roles.length) return res.json({ ok: true, roles: listServerRoles(srv.id) });
+  const a = roles[idx], b = roles[swapIdx];
+  const upd = db.prepare('UPDATE server_roles SET position = ? WHERE id = ?');
+  const tx = db.transaction(() => { upd.run(b.position, a.id); upd.run(a.position, b.id); });
+  tx();
+  io.emit('server_roles_update', { server_id: srv.id });
+  broadcastMembers(srv.id);
+  res.json({ ok: true, roles: listServerRoles(srv.id) });
 });
 
 /* ---------------- Server invites ---------------- */
