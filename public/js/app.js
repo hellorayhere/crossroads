@@ -537,20 +537,54 @@ function setCustomBg(cfg) {
   applyCustomBg();
   return true;
 }
+function cbNum(v, def, min, max) {
+  const n = Number(v);
+  if (!isFinite(n)) return def;
+  return Math.min(max, Math.max(min, n));
+}
+/* Adjustments are stored alongside the image so they survive a reload:
+   scale (1 = fit), opacity (0-1), blur (px) and background position. */
+function cbOptions(cfg) {
+  cfg = cfg || {};
+  return {
+    scale: cbNum(cfg.scale, 1, 1, 3),
+    opacity: cbNum(cfg.opacity, 1, 0.05, 1),
+    blur: cbNum(cfg.blur, 0, 0, 30),
+    position: typeof cfg.position === 'string' ? cfg.position : 'center center'
+  };
+}
 function applyCustomBg() {
   const layer = document.getElementById('app-bg-layer');
   if (!layer) return;
   const cfg = getCustomBg();
   if (cfg && cfg.url) {
+    const o = cbOptions(cfg);
     layer.style.backgroundImage = `url("${String(cfg.url).replace(/"/g, '%22')}")`;
     layer.style.backgroundSize = 'cover';
-    layer.style.backgroundPosition = 'center center';
+    layer.style.backgroundPosition = o.position;
     layer.style.backgroundRepeat = 'no-repeat';
+    /* Zoom with transform (not background-size) so the artwork always keeps
+       covering the viewport, whatever its aspect ratio. */
+    layer.style.transform = `scale(${o.scale})`;
+    layer.style.transformOrigin = 'center center';
+    layer.style.filter = o.blur > 0 ? `blur(${o.blur}px)` : '';
+    layer.style.opacity = String(o.opacity);
     document.body.classList.add('has-custom-bg');
+    document.body.style.setProperty('--cb-img-opacity', String(o.opacity));
   } else {
     layer.style.backgroundImage = '';
+    layer.style.transform = '';
+    layer.style.filter = '';
+    layer.style.opacity = '';
     document.body.classList.remove('has-custom-bg');
+    document.body.style.removeProperty('--cb-img-opacity');
   }
+}
+/* Merge a partial adjustment into the saved config without losing the image. */
+function updateCustomBgOptions(patch) {
+  const cfg = getCustomBg();
+  if (!cfg || !cfg.url) return false;
+  return setCustomBg(Object.assign({}, cfg, patch));
 }
 
 function applyTheme() {
@@ -1280,7 +1314,7 @@ function renderDMList() {
 
   const cat = document.createElement('div');
   cat.className = 'channel-category dm-cat';
-  cat.innerHTML = `<span class="cat-caret">${icon('caret-down')}</span><span class="cat-name">${t('Direct Messages')}</span><button class="cat-add" id="dm-cat-add" title="${t('Start a conversation')}">${icon('plus')}</button>`;
+  cat.innerHTML = `<span class="cat-caret">${icon('caret-down')}</span><span class="cat-ic">${icon('message-circle')}</span><span class="cat-name">${t('Direct Messages')}</span><button class="cat-add" id="dm-cat-add" title="${t('Start a conversation')}">${icon('plus')}</button>`;
   cat.querySelector('#dm-cat-add').addEventListener('click', (e) => { e.stopPropagation(); openNewDM(); });
   list.appendChild(cat);
 
@@ -4795,7 +4829,7 @@ function settingsPanelHTML(section) {
         <div class="field cb-field">
           <label>Custom Background</label>
           <p class="cb-desc">Add a personal image or animated GIF behind the whole app. Stored only on this device — 1920×1080 (1080p) looks best.</p>
-          <div class="cb-preview" id="cb-preview"><span class="cb-preview-empty">${icon('image')} No custom background</span></div>
+          <div class="cb-preview" id="cb-preview"><div class="cb-preview-img" id="cb-preview-img"></div><span class="cb-preview-empty">${icon('image')} No custom background</span></div>
           <div class="cb-row">
             <input id="cb-url" placeholder="Paste an image or GIF URL (https://…)" autocomplete="off" spellcheck="false">
             <button class="btn" id="cb-apply-url">Apply</button>
@@ -4804,6 +4838,31 @@ function settingsPanelHTML(section) {
             <button class="btn ghost" id="cb-upload">${icon('upload')} Upload image / GIF</button>
             <button class="btn ghost" id="cb-remove">${icon('trash')} Remove</button>
             <input type="file" id="cb-file" accept="image/*" class="hidden">
+          </div>
+          <div class="cb-controls" id="cb-controls">
+            <div class="cb-ctl">
+              <div class="cb-ctl-head"><label for="cb-scale">Scale</label><span class="cb-val" id="cb-scale-val">100%</span></div>
+              <input type="range" id="cb-scale" min="100" max="250" step="5" value="100" aria-label="Background scale">
+            </div>
+            <div class="cb-ctl">
+              <div class="cb-ctl-head"><label for="cb-opacity">Transparency</label><span class="cb-val" id="cb-opacity-val">0%</span></div>
+              <input type="range" id="cb-opacity" min="0" max="90" step="5" value="0" aria-label="Background transparency">
+            </div>
+            <div class="cb-ctl">
+              <div class="cb-ctl-head"><label for="cb-blur">Blur</label><span class="cb-val" id="cb-blur-val">0px</span></div>
+              <input type="range" id="cb-blur" min="0" max="30" step="1" value="0" aria-label="Background blur">
+            </div>
+            <div class="cb-ctl">
+              <div class="cb-ctl-head"><label for="cb-position">Position</label></div>
+              <select id="cb-position" aria-label="Background position">
+                <option value="center center">Center</option>
+                <option value="center top">Top</option>
+                <option value="center bottom">Bottom</option>
+                <option value="left center">Left</option>
+                <option value="right center">Right</option>
+              </select>
+            </div>
+            <button class="btn ghost cb-reset" id="cb-reset">${icon('refresh')} Reset adjustments</button>
           </div>
           <div class="cb-hint" id="cb-hint"></div>
         </div>
@@ -5045,21 +5104,47 @@ function wireAppearance() {
 
   /* ---- Custom background (client-side only) ---- */
   const cbPreview = $('cb-preview');
+  const cbPreviewImg = $('cb-preview-img');
   const cbHint = $('cb-hint');
   const cbUrl = $('cb-url');
+  const cbEmpty = cbPreview ? cbPreview.querySelector('.cb-preview-empty') : null;
+  const cbInputs = {
+    scale: $('cb-scale'), opacity: $('cb-opacity'), blur: $('cb-blur'), position: $('cb-position')
+  };
+  const cbVals = { scale: $('cb-scale-val'), opacity: $('cb-opacity-val'), blur: $('cb-blur-val') };
+  const cbControls = $('cb-controls');
+
+  /* Paint the little preview with the exact same scale / transparency / blur /
+     position as the real background, so what you see is what you get. */
   const paintCbPreview = () => {
-    if (!cbPreview) return;
+    if (!cbPreview || !cbPreviewImg) return;
     const cfg = getCustomBg();
-    if (cfg && cfg.url) {
-      cbPreview.style.backgroundImage = `url("${String(cfg.url).replace(/"/g, '%22')}")`;
-      cbPreview.classList.add('has');
-      cbPreview.innerHTML = '';
+    const has = !!(cfg && cfg.url);
+    cbPreview.classList.toggle('has', has);
+    if (cbEmpty) cbEmpty.style.display = has ? 'none' : '';
+    if (has) {
+      const o = cbOptions(cfg);
+      cbPreviewImg.style.backgroundImage = `url("${String(cfg.url).replace(/"/g, '%22')}")`;
+      cbPreviewImg.style.backgroundPosition = o.position;
+      cbPreviewImg.style.transform = `scale(${o.scale})`;
+      cbPreviewImg.style.opacity = String(o.opacity);
+      cbPreviewImg.style.filter = o.blur > 0 ? `blur(${o.blur}px)` : '';
     } else {
-      cbPreview.style.backgroundImage = '';
-      cbPreview.classList.remove('has');
-      cbPreview.innerHTML = `<span class="cb-preview-empty">${icon('image')} No custom background</span>`;
-      hydrateIcons(cbPreview);
+      cbPreviewImg.style.backgroundImage = '';
+      cbPreviewImg.style.transform = '';
+      cbPreviewImg.style.opacity = '';
+      cbPreviewImg.style.filter = '';
     }
+    /* Sync the sliders to whatever is stored. */
+    const o = cbOptions(cfg || {});
+    if (cbInputs.scale) cbInputs.scale.value = String(Math.round(o.scale * 100));
+    if (cbInputs.opacity) cbInputs.opacity.value = String(Math.round((1 - o.opacity) * 100));
+    if (cbInputs.blur) cbInputs.blur.value = String(Math.round(o.blur));
+    if (cbInputs.position) cbInputs.position.value = o.position;
+    if (cbVals.scale) cbVals.scale.textContent = Math.round(o.scale * 100) + '%';
+    if (cbVals.opacity) cbVals.opacity.textContent = Math.round((1 - o.opacity) * 100) + '%';
+    if (cbVals.blur) cbVals.blur.textContent = Math.round(o.blur) + 'px';
+    if (cbControls) cbControls.classList.toggle('disabled', !has);
   };
   const cbMsg = (text, kind) => {
     if (!cbHint) return;
@@ -5072,7 +5157,7 @@ function wireAppearance() {
     const v = (cbUrl && cbUrl.value || '').trim();
     if (!v) { cbMsg('Paste an image or GIF URL first.', 'bad'); return; }
     if (!/^(https?:\/\/|data:image\/)/i.test(v)) { cbMsg('Use a full https:// image or GIF URL.', 'bad'); return; }
-    if (setCustomBg({ url: v })) {
+    if (setCustomBg(Object.assign({ url: v }, cbOptions(getCustomBg() || {})))) {
       cbMsg('Custom background applied.', 'ok');
       if (cbUrl) cbUrl.value = '';
       paintCbPreview();
@@ -5094,7 +5179,7 @@ function wireAppearance() {
       if (!/^image\//.test(f.type)) { cbMsg('Please choose an image or GIF file.', 'bad'); return; }
       const reader = new FileReader();
       reader.onload = () => {
-        if (setCustomBg({ url: reader.result })) {
+        if (setCustomBg(Object.assign({ url: reader.result }, cbOptions(getCustomBg() || {})))) {
           cbMsg(`Applied ${f.name} — animated GIFs play automatically.`, 'ok');
           paintCbPreview();
         } else {
@@ -5111,6 +5196,41 @@ function wireAppearance() {
     setCustomBg(null);
     paintCbPreview();
     cbMsg('Custom background removed.', 'ok');
+  });
+
+  /* ---- Adjustments: scale / transparency / blur / position ---- */
+  const applyAdjust = (patch, label) => {
+    if (!updateCustomBgOptions(patch)) { cbMsg('Add a background image first.', 'bad'); return; }
+    paintCbPreview();
+    if (label) cbMsg(label, 'ok');
+  };
+  if (cbInputs.scale) {
+    cbInputs.scale.addEventListener('input', () => {
+      const v = Number(cbInputs.scale.value) || 100;
+      if (cbVals.scale) cbVals.scale.textContent = v + '%';
+      applyAdjust({ scale: v / 100 });
+    });
+  }
+  if (cbInputs.opacity) {
+    cbInputs.opacity.addEventListener('input', () => {
+      const t = Number(cbInputs.opacity.value) || 0;
+      if (cbVals.opacity) cbVals.opacity.textContent = t + '%';
+      applyAdjust({ opacity: 1 - t / 100 });
+    });
+  }
+  if (cbInputs.blur) {
+    cbInputs.blur.addEventListener('input', () => {
+      const b = Number(cbInputs.blur.value) || 0;
+      if (cbVals.blur) cbVals.blur.textContent = b + 'px';
+      applyAdjust({ blur: b });
+    });
+  }
+  if (cbInputs.position) {
+    cbInputs.position.addEventListener('change', () => applyAdjust({ position: cbInputs.position.value }));
+  }
+  const resetBtn = $('cb-reset');
+  if (resetBtn) resetBtn.addEventListener('click', () => {
+    applyAdjust({ scale: 1, opacity: 1, blur: 0, position: 'center center' }, 'Adjustments reset.');
   });
 }
 

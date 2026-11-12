@@ -578,7 +578,7 @@ button:active, .rail-item:active, .channel:active, .dm-item:active, .member:acti
   --pf-bg: color-mix(in srgb, var(--accent) 38%, var(--pf-base));
   --pf-card: color-mix(in srgb, var(--accent) 50%, var(--pf-base));
   --pf-hover: color-mix(in srgb, var(--accent) 62%, var(--pf-base));
-  width: 100%; max-width: 620px; padding: 0; overflow: hidden;
+  width: 100%; max-width: 700px; padding: 0; overflow: hidden;
   background:
     /* A dark scrim over the lower half keeps body text legible while the top
        of the card stays vividly accent-coloured. */
@@ -601,7 +601,7 @@ button:active, .rail-item:active, .channel:active, .dm-item:active, .member:acti
 }
 .oprofile-modal { position: relative; }
 .oprofile-banner {
-  position: relative; z-index: 0; height: 140px; width: 100%; flex: 0 0 auto;
+  position: relative; z-index: 0; height: 158px; width: 100%; flex: 0 0 auto;
   background: var(--accent); background-size: cover; background-position: center;
 }
 .oprofile-banner::after {
@@ -615,7 +615,7 @@ button:active, .rail-item:active, .channel:active, .dm-item:active, .member:acti
 }
 .dp-icon-btn:hover { background: rgba(0,0,0,.78); }
 
-.dp-body { position: relative; z-index: 1; padding: 0 22px 22px; display: flex; flex-direction: column; min-height: 0; overflow: visible; }
+.dp-body { position: relative; z-index: 1; padding: 0 26px 26px; display: flex; flex-direction: column; min-height: 0; overflow: visible; }
 .dp-scroll { overflow-y: auto; overflow-x: hidden; min-height: 0; padding-bottom: 4px; }
 
 /* Avatar straddles the banner, then the name sits beside it with the action
@@ -632,7 +632,7 @@ button:active, .rail-item:active, .channel:active, .dm-item:active, .member:acti
 .dp-avatar .avatar .status-dot { z-index: 11; }
 .dp-identity { flex: 1 1 auto; min-width: 0; padding-bottom: 4px; }
 .dp-name {
-  font-size: 24px; font-weight: 700; line-height: 1.2; color: #f2f3f5;
+  font-size: 26px; font-weight: 700; line-height: 1.2; color: #f2f3f5;
   word-break: break-word; overflow-wrap: anywhere;
 }
 .dp-handle { font-size: 14px; color: #dbdee1; margin-top: 3px; word-break: break-word; }
@@ -990,6 +990,8 @@ button:active, .rail-item:active, .channel:active, .dm-item:active, .member:acti
 .dm-cat .cat-add { opacity: 1; width: 20px; height: 20px; border-radius: 5px; color: var(--text-muted); transition: background .12s, color .12s, transform .12s; }
 .dm-cat .cat-add:hover { background: var(--brand); color: #fff; transform: scale(1.06); }
 .dm-cat .cat-add .ic { width: 14px; height: 14px; }
+.dm-cat .cat-ic { display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; flex: 0 0 auto; color: var(--text-muted); margin-right: 2px; }
+.dm-cat .cat-ic .ic { width: 15px; height: 15px; }
 
 /* Revamped "Start a conversation" row: a soft brand-tinted dashed action card. */
 .dm-add {
@@ -2151,7 +2153,8 @@ body[data-theme="light"] .dp-btn.friends:hover { background: #1a6334; }
 .app-bg-layer {
   position: fixed; inset: 0; z-index: 0;
   background-size: cover; background-position: center center; background-repeat: no-repeat;
-  opacity: 0; transition: opacity .35s ease; pointer-events: none;
+  opacity: 0; transition: opacity .35s ease, transform .18s ease, filter .18s ease;
+  transform-origin: center center; will-change: transform, opacity, filter; pointer-events: none;
 }
 body.has-custom-bg .app-bg-layer { opacity: 1; }
 #app { position: relative; z-index: 1; }
@@ -2183,6 +2186,44 @@ body.has-custom-bg .server-rail {
   display: grid; place-items: center; overflow: hidden; margin-bottom: 10px;
 }
 .cb-preview.has { border-style: solid; border-color: var(--brand); }
+.cb-preview { position: relative; }
+.cb-preview-img {
+  position: absolute; inset: 0; background-size: cover; background-position: center center;
+  background-repeat: no-repeat; transform-origin: center center; transition: transform .12s linear, opacity .12s linear, filter .12s linear;
+}
+.cb-preview-empty { position: relative; z-index: 1; }
+.cb-controls {
+  margin-top: 14px; padding: 14px; border-radius: 10px;
+  background: color-mix(in srgb, var(--card) 70%, transparent);
+  border: 1px solid var(--divider);
+  display: grid; grid-template-columns: 1fr 1fr; gap: 14px 16px;
+  transition: opacity .15s;
+}
+.cb-controls.disabled { opacity: .45; pointer-events: none; }
+.cb-ctl { min-width: 0; display: flex; flex-direction: column; gap: 7px; }
+.cb-ctl-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.cb-ctl-head label { font-size: 11.5px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--text-muted); }
+.cb-val { font-size: 11.5px; font-weight: 600; color: var(--text-normal); font-variant-numeric: tabular-nums; }
+.cb-ctl select {
+  width: 100%; background: var(--input-bg); border: 1px solid var(--divider);
+  border-radius: var(--radius-sm); padding: 7px 9px; color: var(--text-normal); font-size: 13px; outline: none;
+}
+.cb-ctl select:focus { border-color: var(--brand); }
+.cb-ctl input[type="range"] {
+  -webkit-appearance: none; appearance: none; width: 100%; height: 5px; border-radius: 999px;
+  background: color-mix(in srgb, var(--text-faint) 35%, transparent); outline: none; cursor: pointer;
+}
+.cb-ctl input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none; appearance: none; width: 15px; height: 15px; border-radius: 50%;
+  background: var(--brand); border: 2px solid var(--chat-bg); box-shadow: 0 1px 4px rgba(0,0,0,.4); cursor: grab;
+}
+.cb-ctl input[type="range"]::-moz-range-thumb {
+  width: 15px; height: 15px; border-radius: 50%; background: var(--brand);
+  border: 2px solid var(--chat-bg); cursor: grab;
+}
+.cb-reset { grid-column: 1 / -1; justify-self: start; display: inline-flex; align-items: center; gap: 7px; padding: 7px 12px; font-size: 12.5px; }
+.cb-reset .ic { width: 13px; height: 13px; }
+@media (max-width: 640px) { .cb-controls { grid-template-columns: 1fr; } }
 .cb-preview-empty { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text-faint); }
 .cb-preview-empty .ic { width: 18px; height: 18px; }
 .cb-row { display: flex; gap: 8px; }
