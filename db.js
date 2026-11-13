@@ -352,7 +352,16 @@ function migrate() {
     system_welcome: 'INTEGER DEFAULT 1',
     default_role_id: 'TEXT',
     invite_splash: 'INTEGER DEFAULT 1',
-    community_name: "TEXT DEFAULT ''"
+    community_name: "TEXT DEFAULT ''",
+    discoverable: 'INTEGER DEFAULT 0',
+    automod: 'INTEGER DEFAULT 0',
+    automod_links: 'INTEGER DEFAULT 0',
+    automod_spam: 'INTEGER DEFAULT 1',
+    mention_limit: 'INTEGER DEFAULT 0',
+    nsfw: 'INTEGER DEFAULT 0',
+    invite_expiry: 'INTEGER DEFAULT 0',
+    invite_max_uses: 'INTEGER DEFAULT 0',
+    allow_attachments: 'INTEGER DEFAULT 1'
   };
   for (const [col, def] of Object.entries(ssAdditions)) {
     if (!ssCols.includes(col)) {

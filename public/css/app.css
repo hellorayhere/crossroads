@@ -192,7 +192,7 @@ button:active, .rail-item:active, .channel:active, .dm-item:active, .member:acti
 }
 
 /* ============ SIDEBAR ============ */
-.sidebar { width: 268px; flex: 0 0 268px; background: var(--sidebar-bg); display: flex; flex-direction: column; height: 100%; }
+.sidebar { width: 312px; flex: 0 0 312px; background: var(--sidebar-bg); display: flex; flex-direction: column; height: 100%; }
 .sidebar-header {
   height: 48px; flex: 0 0 48px; display: flex; align-items: center; justify-content: space-between;
   padding: 0 16px; box-shadow: 0 1px 0 var(--divider); cursor: pointer;
@@ -1581,7 +1581,7 @@ button:active, .rail-item:active, .channel:active, .dm-item:active, .member:acti
   .dp-actions { flex: 1 1 100%; padding-bottom: 0; }
   .dp-grid { grid-template-columns: 1fr; gap: 18px; }
 }
-@media (max-width: 700px) { .sidebar { position: absolute; left: 72px; top: 0; bottom: 0; z-index: 50; transform: translateX(-120%); transition: transform .2s; } .sidebar.open { transform: translateX(0); } }
+@media (max-width: 700px) { .sidebar { position: absolute; left: 72px; top: 0; bottom: 0; width: min(312px, calc(100vw - 72px)); flex-basis: auto; z-index: 50; transform: translateX(-120%); transition: transform .2s; } .sidebar.open { transform: translateX(0); } }
 
 /* ============ RICHER PLACEHOLDERS ============ */
 ::placeholder { color: color-mix(in srgb, var(--text-faint) 78%, transparent); opacity: 1; font-weight: 400; letter-spacing: .01em; transition: color .18s ease, opacity .18s ease; }
@@ -4338,7 +4338,7 @@ body[data-theme="light"] .update-card { box-shadow: 0 24px 70px rgba(0, 0, 0, .2
 @media (max-width: 700px) {
   .dm-call-layer { right: 10px; left: 10px; bottom: 10px; align-items: stretch; }
   .dm-call-incoming, .dm-call-bar { width: auto; }
-  .sidebar-banner { height: 160px; min-height: 160px; }
+  .sidebar-banner { height: 200px; min-height: 200px; }
 }
 @media (prefers-reduced-motion: reduce) {
   .dci-ring, .dcb-ring, .dci-live-dot { animation: none; }
@@ -4352,7 +4352,7 @@ body[data-theme="light"] .update-card { box-shadow: 0 24px 70px rgba(0, 0, 0, .2
 @media (max-width: 700px) {
   .dm-call-layer { right: 10px; left: 10px; bottom: 10px; align-items: stretch; }
   .dm-call-incoming, .dm-call-bar { width: auto; }
-  .sidebar-banner { height: 160px; min-height: 160px; }
+  .sidebar-banner { height: 200px; min-height: 200px; }
 }
 
 /* ---------- Custom invite links ---------- */
@@ -4511,4 +4511,52 @@ body[data-theme="light"] .update-card { box-shadow: 0 24px 70px rgba(0, 0, 0, .2
   .icf-icon { width: 54px; height: 54px; border-radius: 13px; }
   .icf-name { font-size: 17px; }
   .icf-actions { flex-direction: column-reverse; }
+}
+
+/* ============================================================
+   SERVER SETTINGS — grouped section cards (Community / Safety)
+   ============================================================ */
+.ss-panel-pad { padding: 18px 22px 28px; display: flex; flex-direction: column; gap: 18px; }
+.ss-group {
+  border: 1px solid var(--divider); border-radius: 12px; overflow: hidden;
+  background: color-mix(in srgb, var(--chat-bg) 72%, #000);
+  transition: border-color .15s ease;
+}
+.ss-group:hover { border-color: color-mix(in srgb, var(--brand) 26%, var(--divider)); }
+.ss-group-head {
+  display: flex; gap: 12px; align-items: flex-start; padding: 14px 18px;
+  border-bottom: 1px solid var(--divider);
+  background: color-mix(in srgb, var(--sidebar-bg) 55%, transparent);
+}
+.ss-group-ic {
+  width: 34px; height: 34px; border-radius: 9px; flex: 0 0 auto;
+  display: grid; place-items: center;
+  background: color-mix(in srgb, var(--brand) 16%, transparent); color: var(--brand);
+}
+.ss-group-ic svg { width: 17px; height: 17px; }
+.ss-group-titles { min-width: 0; }
+.ss-group-title { font-size: 14.5px; font-weight: 800; color: var(--text-header); letter-spacing: -.005em; }
+.ss-group-desc { font-size: 12px; color: var(--text-muted); margin-top: 2px; line-height: 1.45; }
+.ss-group-body { padding: 4px 18px 10px; }
+.ss-group-body .ss-field-grid { padding: 6px 0 2px; gap: 2px 32px; }
+.ss-group-body .ss-field { padding: 13px 2px; }
+.ss-group-body .ss-field:last-child { border-bottom: none; }
+.ss-group-body .ss-field textarea {
+  width: 100%; padding: 11px 13px; border-radius: 9px; border: 1px solid var(--divider);
+  background: color-mix(in srgb, var(--chat-bg) 62%, #000); color: var(--text-normal);
+  font-size: 14px; line-height: 1.5; resize: vertical; min-height: 84px; font-family: inherit;
+}
+.ss-group-body .ss-field textarea:focus { outline: none; border-color: var(--brand); box-shadow: 0 0 0 3px color-mix(in srgb, var(--brand) 22%, transparent); }
+.ss-group-body .ss-set-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 18px;
+  padding: 13px 2px; border-bottom: 1px solid color-mix(in srgb, var(--divider) 60%, transparent);
+}
+.ss-group-body .ss-set-row:last-child { border-bottom: none; }
+.ss-group-body .ss-set-text { min-width: 0; }
+.ss-group-body .sr-title { font-size: 14px; font-weight: 600; color: var(--text-header); }
+.ss-group-body .sr-desc { font-size: 12.5px; color: var(--text-muted); margin-top: 3px; line-height: 1.45; }
+.ss-panel-pad > .ss-actions { margin-top: 2px; }
+@media (max-width: 720px) {
+  .ss-panel-pad { padding: 14px 14px 22px; }
+  .ss-group-body .ss-field-grid { grid-template-columns: 1fr; }
 }

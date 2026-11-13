@@ -4609,6 +4609,10 @@ function renderMembers() {
     const cs = (m.custom_status || '').trim();
     row.innerHTML = `${avatarHTML(m, 36, m.status || 'offline')}<div class="member-body"><span class="mname">${escapeHtml(m.display_name || m.username)}${crown}${roleTag}${croleTag}${badgeChips(m, { compact: true })}</span>${cs ? `<span class="mstatus" title="${escapeHtml(cs)}">${escapeHtml(cs)}</span>` : ''}</div>`;
     row.addEventListener('click', () => openProfile(m));
+    row.addEventListener('contextmenu', (e) => {
+      e.preventDefault(); e.stopPropagation();
+      openMemberContextMenu(e.clientX, e.clientY, m);
+    });
     return row;
   };
   const addCat = (label, arr, color) => {
@@ -6397,6 +6401,42 @@ function showContextMenu(x, y, items) {
     menu.remove();
     if (it && it.onClick) it.onClick();
   }));
+}
+
+/* Right-click menu for a row in the member list. Mirrors the actions you would
+   expect on a member: open their profile, message them, add/invite as a friend,
+   copy their tag or id, and - for people who can moderate - promote, demote,
+   time out, kick or ban. */
+function openMemberContextMenu(x, y, m) {
+  if (!m) return;
+  const isMe = m.id === me.id;
+  const items = [];
+  items.push({ label: 'Open Profile', icon: 'user', onClick: () => openProfile(m) });
+  if (!isMe) {
+    items.push({ label: 'Message', icon: 'message-dots', onClick: () => startDM(m.id) });
+  }
+  items.push({ sep: true });
+  items.push({ label: 'Copy Username', icon: 'copy', onClick: () => copyToClipboard(fullTag(m), 'Username') });
+  items.push({ label: 'Copy User ID', icon: 'id-badge', onClick: () => copyToClipboard(m.id, 'User ID') });
+
+  /* Moderation is only offered to the owner, admins and holders of the
+     relevant permissions, and never against yourself or the server owner. */
+  const srv = state.server;
+  const owner = srv && srv.owner_id === me.id;
+  const canMod = !!(srv && !isMe && srv.owner_id !== m.id &&
+    (owner || amIAdmin() || can('kick_members') || can('ban_members') || can('manage_roles')));
+  if (canMod) {
+    items.push({ sep: true });
+    if (m.role === 'admin') {
+      items.push({ label: 'Remove Admin', icon: 'user-shield', onClick: () => setMemberRole(srv, m.id, 'member') });
+    } else {
+      items.push({ label: 'Make Admin', icon: 'user-shield', onClick: () => setMemberRole(srv, m.id, 'admin') });
+    }
+    items.push({ label: 'Time Out Member', icon: 'clock', onClick: () => timeoutMember(srv, m.id) });
+    items.push({ label: 'Kick Member', icon: 'user-minus', danger: true, onClick: () => kickMember(srv, m.id) });
+    items.push({ label: 'Ban Member', icon: 'ban', danger: true, onClick: () => banMember(srv, m.id) });
+  }
+  showContextMenu(x, y, items);
 }
 
 function openMessageContextMenu(x, y, m) {
@@ -11227,9 +11267,9 @@ function openServerSettings() {
     overview: 'Manage how your server looks and who can join.',
     roles: 'Create roles, set their colour and decide how they appear.',
     members: 'Review everyone in the server and assign roles.',
-    community: 'Welcome messages, rules, invites and AFK behaviour.',
+    community: 'Identity, welcome messages, invites, AFK behaviour and discovery.',
     moderation: 'Bans and recent moderation actions.',
-    safety: 'Control who can join and how the server behaves.',
+    safety: 'Verification, content filtering, AutoModeration and mentions.',
     invites: 'Share invite links and track how people get in.'
   };
   const showTab = (tab) => {
@@ -11928,62 +11968,82 @@ async function loadBans(s) {
   } catch (e) { const el = $('ss-bans'); if (el) el.innerHTML = '<div class="inv-empty">' + escapeHtml(e.message) + '</div>'; }
 }
 
+function ssGroup(title, desc, inner, iconName) {
+  return `<div class="ss-group">
+    <div class="ss-group-head">
+      ${iconName ? `<span class="ss-group-ic">${icon(iconName)}</span>` : ''}
+      <div class="ss-group-titles"><div class="ss-group-title">${title}</div>${desc ? `<div class="ss-group-desc">${desc}</div>` : ''}</div>
+    </div>
+    <div class="ss-group-body">${inner}</div>
+  </div>`;
+}
+function ssToggleRow(key, title, desc, on) {
+  return `<div class="set-row ss-set-row"><div class="ss-set-text"><div class="sr-title">${title}</div><div class="sr-desc">${desc}</div></div><div class="toggle${on ? ' on' : ''}" data-ss-toggle="${key}" role="switch" aria-checked="${on ? 'true' : 'false'}"></div></div>`;
+}
+function ssField(label, control, hint) {
+  return `<div class="ss-field"><label>${label}</label>${control}${hint ? `<div class="hint">${hint}</div>` : ''}</div>`;
+}
+function ssToggleVal(key) {
+  const el = document.querySelector(`#ss-body [data-ss-toggle="${key}"]`);
+  return el ? el.classList.contains('on') : false;
+}
+function wireSsToggles(body) {
+  body.querySelectorAll('[data-ss-toggle]').forEach(t => t.addEventListener('click', () => {
+    t.classList.toggle('on');
+    t.setAttribute('aria-checked', t.classList.contains('on') ? 'true' : 'false');
+  }));
+}
+
 function renderCommunityTab(body, s) {
   const admin = amIAdmin();
   const st = state.serverSettings || {};
+  const dis = admin ? '' : 'disabled';
   const voiceChannels = (state.channels || []).filter(c => c.type === 'voice');
   const timeoutOpts = [60, 300, 900, 1800, 3600];
-  body.innerHTML = `
-    <div class="ss-section-title">Community</div>
+  const expiryOpts = [[0, 'Never'], [3600, '1 hour'], [86400, '1 day'], [604800, '7 days'], [2592000, '30 days']];
+
+  const identity = ssGroup('Server Identity', 'How this community presents itself to members and visitors.', `
     <div class="ss-field-grid">
-      <div class="ss-field"><label>Community Name</label>
-        <input id="ss-community-name" maxlength="80" value="${escapeHtml(st.community_name || '')}" ${admin ? '' : 'disabled'} placeholder="e.g. The Pixel Lounge">
-        <div class="hint">A friendly display name shown on the invite splash and welcome screen.</div>
-      </div>
-      <div class="ss-field"><label>AFK Voice Channel</label>
-        <select id="ss-afk-channel" ${admin ? '' : 'disabled'}>
-          <option value="">None</option>
-          ${voiceChannels.map(c => `<option value="${c.id}"${st.afk_channel_id === c.id ? ' selected' : ''}>${escapeHtml(c.name)}</option>`).join('')}
-        </select>
-        <div class="hint">Members who are idle are moved here automatically.</div>
-      </div>
-      <div class="ss-field"><label>AFK Timeout</label>
-        <select id="ss-afk-timeout" ${admin ? '' : 'disabled'}>
-          ${timeoutOpts.map(v => `<option value="${v}"${Number(st.afk_timeout) === v ? ' selected' : ''}>${v < 3600 ? (v / 60) + ' minutes' : '1 hour'}</option>`).join('')}
-        </select>
-        <div class="hint">How long before an idle member is moved to the AFK channel.</div>
-      </div>
-      <div class="ss-field"><label>Default Role</label>
-        <select id="ss-default-role" ${admin ? '' : 'disabled'}>
-          <option value="">Member (no role)</option>
-          ${(state.roles || []).map(r => `<option value="${r.id}"${st.default_role_id === r.id ? ' selected' : ''}>${escapeHtml(r.name)}</option>`).join('')}
-        </select>
-        <div class="hint">Automatically given to everyone who joins.</div>
-      </div>
+      ${ssField('Community Name', `<input id="ss-community-name" maxlength="80" value="${escapeHtml(st.community_name || '')}" ${dis} placeholder="e.g. The Pixel Lounge">`, 'A friendly display name shown on the invite splash and welcome screen.')}
+      ${ssField('Default Role', `<select id="ss-default-role" ${dis}><option value="">Member (no role)</option>${(state.roles || []).map(r => `<option value="${r.id}"${st.default_role_id === r.id ? ' selected' : ''}>${escapeHtml(r.name)}</option>`).join('')}</select>`, 'Automatically given to everyone who joins.')}
+    </div>`, 'server');
+
+  const welcome = ssGroup('Welcome & Rules', 'Greet new members and set expectations from day one.', `
+    ${ssField('Welcome Message', `<textarea id="ss-welcome" maxlength="2000" ${dis} placeholder="Say hello to new members\u2026">${escapeHtml(st.welcome_message || '')}</textarea>`, 'Posted in the system channel when someone joins (if enabled below).')}
+    ${ssField('Server Rules', `<textarea id="ss-rules" maxlength="4000" ${dis} placeholder="1. Be kind. 2. No spam. 3. Have fun.">${escapeHtml(st.rules || '')}</textarea>`, 'Shown to new members before they can chat when verification is on.')}
+    ${ssToggleRow('system_welcome', 'Post Welcome Messages', 'Send the welcome message above to the system channel whenever a member joins.', st.system_welcome)}
+  `, 'hand-wave');
+
+  const invites = ssGroup('Invites', 'Control who can invite people and how invite links behave by default.', `
+    <div class="ss-field-grid">
+      ${ssField('Default Invite Expiry', `<select id="ss-invite-expiry" ${dis}>${expiryOpts.map(([v, l]) => `<option value="${v}"${Number(st.invite_expiry) === v ? ' selected' : ''}>${l}</option>`).join('')}</select>`, 'New invite links expire after this long.')}
+      ${ssField('Default Max Uses', `<input type="number" id="ss-invite-max" min="0" max="1000" value="${Number(st.invite_max_uses) || 0}" ${dis}>`, '0 = unlimited. New invites stop working after this many joins.')}
     </div>
-    <div class="ss-field" style="margin-top:16px"><label>Welcome Message</label>
-      <textarea id="ss-welcome" maxlength="2000" ${admin ? '' : 'disabled'} placeholder="Say hello to new members…">${escapeHtml(st.welcome_message || '')}</textarea>
-      <div class="hint">Posted in the system channel when someone joins (if enabled below).</div>
+    ${ssToggleRow('allow_member_invites', 'Allow Member Invites', 'Let regular members create their own invite links. When off, only owners and admins can invite.', st.allow_member_invites)}
+  `, 'link');
+
+  const afk = ssGroup('Voice & AFK', 'Move idle members out of voice channels automatically.', `
+    <div class="ss-field-grid">
+      ${ssField('AFK Voice Channel', `<select id="ss-afk-channel" ${dis}><option value="">None</option>${voiceChannels.map(c => `<option value="${c.id}"${st.afk_channel_id === c.id ? ' selected' : ''}>${escapeHtml(c.name)}</option>`).join('')}</select>`, 'Members who are idle are moved here automatically.')}
+      ${ssField('AFK Timeout', `<select id="ss-afk-timeout" ${dis}>${timeoutOpts.map(v => `<option value="${v}"${Number(st.afk_timeout) === v ? ' selected' : ''}>${v < 3600 ? (v / 60) + ' minutes' : '1 hour'}</option>`).join('')}</select>`, 'How long before an idle member is moved to the AFK channel.')}
     </div>
-    <div class="ss-field" style="margin-top:16px"><label>Server Rules</label>
-      <textarea id="ss-rules" maxlength="4000" ${admin ? '' : 'disabled'} placeholder="1. Be kind. 2. No spam. 3. Have fun.">${escapeHtml(st.rules || '')}</textarea>
-      <div class="hint">Shown to new members before they can chat when verification is on.</div>
-    </div>
-    <div class="set-row"><div><div class="sr-title">Allow Member Invites</div><div class="sr-desc">Let regular members create their own invite links. When off, only owners and admins can invite.</div></div><div class="toggle${st.allow_member_invites ? ' on' : ''}" data-ss-toggle="allow_member_invites"></div></div>
-    <div class="set-row"><div><div class="sr-title">Post Welcome Messages</div><div class="sr-desc">Send the welcome message above to the system channel whenever a member joins.</div></div><div class="toggle${st.system_welcome ? ' on' : ''}" data-ss-toggle="system_welcome"></div></div>
-    <div class="set-row"><div><div class="sr-title">Show Invite Splash</div><div class="sr-desc">Display the server banner and description on the invite preview page.</div></div><div class="toggle${st.invite_splash ? ' on' : ''}" data-ss-toggle="invite_splash"></div></div>
-    <div class="set-row"><div><div class="sr-title">Require 2FA for Moderation</div><div class="sr-desc">Members must have two-factor authentication enabled before they can use moderation actions.</div></div><div class="toggle${st.require_2fa ? ' on' : ''}" data-ss-toggle="require_2fa"></div></div>
-    <div class="set-row"><div><div class="sr-title">Raid Protection</div><div class="sr-desc">Temporarily raise verification and slow joins when many accounts arrive at once.</div></div><div class="toggle${st.raid_protection ? ' on' : ''}" data-ss-toggle="raid_protection"></div></div>
+  `, 'microphone');
+
+  const discovery = ssGroup('Discovery & Listing', 'Decide whether this server can be found and previewed by new people.', `
+    ${ssToggleRow('discoverable', 'List in Server Discovery', 'Make this server publicly discoverable so anyone browsing can find and join it.', st.discoverable)}
+    ${ssToggleRow('invite_splash', 'Show Invite Splash', 'Display the server banner and description on the invite preview page.', st.invite_splash)}
+  `, 'compass');
+
+  body.innerHTML = `<div class="ss-panel ss-panel-pad">${identity}${welcome}${invites}${afk}${discovery}
     ${admin ? `<div class="ss-actions"><button class="btn" id="ss-save-community">${icon('check')} Save Community Settings</button></div>` : '<div class="ss-note">Only the owner and admins can edit these settings.</div>'}
-  `;
+  </div>`;
   hydrateIcons(body);
   if (!admin) return;
-  body.querySelectorAll('[data-ss-toggle]').forEach(t => t.addEventListener('click', () => t.classList.toggle('on')));
+  wireSsToggles(body);
   $('ss-save-community').addEventListener('click', () => saveCommunitySettings(s));
 }
 
 async function saveCommunitySettings(s) {
-  const body = $('ss-body');
   const payload = {
     community_name: $('ss-community-name').value.trim(),
     afk_channel_id: $('ss-afk-channel').value || null,
@@ -11991,11 +12051,12 @@ async function saveCommunitySettings(s) {
     default_role_id: $('ss-default-role').value || null,
     welcome_message: $('ss-welcome').value,
     rules: $('ss-rules').value,
-    allow_member_invites: body.querySelector('[data-ss-toggle="allow_member_invites"]').classList.contains('on'),
-    system_welcome: body.querySelector('[data-ss-toggle="system_welcome"]').classList.contains('on'),
-    invite_splash: body.querySelector('[data-ss-toggle="invite_splash"]').classList.contains('on'),
-    require_2fa: body.querySelector('[data-ss-toggle="require_2fa"]').classList.contains('on'),
-    raid_protection: body.querySelector('[data-ss-toggle="raid_protection"]').classList.contains('on')
+    invite_expiry: parseInt($('ss-invite-expiry').value, 10) || 0,
+    invite_max_uses: parseInt($('ss-invite-max').value, 10) || 0,
+    allow_member_invites: ssToggleVal('allow_member_invites'),
+    system_welcome: ssToggleVal('system_welcome'),
+    invite_splash: ssToggleVal('invite_splash'),
+    discoverable: ssToggleVal('discoverable')
   };
   try {
     const { settings } = await api('/api/servers/' + s.id + '/settings', { method: 'PATCH', body: JSON.stringify(payload) });
@@ -12007,58 +12068,71 @@ async function saveCommunitySettings(s) {
 function renderSafetyTab(body, s) {
   const admin = amIAdmin();
   const st = state.serverSettings || {};
+  const dis = admin ? '' : 'disabled';
   const channels = (state.channels || []).filter(c => c.type === 'text');
-  body.innerHTML = `
-    <div class="ss-section-title">Safety & Moderation</div>
+
+  const verify = ssGroup('Verification & Access', 'Set the bar for who can take part and how members prove they are human.', `
     <div class="ss-field-grid">
-      <div class="ss-field"><label>Verification Level</label>
-        <select id="ss-verif" ${admin ? '' : 'disabled'}>
-          ${['none','low','medium','high'].map(v => `<option value="${v}"${st.verification_level === v ? ' selected' : ''}>${{none:'None',low:'Low',medium:'Medium',high:'Highest'}[v]}</option>`).join('')}
-        </select>
-        <div class="hint">How strict membership checks are before members can chat.</div>
-      </div>
-      <div class="ss-field"><label>Default Notifications</label>
-        <select id="ss-notif" ${admin ? '' : 'disabled'}>
-          ${['all','mentions','none'].map(v => `<option value="${v}"${st.default_notifications === v ? ' selected' : ''}>${{all:'All Messages',mentions:'Only @mentions',none:'Nothing'}[v]}</option>`).join('')}
-        </select>
-        <div class="hint">What new members are notified about by default.</div>
-      </div>
-      <div class="ss-field"><label>Slow Mode (seconds between messages)</label>
-        <input type="number" id="ss-slow" min="0" max="21600" value="${st.slow_mode || 0}" ${admin ? '' : 'disabled'}>
-        <div class="hint">0 = off. Members must wait this long between messages.</div>
-      </div>
-      <div class="ss-field"><label>System Messages Channel</label>
-        <select id="ss-sys" ${admin ? '' : 'disabled'}>
-          <option value="">None</option>
-          ${channels.map(c => `<option value="${c.id}"${st.system_channel_id === c.id ? ' selected' : ''}>#${escapeHtml(c.name)}</option>`).join('')}
-        </select>
-        <div class="hint">Where join and moderation notices are posted.</div>
-      </div>
+      ${ssField('Verification Level', `<select id="ss-verif" ${dis}>${['none','low','medium','high'].map(v => `<option value="${v}"${st.verification_level === v ? ' selected' : ''}>${{none:'None \u2014 no requirements',low:'Low \u2014 verified email',medium:'Medium \u2014 registered 5+ minutes',high:'Highest \u2014 verified phone'}[v]}</option>`).join('')}</select>`, 'How strict membership checks are before members can chat.')}
+      ${ssField('Default Notifications', `<select id="ss-notif" ${dis}>${['all','mentions','none'].map(v => `<option value="${v}"${st.default_notifications === v ? ' selected' : ''}>${{all:'All Messages',mentions:'Only @mentions',none:'Nothing'}[v]}</option>`).join('')}</select>`, 'What new members are notified about by default.')}
     </div>
-    <div class="set-row"><div><div class="sr-title">Explicit Content Filter</div><div class="sr-desc">Block messages and attachment names that contain explicit language or media. Blocked messages are never posted.</div></div><div class="toggle${st.explicit_filter ? ' on' : ''}" data-ss-toggle="explicit_filter"></div></div>
-    <div class="set-row"><div><div class="sr-title">Allow @everyone / @here</div><div class="sr-desc">Let the owner and admins ping the whole server (@everyone) or only members who are online (@here). When off, these pings are ignored.</div></div><div class="toggle${st.allow_everyone ? ' on' : ''}" data-ss-toggle="allow_everyone"></div></div>
-    ${admin ? `<div class="ss-actions"><button class="btn" id="ss-save-settings">${icon('check')} Save Settings</button></div>` : '<div class="ss-note">Only the owner and admins can edit these settings.</div>'}
-  `;
+    ${ssToggleRow('require_2fa', 'Require 2FA for Moderation', 'Members must have two-factor authentication enabled before they can use moderation actions.', st.require_2fa)}
+    ${ssToggleRow('raid_protection', 'Raid Protection', 'Temporarily raise verification and slow joins when many accounts arrive at once.', st.raid_protection)}
+  `, 'shield');
+
+  const content = ssGroup('Content & Attachments', 'Keep the server safe for everyone by filtering risky content.', `
+    ${ssToggleRow('explicit_filter', 'Explicit Content Filter', 'Block messages and attachment names that contain explicit language or media. Blocked messages are never posted.', st.explicit_filter)}
+    ${ssToggleRow('allow_attachments', 'Allow File Attachments', 'Let members upload images and files. When off, attachments are rejected.', st.allow_attachments)}
+    ${ssToggleRow('nsfw', 'Age-Restricted (NSFW) Server', 'Mark this server as 18+ so it is hidden from minors and unverified accounts.', st.nsfw)}
+  `, 'filter');
+
+  const automod = ssGroup('AutoModeration', 'Automatically catch spam and unwanted links before anyone sees them.', `
+    ${ssToggleRow('automod', 'Enable AutoModeration', 'Turn on automatic message screening for this server.', st.automod)}
+    ${ssToggleRow('automod_spam', 'Block Spam & Repeated Messages', 'Hide messages that repeat rapidly or flood a channel.', st.automod_spam)}
+    ${ssToggleRow('automod_links', 'Block Suspicious Links', 'Hide messages that contain known scam or shortened links.', st.automod_links)}
+    <div class="ss-field-grid">
+      ${ssField('Mention Limit per Message', `<input type="number" id="ss-mention-limit" min="0" max="50" value="${Number(st.mention_limit) || 0}" ${dis}>`, '0 = off. Messages with more unique mentions than this are blocked.')}
+    </div>
+  `, 'robot');
+
+  const mentions = ssGroup('Mentions & Channels', 'Control mass pings, slow mode and where system notices appear.', `
+    ${ssToggleRow('allow_everyone', 'Allow @everyone / @here', 'Let the owner and admins ping the whole server (@everyone) or only members who are online (@here). When off, these pings are ignored.', st.allow_everyone)}
+    <div class="ss-field-grid">
+      ${ssField('Slow Mode (seconds between messages)', `<input type="number" id="ss-slow" min="0" max="21600" value="${st.slow_mode || 0}" ${dis}>`, '0 = off. Members must wait this long between messages.')}
+      ${ssField('System Messages Channel', `<select id="ss-sys" ${dis}><option value="">None</option>${channels.map(c => `<option value="${c.id}"${st.system_channel_id === c.id ? ' selected' : ''}>#${escapeHtml(c.name)}</option>`).join('')}</select>`, 'Where join and moderation notices are posted.')}
+    </div>
+  `, 'at-sign');
+
+  body.innerHTML = `<div class="ss-panel ss-panel-pad">${verify}${content}${automod}${mentions}
+    ${admin ? `<div class="ss-actions"><button class="btn" id="ss-save-settings">${icon('check')} Save Safety Settings</button></div>` : '<div class="ss-note">Only the owner and admins can edit these settings.</div>'}
+  </div>`;
   hydrateIcons(body);
   if (!admin) return;
-  body.querySelectorAll('[data-ss-toggle]').forEach(t => t.addEventListener('click', () => t.classList.toggle('on')));
+  wireSsToggles(body);
   $('ss-save-settings').addEventListener('click', () => saveServerSettings(s));
 }
 
 async function saveServerSettings(s) {
-  const body = $('ss-body');
   const payload = {
     verification_level: $('ss-verif').value,
     default_notifications: $('ss-notif').value,
     slow_mode: parseInt($('ss-slow').value, 10) || 0,
     system_channel_id: $('ss-sys').value || null,
-    explicit_filter: body.querySelector('[data-ss-toggle="explicit_filter"]').classList.contains('on'),
-    allow_everyone: body.querySelector('[data-ss-toggle="allow_everyone"]').classList.contains('on')
+    mention_limit: parseInt($('ss-mention-limit').value, 10) || 0,
+    explicit_filter: ssToggleVal('explicit_filter'),
+    allow_attachments: ssToggleVal('allow_attachments'),
+    nsfw: ssToggleVal('nsfw'),
+    require_2fa: ssToggleVal('require_2fa'),
+    raid_protection: ssToggleVal('raid_protection'),
+    automod: ssToggleVal('automod'),
+    automod_spam: ssToggleVal('automod_spam'),
+    automod_links: ssToggleVal('automod_links'),
+    allow_everyone: ssToggleVal('allow_everyone')
   };
   try {
     const { settings } = await api('/api/servers/' + s.id + '/settings', { method: 'PATCH', body: JSON.stringify(payload) });
     state.serverSettings = settings;
-    toast('Server settings saved', 'success');
+    toast('Safety settings saved', 'success');
   } catch (e) { toast(e.message, 'error'); }
 }
 

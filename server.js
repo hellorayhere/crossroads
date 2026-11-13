@@ -667,7 +667,16 @@ const SETTINGS_DEFAULTS = {
   system_welcome: 1,
   default_role_id: null,
   invite_splash: 1,
-  community_name: ''
+  community_name: '',
+  discoverable: 0,
+  automod: 0,
+  automod_links: 0,
+  automod_spam: 1,
+  mention_limit: 0,
+  nsfw: 0,
+  invite_expiry: 0,
+  invite_max_uses: 0,
+  allow_attachments: 1
 };
 
 /* Fetch a server's settings row, creating it (with defaults) on first use.
@@ -2594,14 +2603,25 @@ app.patch('/api/servers/:id/settings', auth, (req, res) => {
     system_welcome: 'system_welcome' in body ? (body.system_welcome ? 1 : 0) : cur.system_welcome,
     default_role_id: 'default_role_id' in body ? (body.default_role_id || null) : cur.default_role_id,
     invite_splash: 'invite_splash' in body ? (body.invite_splash ? 1 : 0) : cur.invite_splash,
-    community_name: 'community_name' in body ? String(body.community_name || '').slice(0, 80) : cur.community_name
+    community_name: 'community_name' in body ? String(body.community_name || '').slice(0, 80) : cur.community_name,
+    discoverable: 'discoverable' in body ? (body.discoverable ? 1 : 0) : cur.discoverable,
+    automod: 'automod' in body ? (body.automod ? 1 : 0) : cur.automod,
+    automod_links: 'automod_links' in body ? (body.automod_links ? 1 : 0) : cur.automod_links,
+    automod_spam: 'automod_spam' in body ? (body.automod_spam ? 1 : 0) : cur.automod_spam,
+    mention_limit: 'mention_limit' in body ? Math.max(0, Math.min(50, parseInt(body.mention_limit, 10) || 0)) : cur.mention_limit,
+    nsfw: 'nsfw' in body ? (body.nsfw ? 1 : 0) : cur.nsfw,
+    invite_expiry: 'invite_expiry' in body ? Math.max(0, Math.min(2592000, parseInt(body.invite_expiry, 10) || 0)) : cur.invite_expiry,
+    invite_max_uses: 'invite_max_uses' in body ? Math.max(0, Math.min(1000, parseInt(body.invite_max_uses, 10) || 0)) : cur.invite_max_uses,
+    allow_attachments: 'allow_attachments' in body ? (body.allow_attachments ? 1 : 0) : cur.allow_attachments
   };
   db.prepare(`UPDATE server_settings SET verification_level=?, explicit_filter=?, allow_everyone=?, default_notifications=?, slow_mode=?, system_channel_id=?,
-      welcome_message=?, rules=?, allow_member_invites=?, afk_channel_id=?, afk_timeout=?, require_2fa=?, raid_protection=?, system_welcome=?, default_role_id=?, invite_splash=?, community_name=?, updated_at=?
+      welcome_message=?, rules=?, allow_member_invites=?, afk_channel_id=?, afk_timeout=?, require_2fa=?, raid_protection=?, system_welcome=?, default_role_id=?, invite_splash=?, community_name=?,
+      discoverable=?, automod=?, automod_links=?, automod_spam=?, mention_limit=?, nsfw=?, invite_expiry=?, invite_max_uses=?, allow_attachments=?, updated_at=?
       WHERE server_id=?`)
     .run(next.verification_level, next.explicit_filter, next.allow_everyone, next.default_notifications, next.slow_mode, next.system_channel_id,
       next.welcome_message, next.rules, next.allow_member_invites, next.afk_channel_id, next.afk_timeout, next.require_2fa, next.raid_protection,
-      next.system_welcome, next.default_role_id, next.invite_splash, next.community_name, Date.now(), srv.id);
+      next.system_welcome, next.default_role_id, next.invite_splash, next.community_name,
+      next.discoverable, next.automod, next.automod_links, next.automod_spam, next.mention_limit, next.nsfw, next.invite_expiry, next.invite_max_uses, next.allow_attachments, Date.now(), srv.id);
   addAudit(srv.id, req.user.id, 'settings_update', null, '');
   io.emit('server_settings_update', { server_id: srv.id, settings: getServerSettings(srv.id) });
   res.json({ settings: getServerSettings(srv.id) });
