@@ -30,6 +30,6 @@
 - [x] No failed resource requests / no JS errors across DM, server, channel, settings, profile flows
 
 ## G. Ship
-- [ ] Commit + push
-- [ ] Deploy + poll until live
-- [ ] Verify live version
+- [x] Commit + push
+- [x] Deploy + poll until live
+- [x] Verify live version
