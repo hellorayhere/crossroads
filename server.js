@@ -3209,8 +3209,22 @@ app.post('/api/dms', auth, (req, res) => {
   const other = db.prepare('SELECT * FROM users WHERE id = ?').get(userId);
   if (!other) return res.status(404).json({ error: 'User not found' });
   if (other.is_webhook) return res.status(400).json({ error: 'Webhooks cannot be messaged directly' });
+  if (isBlockedBetween(req.user.id, userId)) return res.status(403).json({ error: 'You cannot message this user.' });
   const [a, b] = [req.user.id, userId].sort();
   let dm = db.prepare('SELECT * FROM dm_channels WHERE user1_id = ? AND user2_id = ?').get(a, b);
+  /* Respect the recipient's privacy choices. A brand-new conversation is only
+     allowed when they accept direct messages, and - if they have turned off
+     messages from server members - only when the two are friends. Existing
+     conversations keep working so nobody loses their history. */
+  if (!dm) {
+    const otherSettings = safeParse(other.settings, {});
+    if (otherSettings.directMessages === false) {
+      return res.status(403).json({ error: 'This user is not accepting direct messages right now.' });
+    }
+    if (otherSettings.dmFromMembers === false && relationshipBetween(req.user.id, userId) !== 'friends') {
+      return res.status(403).json({ error: 'This user only accepts direct messages from friends.' });
+    }
+  }
   if (!dm) {
     const id = newId();
     db.prepare('INSERT INTO dm_channels (id, user1_id, user2_id, created_at) VALUES (?,?,?,?)').run(id, a, b, Date.now());

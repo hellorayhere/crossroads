@@ -86,7 +86,7 @@ const BG_COLORS = [
 
 const SETTINGS_DEFAULTS = {
   theme: 'dark', bg: 'graphite', compact: false, showMembers: true,
-  friendRequests: true, safeMode: true, dmFromMembers: true, dataPersonalisation: false, readReceipts: true,
+  friendRequests: true, safeMode: true, directMessages: true, dmFromMembers: true, dataPersonalisation: false, readReceipts: true,
   notifDesktop: true, notifSounds: true, notifBadge: false,
   echoCancel: true, noiseSuppress: true, autoGain: true, inputVolume: 70,
   outputVolume: 100, micDeviceId: '', speakerDeviceId: '', voiceLowLatency: true,
@@ -1870,6 +1870,9 @@ async function init() {
   if (!token) { window.location.href = '/'; return; }
   /* After 4 seconds without a response, assume a cold start is in progress. */
   wakeHintTimer = setTimeout(showWakeHint, 4000);
+  /* Settings only need the token, so start that request immediately and let it
+     run alongside /api/me instead of adding a second round-trip afterwards. */
+  const settingsPromise = api('/api/settings', { retries: 4 }).catch(() => ({ settings: {} }));
   let meData = null;
   try {
     meData = await api('/api/me', { retries: 8 });
@@ -1895,7 +1898,7 @@ async function init() {
   myChosenStatus = me.status || 'online';
   try { localStorage.setItem('cr_user', JSON.stringify(me)); } catch (err) { /* ignore */ }
   try {
-    const { settings } = await api('/api/settings', { retries: 4 });
+    const { settings } = await settingsPromise;
     state.settings = settings || {};
   } catch (e) { state.settings = {}; }
   applyTheme();
@@ -1906,8 +1909,14 @@ async function init() {
   loadGlobalMessages();
   /* Load everything in parallel so the first paint is not blocked by a chain
      of sequential round-trips. */
-  await Promise.all([loadServers(), loadFriends(), loadDMs(), loadNotifications()]);
-  const restored = await restoreLastLocation();
+  /* The server list is needed before we can reopen the last location, so load
+     it first; everything else - including the last channel's messages - then
+     runs in parallel instead of one request after another. */
+  await loadServers();
+  const [restored] = await Promise.all([
+    restoreLastLocation(),
+    loadFriends(), loadDMs(), loadNotifications()
+  ]);
   if (!restored) showHome();
   updateTitle();
   bindGlobalEvents();
@@ -4779,12 +4788,19 @@ function callEventNode(m) {
   const ended = (m.plain || 'started') === 'ended';
   const verb = ended ? 'ended the call' : 'started a voice call';
   node.innerHTML = `
-    <span class="ce-body">
-      <span class="ce-avatar">${avatarHTML(a, 22)}</span>
-      <span class="ce-text"><b>${who}</b> ${verb}</span>
-      <span class="ce-time">${shortTime(m.created_at)}</span>
+    <div class="ce-card">
+      <div class="ce-ico">${icon(ended ? 'phone-off' : 'phone')}</div>
+      <div class="ce-main">
+        <div class="ce-title"><b>${who}</b> ${verb}</div>
+        <div class="ce-sub">
+          <span class="ce-avatar">${avatarHTML(a, 18)}</span>
+          <span>${ended ? 'Call ended' : 'Voice call'}</span>
+          <span class="ce-dot"></span>
+          <span class="ce-time">${shortTime(m.created_at)}</span>
+        </div>
+      </div>
       ${ended ? '' : '<button class="ce-call" type="button">Call back</button>'}
-    </span>`;
+    </div>`;
   hydrateIcons(node);
   const btn = node.querySelector('.ce-call');
   if (btn) btn.addEventListener('click', () => {
@@ -7815,10 +7831,9 @@ function renderWebhookProfile(user) {
   const name = user.display_name || user.username || 'Webhook';
   openModal(`
     <div class="wh-profile">
-      <div class="wh-profile-av">${avatarHTML(Object.assign({}, user, { status: 'offline' }), 84, 'offline')}</div>
+      <div class="wh-profile-av">${avatarHTML(Object.assign({}, user), 84)}</div>
       <div class="wh-profile-name">${escapeHtml(name)}</div>
       <div class="wh-profile-tag"><span class="bot-tag" title="Verified bot">${icon('check-badge')}<span>BOT</span></span><span>Webhook</span></div>
-      <p class="wh-profile-note">This is a webhook. Messages sent here are posted by an automated integration, not a person.</p>
     </div>`, { modalClass: 'modal wh-profile-modal' });
 }
 
@@ -8842,9 +8857,10 @@ function settingsPanelHTML(section) {
     case 'privacy':
       return `
         <h4>Privacy &amp; Safety</h4>
+        ${toggleRow('directMessages', 'Direct messages', 'Allow people to start a direct message with you. Turn this off to block all new direct messages.')}
+        ${toggleRow('dmFromMembers', 'Allow direct messages from server members', 'When on, members of servers you share can start a conversation with you. When off, only friends can message you.')}
         ${toggleRow('friendRequests', 'Allow friend requests', 'Let other people send you friend requests. Turn this off to only be added by people you choose to add first.')}
         ${toggleRow('safeMode', 'Keep me safe', 'Scan and blur media from unverified sources.')}
-        ${toggleRow('dmFromMembers', 'Allow direct messages from server members', 'Members of servers you share can start a conversation with you.')}
         ${toggleRow('dataPersonalisation', 'Allow data personalisation', 'Use my activity to improve recommendations.')}
         ${toggleRow('readReceipts', 'Show my read receipts', 'Let others know when you have read their messages.')}
         <div class="pw-section">
@@ -12515,7 +12531,35 @@ function openMiniProfile() {
 /* ============================================================
    GLOBAL EVENTS
    ============================================================ */
+/* Body-level tooltip for the server rail. The rail clips overflow, so a plain
+   CSS ::after tooltip would be cut off; this floats above everything instead. */
+function installRailTooltip() {
+  const rail = $('server-rail');
+  if (!rail || rail._tipBound) return;
+  rail._tipBound = true;
+  let tip = document.getElementById('rail-tip');
+  if (!tip) { tip = document.createElement('div'); tip.id = 'rail-tip'; document.body.appendChild(tip); }
+  const show = (el) => {
+    const label = el.dataset.tip;
+    if (!label) return;
+    tip.textContent = label;
+    const r = el.getBoundingClientRect();
+    tip.style.left = (r.right + 12) + 'px';
+    tip.style.top = (r.top + r.height / 2) + 'px';
+    tip.classList.add('show');
+  };
+  const hide = () => tip.classList.remove('show');
+  rail.addEventListener('mouseover', (e) => {
+    const el = e.target.closest('.rail-item[data-tip]');
+    if (el && rail.contains(el)) show(el); else hide();
+  });
+  rail.addEventListener('mouseleave', hide);
+  rail.addEventListener('scroll', hide, { passive: true });
+  window.addEventListener('blur', hide);
+}
+
 function bindGlobalEvents() {
+  installRailTooltip();
   $('rail-home').addEventListener('click', showHome);
   $('rail-add').addEventListener('click', openCreateServer);
   $('rail-explore').addEventListener('click', () => openJoinServer());

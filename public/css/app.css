@@ -172,6 +172,25 @@ button:active, .rail-item:active, .channel:active, .dm-item:active, .member:acti
 }
 .tip:hover::after { opacity: 1; transform: translateY(-50%) scale(1); }
 
+/* The server rail scrolls vertically, which clips the ::after tooltip above.
+   Rail items therefore use a single body-level tooltip that can overflow. */
+.rail-item.tip::after { display: none; }
+#rail-tip {
+  position: fixed; z-index: 6000; left: 0; top: 0;
+  padding: 8px 12px; border-radius: 8px;
+  background: var(--menu-bg, #111214); color: var(--text-header, #f2f3f5);
+  font-size: 13.5px; font-weight: 700; letter-spacing: .01em; white-space: nowrap;
+  box-shadow: 0 8px 24px rgba(0,0,0,.45), 0 0 0 1px rgba(255,255,255,.06);
+  opacity: 0; pointer-events: none; transform: translateY(-50%) scale(.94);
+  transform-origin: left center;
+  transition: opacity .12s ease, transform .12s ease;
+}
+#rail-tip.show { opacity: 1; transform: translateY(-50%) scale(1); }
+#rail-tip::before {
+  content: ''; position: absolute; left: -4px; top: 50%; width: 8px; height: 8px;
+  background: inherit; transform: translateY(-50%) rotate(45deg); border-radius: 1px;
+}
+
 /* ============ SIDEBAR ============ */
 .sidebar { width: 268px; flex: 0 0 268px; background: var(--sidebar-bg); display: flex; flex-direction: column; height: 100%; }
 .sidebar-header {
@@ -343,41 +362,59 @@ button:active, .rail-item:active, .channel:active, .dm-item:active, .member:acti
 .msg-group.fade-in { animation: none; }
 .msg-group.flash { animation: flashHighlight 1.4s ease; }
 
-/* Inline "X started a voice call" event row.
-   A quiet, centred system line with the caller's avatar so it feels personal
-   and part of the transcript rather than a cartoonish card. */
+/* "X started a voice call" - rendered as a proper embedded card in the
+   transcript (not a floating pill), so it reads as part of the conversation. */
 .call-event {
-  display: flex; align-items: center; justify-content: center;
-  margin: 9px 16px; padding: 0;
-  font-size: 13px; color: var(--text-muted);
+  display: flex; margin: 6px 16px; padding: 0;
 }
-.call-event .ce-body {
-  display: inline-flex; align-items: center; gap: 8px;
-  max-width: 88%; padding: 4px 12px 4px 5px; border-radius: 999px;
-  background: color-mix(in srgb, var(--text-normal) 5%, transparent);
-  border: 1px solid color-mix(in srgb, var(--divider) 70%, transparent);
-  transition: background .14s ease, border-color .14s ease;
+.call-event .ce-card {
+  position: relative; display: flex; align-items: center; gap: 13px;
+  width: min(468px, 100%); padding: 13px 14px 13px 16px;
+  border-radius: 8px; overflow: hidden;
+  background: linear-gradient(135deg,
+      color-mix(in srgb, #23a55a 8%, var(--card)) 0%,
+      color-mix(in srgb, var(--card) 96%, #000) 60%);
+  border: 1px solid color-mix(in srgb, var(--divider) 80%, #fff 5%);
+  box-shadow: 0 1px 0 rgba(0,0,0,.18), 0 8px 24px -18px rgba(0,0,0,.8);
+  transition: border-color .16s ease, transform .16s ease, box-shadow .16s ease;
 }
-.call-event:hover .ce-body {
-  background: color-mix(in srgb, var(--text-normal) 8%, transparent);
-  border-color: var(--divider);
+.call-event .ce-card::before {
+  content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 4px;
+  background: linear-gradient(180deg, #2fd06f, #1a8f4c);
 }
-.call-event .ce-avatar { flex: 0 0 auto; display: inline-flex; width: 22px; height: 22px; }
-.call-event .ce-avatar .avatar { width: 22px; height: 22px; font-size: 9px; border-radius: 50%; }
-.call-event .ce-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-muted); }
-.call-event .ce-text b { color: var(--text-normal); font-weight: 600; }
-.call-event .ce-time { flex: 0 0 auto; font-size: 11px; color: var(--text-faint); }
+.call-event .ce-card:hover {
+  border-color: color-mix(in srgb, #23a55a 45%, var(--divider));
+  box-shadow: 0 1px 0 rgba(0,0,0,.18), 0 10px 30px -16px rgba(0,0,0,.85);
+}
+.call-event .ce-ico {
+  flex: 0 0 auto; width: 40px; height: 40px; border-radius: 50%;
+  display: grid; place-items: center; font-size: 16px; color: #2fd06f;
+  background: color-mix(in srgb, #23a55a 16%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, #23a55a 32%, transparent);
+}
+.call-event .ce-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.call-event .ce-title { font-size: 13.5px; font-weight: 700; color: var(--text-header); letter-spacing: .01em; }
+.call-event .ce-title b { color: #fff; font-weight: 700; }
+.call-event .ce-sub {
+  display: flex; align-items: center; gap: 7px; min-width: 0;
+  font-size: 12px; color: var(--text-muted);
+}
+.call-event .ce-sub .ce-dot { width: 3px; height: 3px; border-radius: 50%; background: var(--text-faint); flex: 0 0 auto; }
+.call-event .ce-sub .ce-time { color: var(--text-faint); white-space: nowrap; }
+.call-event .ce-avatar { flex: 0 0 auto; display: inline-flex; width: 18px; height: 18px; }
+.call-event .ce-avatar .avatar { width: 18px; height: 18px; font-size: 8px; border-radius: 50%; }
 .call-event .ce-call {
-  flex: 0 0 auto; margin-left: 2px; padding: 2px 8px; border-radius: 999px;
-  border: 0; background: transparent;
-  color: var(--link); font: inherit; font-size: 12px; font-weight: 600;
-  cursor: pointer; transition: background .12s ease, color .12s ease;
+  flex: 0 0 auto; padding: 7px 13px; border-radius: 6px; border: 0;
+  background: #23a55a; color: #fff; font: inherit; font-size: 12.5px; font-weight: 700;
+  cursor: pointer; white-space: nowrap;
+  transition: background .14s ease, transform .12s ease;
 }
-.call-event .ce-call:hover { background: color-mix(in srgb, var(--brand) 18%, transparent); color: var(--text-header); }
+.call-event .ce-call:hover { background: #1f9450; }
+.call-event .ce-call:active { transform: scale(.96); }
+.call-event .ce-call.ended { background: transparent; color: var(--text-muted); cursor: default; }
 @media (max-width: 560px) {
-  .call-event { margin: 8px 10px; }
-  .call-event .ce-body { max-width: 96%; }
-  .call-event .ce-time { display: none; }
+  .call-event { margin: 6px 10px; }
+  .call-event .ce-card { width: 100%; }
 }
 @keyframes flashHighlight { 0%,100% { background: transparent; } 15% { background: rgba(88,101,242,.22); } }
 
@@ -520,13 +557,17 @@ button:active, .rail-item:active, .channel:active, .dm-item:active, .member:acti
 .wh-profile-tag .bot-tag { margin-left: 0; }
 .wh-profile-note { margin: 4px 0 0; font-size: 13px; line-height: 1.5; color: var(--text-muted); }
 
-/* ---- Reply highlight (when someone replies to you) ---- */
+/* ---- Reply highlight (when someone replies to you) ----
+   Discord tints a message that mentions you with a warm gold wash and a
+   matching accent rail, rather than the blurple brand colour. */
 .msg-group.reply-to-me {
-  background: color-mix(in srgb, var(--brand) 9%, transparent);
-  box-shadow: inset 3px 0 0 color-mix(in srgb, var(--brand) 70%, transparent);
+  background: color-mix(in srgb, #f0b232 10%, transparent);
+  box-shadow: inset 3px 0 0 color-mix(in srgb, #f0b232 85%, transparent);
   border-radius: 4px;
 }
-.msg-group.reply-to-me:hover { background: color-mix(in srgb, var(--brand) 13%, transparent); }
+.msg-group.reply-to-me:hover { background: color-mix(in srgb, #f0b232 15%, transparent); }
+.msg-group.reply-to-me .head .author { color: #f5c451; }
+.msg-group.reply-to-me .reply-ref .rr-line { border-color: #f0b232; }
 
 /* ---- Rich embed card (webhook / structured embeds) ---- */
 .msg-embed {
@@ -3060,13 +3101,13 @@ body[data-theme="light"] .toast { box-shadow: 0 8px 24px rgba(0, 0, 0, .12); }
 .admin-entry-btn { flex: 0 0 auto; }
 
 .adm-modal {
-  width: 100%; max-width: 1180px; height: min(820px, 92vh); padding: 0;
+  width: min(1680px, calc(100vw - 48px)); max-width: calc(100vw - 48px); height: min(900px, calc(100vh - 48px)); padding: 0;
   background: var(--chat-bg); border-radius: var(--radius-lg); overflow: hidden;
   display: flex; box-shadow: var(--elevation-lg);
 }
 .adm-shell { display: flex; width: 100%; min-height: 0; }
 .adm-side {
-  width: 250px; flex: 0 0 auto; background: var(--sidebar-bg); display: flex;
+  width: 272px; flex: 0 0 auto; background: var(--sidebar-bg); display: flex;
   flex-direction: column; border-right: 1px solid var(--divider);
 }
 .adm-brand { display: flex; align-items: center; gap: 12px; padding: 20px 18px 16px; }

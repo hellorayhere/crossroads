@@ -21,52 +21,202 @@
     })();
   </script>
   <style>
+    /* ============================================================
+       Crossroads boot screen
+       A pure-CSS loading experience: layered aurora, a fine grid,
+       a hand-built crossroads mark (no image, no SVG icon), a
+       gradient wordmark and a determinate-feeling progress rail.
+       ============================================================ */
     html.booting body { overflow: hidden; }
-    .boot-gate { position: fixed; inset: 0; z-index: 9999; display: grid; place-items: center;
-      background:
-        radial-gradient(60% 50% at 50% 0%, rgba(88,101,242,.16) 0%, transparent 70%),
-        var(--bg-base, #1e1f22);
-      color: var(--text-normal, #dbdee1);
-      transition: opacity .28s ease; }
+    .boot-gate {
+      position: fixed; inset: 0; z-index: 9999; display: grid; place-items: center;
+      background: #08090c; color: var(--text-normal, #dbdee1);
+      overflow: hidden; isolation: isolate;
+      transition: opacity .45s cubic-bezier(.4,0,.2,1);
+    }
     .boot-gate.done { opacity: 0; pointer-events: none; }
-    .boot-gate .bg-inner { display: flex; flex-direction: column; align-items: center; gap: 14px; text-align: center; padding: 24px; }
+
+    /* Soft aurora wash */
+    .boot-gate::before {
+      content: ''; position: absolute; inset: -25%; z-index: -2;
+      background:
+        radial-gradient(34% 30% at 28% 26%, rgba(88,101,242,.34), transparent 72%),
+        radial-gradient(30% 28% at 74% 70%, rgba(240,178,50,.16), transparent 72%),
+        radial-gradient(26% 24% at 62% 18%, rgba(35,165,90,.13), transparent 72%);
+      filter: blur(34px);
+      animation: bgAurora 16s ease-in-out infinite alternate;
+    }
+    /* Fine technical grid, faded at the edges */
+    .boot-gate::after {
+      content: ''; position: absolute; inset: 0; z-index: -1;
+      background-image:
+        linear-gradient(rgba(255,255,255,.032) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255,255,255,.032) 1px, transparent 1px);
+      background-size: 46px 46px;
+      -webkit-mask-image: radial-gradient(62% 62% at 50% 46%, #000 12%, transparent 78%);
+              mask-image: radial-gradient(62% 62% at 50% 46%, #000 12%, transparent 78%);
+      animation: bgGridDrift 26s linear infinite;
+    }
+    @keyframes bgAurora {
+      0%   { transform: translate3d(-2%, -1%, 0) scale(1); }
+      50%  { transform: translate3d(2%, 2%, 0) scale(1.06); }
+      100% { transform: translate3d(-1%, 1%, 0) scale(1.02); }
+    }
+    @keyframes bgGridDrift { to { background-position: 46px 46px, 46px 46px; } }
+
+    .boot-gate .bg-inner {
+      position: relative; display: flex; flex-direction: column; align-items: center;
+      gap: 0; text-align: center; padding: 40px 28px; width: min(460px, 100%);
+      animation: bgRise .7s cubic-bezier(.22,.61,.36,1) both;
+    }
+    @keyframes bgRise { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
+
+    /* ---- Crossroads mark (pure CSS) ---- */
     .boot-gate .bg-logo {
-      position: relative; width: 92px; height: 92px; display: grid; place-items: center;
-      border-radius: 24px; background: #1b1c20;
-      box-shadow: 0 0 0 1px rgba(255,255,255,.06), 0 14px 40px rgba(0,0,0,.5);
-      animation: bgfloat 3.2s ease-in-out infinite;
+      position: relative; width: 104px; height: 104px; border-radius: 30px;
+      display: grid; place-items: center;
+      background: linear-gradient(160deg, #1c1e26 0%, #101116 100%);
+      box-shadow:
+        0 0 0 1px rgba(255,255,255,.07),
+        inset 0 1px 0 rgba(255,255,255,.08),
+        0 30px 70px -24px rgba(88,101,242,.65);
+      animation: bgfloat 4.4s ease-in-out infinite;
     }
     .boot-gate .bg-logo::before {
-      content: ''; position: absolute; inset: -6px; border-radius: 30px; z-index: -1;
-      background: conic-gradient(from 0deg, transparent 0deg, rgba(88,101,242,.9) 70deg, transparent 150deg, transparent 360deg);
-      animation: bgspin 2.4s linear infinite; filter: blur(2px); opacity: .8;
+      content: ''; position: absolute; inset: -2px; border-radius: 32px; z-index: -1;
+      background: conic-gradient(from 0deg,
+        transparent 0deg, rgba(88,101,242,.9) 60deg, rgba(240,178,50,.75) 130deg,
+        transparent 190deg, transparent 360deg);
+      filter: blur(3px); opacity: .85;
+      animation: bgspin 3.6s linear infinite;
     }
-    .boot-gate .bg-logo img { width: 64px; height: 64px; object-fit: contain; display: block; }
-    @keyframes bgfloat { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-6px); } }
+    .boot-gate .bg-logo::after {
+      content: ''; position: absolute; inset: 0; border-radius: 30px;
+      background: radial-gradient(60% 60% at 50% 30%, rgba(255,255,255,.10), transparent 70%);
+      pointer-events: none;
+    }
+    .boot-gate .bg-mark { position: relative; width: 52px; height: 52px; }
+    .boot-gate .bg-mark i {
+      position: absolute; left: 50%; top: 50%; width: 9px; height: 52px;
+      border-radius: 6px; transform: translate(-50%,-50%) rotate(45deg);
+      background: linear-gradient(180deg, #a7adff 0%, #5865f2 100%);
+      box-shadow: 0 0 18px rgba(88,101,242,.55);
+    }
+    .boot-gate .bg-mark i:nth-child(2) {
+      transform: translate(-50%,-50%) rotate(-45deg);
+      background: linear-gradient(180deg, #ffd77a 0%, #f0b232 100%);
+      box-shadow: 0 0 18px rgba(240,178,50,.45);
+    }
+    .boot-gate .bg-mark i:nth-child(3) {
+      width: 11px; height: 11px; border-radius: 50%;
+      background: #0d0e12; box-shadow: 0 0 0 3px rgba(255,255,255,.10);
+      transform: translate(-50%,-50%);
+    }
+    @keyframes bgfloat { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-7px); } }
     @keyframes bgspin { to { transform: rotate(360deg); } }
-    .boot-gate .bg-brand { font-weight: 800; letter-spacing: .01em; font-size: 26px; color: #fff; margin-top: 4px; }
-    .boot-gate .bg-tag { font-size: 13px; color: var(--text-muted, #949ba4); letter-spacing: .01em; }
+
+    /* ---- Wordmark ---- */
+    .boot-gate .bg-brand {
+      margin-top: 26px; font-size: 34px; font-weight: 800; letter-spacing: -.02em;
+      background: linear-gradient(180deg, #ffffff 0%, #c7cbf5 100%);
+      -webkit-background-clip: text; background-clip: text; color: transparent;
+      line-height: 1.05;
+    }
+    .boot-gate .bg-tag {
+      margin-top: 9px; font-size: 13px; letter-spacing: .01em; color: #949ba4;
+    }
+    .boot-gate .bg-tag b { color: #c9cdd6; font-weight: 600; }
+
+    /* ---- Progress rail ---- */
     .boot-gate .bg-bar {
-      width: 220px; height: 4px; border-radius: 4px; overflow: hidden; margin-top: 6px;
-      background: rgba(255,255,255,.08);
+      position: relative; width: 260px; height: 5px; margin-top: 30px;
+      border-radius: 999px; overflow: hidden;
+      background: rgba(255,255,255,.07);
+      box-shadow: inset 0 1px 2px rgba(0,0,0,.5);
     }
     .boot-gate .bg-bar span {
-      display: block; width: 40%; height: 100%; border-radius: 4px;
-      background: linear-gradient(90deg, #5865f2, #8b93ff);
-      animation: bgsweep 1.25s ease-in-out infinite;
+      position: absolute; inset: 0 auto 0 0; width: 42%; border-radius: 999px;
+      background: linear-gradient(90deg, #5865f2, #8b93ff 55%, #f0b232);
+      box-shadow: 0 0 14px rgba(88,101,242,.55);
+      animation: bgsweep 1.5s cubic-bezier(.45,.05,.55,.95) infinite;
     }
-    @keyframes bgsweep { 0% { transform: translateX(-120%); } 100% { transform: translateX(320%); } }
-    .boot-gate .bg-sub { font-size: 12.5px; color: var(--text-muted, #949ba4); min-height: 16px; }
-    .boot-gate .bg-foot {
-      display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; margin-top: 2px;
-      font-size: 11px; color: var(--text-faint, #80848e); letter-spacing: .02em;
+    .boot-gate .bg-bar span::after {
+      content: ''; position: absolute; inset: 0;
+      background: linear-gradient(90deg, transparent, rgba(255,255,255,.55), transparent);
+      animation: bgshine 1.5s ease-in-out infinite;
     }
-    .boot-gate .bg-foot span { display: inline-flex; align-items: center; gap: 6px; }
-    .boot-gate .bg-foot span::before { content: ''; width: 4px; height: 4px; border-radius: 50%; background: #23a55a; }
-    /* Shown when the free Render instance is waking from sleep. */
-    .boot-gate.waking .bg-bar span { animation-duration: 2.2s; }
-    .boot-gate.waking .bg-sub { color: var(--text-normal, #dbdee1); }
-    .boot-gate.waking .bg-logo { animation-duration: 1.8s; }
+    @keyframes bgsweep { 0% { transform: translateX(-110%); } 100% { transform: translateX(340%); } }
+    @keyframes bgshine { 0%,100% { opacity: .2; } 50% { opacity: .9; } }
+
+    /* ---- Status line ---- */
+    .boot-gate .bg-status {
+      display: inline-flex; align-items: center; gap: 9px; margin-top: 18px;
+      font-size: 12.5px; color: #9aa0aa; min-height: 18px;
+    }
+    .boot-gate .bg-pulse {
+      width: 7px; height: 7px; border-radius: 50%; background: #23a55a;
+      box-shadow: 0 0 0 0 rgba(35,165,90,.55);
+      animation: bgpulse 1.8s ease-out infinite;
+    }
+    @keyframes bgpulse {
+      0% { box-shadow: 0 0 0 0 rgba(35,165,90,.5); }
+      70% { box-shadow: 0 0 0 8px rgba(35,165,90,0); }
+      100% { box-shadow: 0 0 0 0 rgba(35,165,90,0); }
+    }
+
+    /* ---- Feature chips ---- */
+    .boot-gate .bg-chips {
+      display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-top: 26px;
+    }
+    .boot-gate .bg-chip {
+      display: inline-flex; align-items: center; gap: 7px;
+      padding: 6px 12px; border-radius: 999px;
+      font-size: 11.5px; font-weight: 600; letter-spacing: .02em; color: #aeb4bf;
+      background: rgba(255,255,255,.035);
+      border: 1px solid rgba(255,255,255,.07);
+    }
+    .boot-gate .bg-chip::before {
+      content: ''; width: 5px; height: 5px; border-radius: 50%;
+      background: currentColor; opacity: .8;
+    }
+    .boot-gate .bg-chip:nth-child(1) { color: #8b93ff; }
+    .boot-gate .bg-chip:nth-child(2) { color: #4fdc8b; }
+    .boot-gate .bg-chip:nth-child(3) { color: #f0b232; }
+
+    /* ---- Footer meta ---- */
+    .boot-gate .bg-meta {
+      position: absolute; left: 0; right: 0; bottom: 26px;
+      display: flex; align-items: center; justify-content: center; gap: 14px;
+      font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: #5c616b;
+    }
+    .boot-gate .bg-meta span { display: inline-flex; align-items: center; gap: 6px; }
+    .boot-gate .bg-meta span::before {
+      content: ''; width: 4px; height: 4px; border-radius: 50%; background: #3a3e47;
+    }
+    .boot-gate .bg-meta .ver { color: #7b818c; }
+
+    /* Cold-start (free Render instance waking) */
+    .boot-gate.waking .bg-bar span { animation-duration: 2.6s; }
+    .boot-gate.waking .bg-status { color: #dbdee1; }
+    .boot-gate.waking .bg-logo { animation-duration: 2.2s; }
+    .boot-gate.waking .bg-pulse { background: #f0b232; animation-name: bgpulseGold; }
+    @keyframes bgpulseGold {
+      0% { box-shadow: 0 0 0 0 rgba(240,178,50,.5); }
+      70% { box-shadow: 0 0 0 8px rgba(240,178,50,0); }
+      100% { box-shadow: 0 0 0 0 rgba(240,178,50,0); }
+    }
+
+    @media (max-width: 480px) {
+      .boot-gate .bg-brand { font-size: 29px; }
+      .boot-gate .bg-logo { width: 92px; height: 92px; }
+      .boot-gate .bg-bar { width: 220px; }
+      .boot-gate .bg-meta { gap: 10px; font-size: 10px; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .boot-gate::before, .boot-gate::after, .boot-gate .bg-logo,
+      .boot-gate .bg-logo::before, .boot-gate .bg-bar span,
+      .boot-gate .bg-bar span::after, .boot-gate .bg-pulse { animation: none !important; }
+    }
   </style>
 </head>
 <body data-theme="dark" data-bg="graphite">
@@ -84,12 +234,23 @@
   <div class="app-bg-layer" id="app-bg-layer" aria-hidden="true"></div>
   <div class="boot-gate" id="boot-gate" aria-hidden="true">
     <div class="bg-inner">
-      <div class="bg-logo"><img src="/icon-512.png" alt="Crossroads" /></div>
+      <div class="bg-logo" aria-hidden="true">
+        <span class="bg-mark"><i></i><i></i><i></i></span>
+      </div>
       <div class="bg-brand">Crossroads</div>
       <div class="bg-tag">hello, we now hangout here</div>
-      <div class="bg-bar"><span></span></div>
-      <div class="bg-sub">Connecting to your workspace</div>
-      <div class="bg-foot"><span>End-to-end encrypted</span><span>Servers</span><span>Messages</span></div>
+      <div class="bg-bar" role="progressbar" aria-label="Loading"><span></span></div>
+      <div class="bg-status"><span class="bg-pulse" aria-hidden="true"></span><span class="bg-sub">Connecting to your workspace</span></div>
+      <div class="bg-chips">
+        <span class="bg-chip">End-to-end encrypted</span>
+        <span class="bg-chip">Realtime voice</span>
+        <span class="bg-chip">Communities</span>
+      </div>
+    </div>
+    <div class="bg-meta">
+      <span>Crossroads</span>
+      <span class="ver">v2.0</span>
+      <span>Secure session</span>
     </div>
   </div>
   <div id="app">
