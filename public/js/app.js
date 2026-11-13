@@ -7501,6 +7501,41 @@ function openEditChannel(c) {
         </div>
       </div>
     </div>
+    <div class="ec-webhook">
+      <div class="ec-wh-head">
+        <div class="ec-head-icon">${icon('link')}</div>
+        <div class="ec-wh-headtext">
+          <div class="ec-section-title" style="margin:0">Webhook</div>
+          <p class="ec-wh-sub">Forward every message posted in this channel to an external URL \u2014 Discord, Slack, Zapier, or your own endpoint.</p>
+        </div>
+        <label class="ec-toggle ec-wh-toggle" for="ec-wh-enabled">
+          <span class="ec-toggle-text"><span class="ec-toggle-title">Connected</span></span>
+          <span class="re-switch"><input type="checkbox" id="ec-wh-enabled"><span class="re-switch-track"></span></span>
+        </label>
+      </div>
+      <div class="ec-wh-body">
+        <div class="field"><label>Webhook URL</label>
+          <input id="ec-wh-url" placeholder="https://discord.com/api/webhooks/\u2026" autocomplete="off" spellcheck="false"></div>
+        <div class="ec-wh-row">
+          <div class="field"><label>Webhook Name</label>
+            <input id="ec-wh-name" placeholder="Crossroads" maxlength="80">
+            <div class="hint">The display name messages will appear under.</div></div>
+          <div class="field"><label>Profile Picture</label>
+            <div class="ec-wh-avatar-row">
+              <div class="ec-wh-avatar" id="ec-wh-avatar">${icon('user')}</div>
+              <button class="btn secondary" id="ec-wh-upload">${icon('image')} Upload</button>
+              <button class="btn ghost" id="ec-wh-remove">Remove</button>
+              <input type="file" id="ec-wh-file" accept="image/*" class="hidden">
+            </div>
+          </div>
+        </div>
+        <div class="ec-wh-status" id="ec-wh-status"></div>
+        <div class="ec-wh-actions">
+          <button class="btn secondary" id="ec-wh-test">${icon('send')} Send test</button>
+          <button class="btn danger ghost" id="ec-wh-disconnect">Disconnect</button>
+        </div>
+      </div>
+    </div>
     <div class="modal-actions ec-actions">
       <button class="btn danger ghost" id="ec-delete">${icon('trash')} Delete Channel</button>
       <span style="flex:1"></span>
@@ -7512,6 +7547,62 @@ function openEditChannel(c) {
   $('ec-delete').addEventListener('click', () => { closeModal(); deleteChannel(c); });
   $('ec-up').addEventListener('click', async () => { await moveChannelBy(c, -1); closeModal(); });
   $('ec-down').addEventListener('click', async () => { await moveChannelBy(c, 1); closeModal(); });
+
+  /* ---- Webhook section ---- */
+  let whAvatar = null;
+  const whSetAvatar = (url) => {
+    whAvatar = url || null;
+    const box = $('ec-wh-avatar');
+    if (!box) return;
+    if (whAvatar) { box.innerHTML = `<img src="${escapeHtml(whAvatar)}" alt="">`; box.classList.add('has-img'); }
+    else { box.innerHTML = icon('user'); box.classList.remove('has-img'); }
+  };
+  const whStatus = (msg, kind) => {
+    const el = $('ec-wh-status');
+    if (!el) return;
+    el.textContent = msg || '';
+    el.className = 'ec-wh-status' + (kind ? ' ' + kind : '');
+  };
+  api('/api/servers/' + state.server.id + '/channels/' + c.id + '/webhook').then(({ webhook }) => {
+    if (!webhook) { whStatus('No webhook connected yet.', ''); return; }
+    if ($('ec-wh-url')) $('ec-wh-url').value = webhook.url || '';
+    if ($('ec-wh-name')) $('ec-wh-name').value = webhook.name || '';
+    if ($('ec-wh-enabled')) $('ec-wh-enabled').checked = !!webhook.enabled;
+    whSetAvatar(webhook.avatar_url);
+    whStatus(webhook.enabled ? 'Connected \u2014 messages are being forwarded.' : 'Saved but paused.', webhook.enabled ? 'ok' : '');
+  }).catch(() => whStatus('Could not load webhook settings.', 'err'));
+  $('ec-wh-upload').addEventListener('click', () => $('ec-wh-file').click());
+  $('ec-wh-file').addEventListener('change', async (e) => {
+    const f = e.target.files && e.target.files[0];
+    if (!f) return;
+    if (!/^image\//.test(f.type)) { toast('Choose an image file', 'error'); return; }
+    if (f.size > 8 * 1024 * 1024) { toast('Image must be under 8 MB', 'error'); return; }
+    try {
+      whStatus('Uploading\u2026', '');
+      const d = await uploadImage(f);
+      whSetAvatar(d.url);
+      whStatus('Picture ready \u2014 save to apply.', 'ok');
+    } catch (err) { whStatus('Upload failed: ' + err.message, 'err'); }
+    e.target.value = '';
+  });
+  $('ec-wh-remove').addEventListener('click', () => { whSetAvatar(null); whStatus('Picture removed \u2014 save to apply.', ''); });
+  $('ec-wh-disconnect').addEventListener('click', async () => {
+    try {
+      await api('/api/servers/' + state.server.id + '/channels/' + c.id + '/webhook', { method: 'DELETE' });
+      $('ec-wh-url').value = ''; $('ec-wh-name').value = ''; $('ec-wh-enabled').checked = false;
+      whSetAvatar(null); whStatus('Webhook disconnected.', '');
+      toast('Webhook disconnected', 'success');
+    } catch (err) { toast(err.message, 'error'); }
+  });
+  $('ec-wh-test').addEventListener('click', async () => {
+    whStatus('Sending test\u2026', '');
+    try {
+      await api('/api/servers/' + state.server.id + '/channels/' + c.id + '/webhook/test', { method: 'POST' });
+      whStatus('Test delivered \u2014 check your endpoint.', 'ok');
+      toast('Test message sent', 'success');
+    } catch (err) { whStatus(err.message, 'err'); toast(err.message, 'error'); }
+  });
+
   $('ec-save').addEventListener('click', async () => {
     const name = $('ec-name').value.trim().toLowerCase().replace(/\s+/g, '-');
     if (!name) { toast('Channel name required', 'error'); return; }
@@ -7530,6 +7621,24 @@ function openEditChannel(c) {
     }
     try {
       await api('/api/servers/' + state.server.id + '/channels/' + c.id, { method: 'PATCH', body: JSON.stringify(payload) });
+      /* Save the webhook alongside the channel when a URL is present. */
+      const whUrl = $('ec-wh-url') ? $('ec-wh-url').value.trim() : '';
+      if (whUrl) {
+        try {
+          await api('/api/servers/' + state.server.id + '/channels/' + c.id + '/webhook', {
+            method: 'PUT',
+            body: JSON.stringify({
+              url: whUrl,
+              name: $('ec-wh-name').value.trim(),
+              avatar_url: whAvatar,
+              enabled: !!($('ec-wh-enabled') && $('ec-wh-enabled').checked)
+            })
+          });
+        } catch (whErr) {
+          toast('Channel saved, but webhook failed: ' + whErr.message, 'error');
+          return;
+        }
+      }
       closeModal();
       toast('Channel updated', 'success');
     } catch (e) { toast(e.message, 'error'); }

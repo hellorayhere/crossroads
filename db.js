@@ -389,6 +389,22 @@ function migrate() {
     }
   }
 
+  /* 1c-2. Per-channel outgoing webhook. A channel has at most one webhook.
+     When `enabled` is 1 every message posted in the channel is forwarded to
+     `url`, using `name` + `avatar_url` as the webhook's display identity.
+     Purely additive: the table is created if missing and never dropped. */
+  try {
+    db.exec(`CREATE TABLE IF NOT EXISTS channel_webhooks (
+      channel_id TEXT PRIMARY KEY,
+      url TEXT NOT NULL,
+      name TEXT,
+      avatar_url TEXT,
+      enabled INTEGER DEFAULT 1,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    )`);
+  } catch (e) {}
+
   // 1d. Additive migration for server member roles (owner / admin / member).
   const memCols = db.prepare('PRAGMA table_info(server_members)').all().map(c => c.name);
   if (!memCols.includes('role')) {
