@@ -4290,6 +4290,76 @@ function videoPlayerNode(url, name) {
   return player;
 }
 
+/* Decide whether a video attachment is genuinely unavailable (the file is
+   really gone) or just hit a transient network hiccup. Render's free tier can
+   cold-start or briefly stall, which used to fire the <video> "error" event and
+   permanently replace a perfectly good player with a "Video unavailable" card.
+   We now only show that card when a HEAD/GET probe confirms the file is truly
+   missing (404/410); any other failure is retried a few times first. */
+function bindVideoAvailability(player, wrap, url, name, sizeText) {
+  const video = player.querySelector('video');
+  if (!video) return;
+  let attempts = 0;
+  let settled = false;
+
+  const showMissing = () => {
+    if (settled || !wrap.isConnected) return;
+    settled = true;
+    wrap.classList.remove('video-attachment');
+    wrap.classList.add('attachment-missing');
+    wrap.innerHTML = `<div class="file-card missing"><div class="fi">${icon('film')}</div><div class="fc-meta"><span class="missing-name">${escapeHtml(name)}</span><div class="fsize">Video unavailable \u2022 ${escapeHtml(sizeText || 'file missing')}</div></div></div>`;
+  };
+
+  /* Probe the URL to learn the real HTTP status. Only a definitive 404/410
+     means the file is gone; anything else (network error, 5xx, timeout) is
+     treated as transient and retried. */
+  const probe = async () => {
+    try {
+      let res = await fetch(url, { method: 'HEAD', cache: 'no-store' });
+      /* Some static hosts don't answer HEAD; fall back to a ranged GET. */
+      if (res.status === 405 || res.status === 501) {
+        res = await fetch(url, { method: 'GET', headers: { Range: 'bytes=0-0' }, cache: 'no-store' });
+      }
+      if (res.status === 404 || res.status === 410) { showMissing(); return true; }
+      return false;
+    } catch (e) {
+      return false; /* network hiccup - not proof the file is missing */
+    }
+  };
+
+  const recover = async () => {
+    if (settled) return;
+    attempts++;
+    const gone = await probe();
+    if (gone || settled) return;
+    if (attempts >= 4) {
+      /* Still failing but never got a 404: keep the player rather than lie
+         about the file being gone. A later play attempt can still succeed. */
+      return;
+    }
+    /* Reload the source after a short backoff (transient cold-start). */
+    setTimeout(() => {
+      if (settled || !video.isConnected) return;
+      try {
+        const src = video.getAttribute('src');
+        video.removeAttribute('src');
+        video.load();
+        video.setAttribute('src', src);
+        video.load();
+      } catch (e) { /* ignore */ }
+      recover();
+    }, 800 * attempts);
+  };
+
+  video.addEventListener('error', () => {
+    if (settled) return;
+    /* MEDIA_ERR_ABORTED (1) is usually our own src reset - ignore it. */
+    const code = video.error ? video.error.code : 0;
+    if (code === 1) return;
+    recover();
+  });
+}
+
 function attachmentNode(m) {
   const wrap = document.createElement('div');
   wrap.className = 'attachment';
@@ -4318,13 +4388,7 @@ function attachmentNode(m) {
        reveals a full custom control bar (seek, volume, fullscreen). */
     wrap.classList.add('video-attachment');
     const vp = videoPlayerNode(url, m.attachment_name || '');
-    const vEl = vp.querySelector('video');
-    if (vEl) vEl.addEventListener('error', () => {
-      if (!vp.isConnected) return;
-      wrap.classList.remove('video-attachment');
-      wrap.classList.add('attachment-missing');
-      wrap.innerHTML = `<div class="file-card missing"><div class="fi">${icon('film')}</div><div class="fc-meta"><span class="missing-name">${escapeHtml(m.attachment_name || 'video')}</span><div class="fsize">Video unavailable \u2022 ${escapeHtml(sizeText || 'file missing')}</div></div></div>`;
-    });
+    bindVideoAvailability(vp, wrap, url, m.attachment_name || 'video', sizeText);
     wrap.appendChild(vp);
     if (sizeText) wrap.insertAdjacentHTML('beforeend', `<span class="att-size">${sizeText}</span>`);
   } else if (t.startsWith('audio/')) {
