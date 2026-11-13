@@ -1050,7 +1050,7 @@ async function e2eInit() {
         const record = { priv: privJwk, pub: pubJwk, keyId: e2e.keyId };
         localStorage.setItem(e2eStorageKey(), JSON.stringify(record));
         ring.push(record);
-        e2e.keyring.unshift({ priv: kp.privateKey, pub: pubJwk, keyId: e2e.keyId });
+        e2e.keyring.unshift({ priv: kp.privateKey, pub: pubJwk, keyId: e2e.keyId, privJwk });
       } catch (err) {
         console.warn('[e2e] key generation failed', err);
         e2e.ready = null;
@@ -1119,26 +1119,38 @@ async function e2eEscrowDeriveKey(password, salt, iter) {
   );
 }
 
-async function e2eMakeEscrow(password) {
-  if (!password || !e2e.privJwk) return null;
+async function e2eMakeEscrowFor(privJwk, password) {
+  if (!password || !privJwk) return null;
   try {
     const salt = crypto.getRandomValues(new Uint8Array(16));
     const iv = crypto.getRandomValues(new Uint8Array(12));
     const key = await e2eEscrowDeriveKey(password, salt, E2E_ESCROW_ITER);
-    const ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, new TextEncoder().encode(JSON.stringify(e2e.privJwk)));
+    const ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, new TextEncoder().encode(JSON.stringify(privJwk)));
     return { ct: e2eB64e(ct), iv: e2eB64e(iv), salt: e2eB64e(salt), iter: E2E_ESCROW_ITER, kdf: 'pbkdf2-sha256' };
   } catch (e) { console.warn('[e2e] escrow build failed', e); return null; }
 }
 
-/* Upload an encrypted backup of the CURRENT key (idempotent). */
+/* Upload an encrypted backup of EVERY key this browser holds (current + any
+   older keys in the keyring), so no held key is ever lost when the device
+   changes. Idempotent; safe to call on each sign-in. */
 async function e2eEscrowSync(password) {
-  if (!password || !e2e.keyId || !e2e.pub || !e2e.privJwk) return false;
-  try {
-    const escrow = await e2eMakeEscrow(password);
-    if (!escrow) return false;
-    await api('/api/e2e/keys', { method: 'POST', body: JSON.stringify({ key_id: e2e.keyId, public_jwk: JSON.stringify(e2e.pub), escrow }) });
-    return true;
-  } catch (e) { console.warn('[e2e] escrow sync failed', e && e.message); return false; }
+  if (!password) return false;
+  const targets = [];
+  const seen = new Set();
+  if (e2e.keyId && e2e.pub && e2e.privJwk) { targets.push({ keyId: e2e.keyId, pub: e2e.pub, privJwk: e2e.privJwk }); seen.add(e2e.keyId); }
+  for (const k of (e2e.keyring || [])) {
+    if (k && k.keyId && k.pub && k.privJwk && !seen.has(k.keyId)) { targets.push({ keyId: k.keyId, pub: k.pub, privJwk: k.privJwk }); seen.add(k.keyId); }
+  }
+  let any = false;
+  for (const t of targets) {
+    try {
+      const escrow = await e2eMakeEscrowFor(t.privJwk, password);
+      if (!escrow) continue;
+      await api('/api/e2e/keys', { method: 'POST', body: JSON.stringify({ key_id: t.keyId, public_jwk: JSON.stringify(t.pub), escrow }) });
+      any = true;
+    } catch (e) { console.warn('[e2e] escrow sync failed for', t.keyId, e && e.message); }
+  }
+  return any;
 }
 
 /* Restore every escrowed key this account owns, using the password just used to
