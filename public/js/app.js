@@ -5264,29 +5264,64 @@ function renderAttachmentPreview() {
     thumb = `<div class="ap-file">${icon('file')}</div>`;
   }
   const sizeText = fmtBytes(a.size);
-  const sub = [sizeText, isGif ? 'GIF' : (isImage ? 'Image' : (isVideo ? 'Video' : 'File'))].filter(Boolean).join(' \u2022 ');
+  const kindLabel = isGif ? 'GIF' : (isImage ? 'Image' : (isVideo ? 'Video' : 'File'));
+  const sub = [sizeText, kindLabel].filter(Boolean).join(' \u2022 ');
   const spoilerOn = !!a.spoiler;
   p.innerHTML = `
-    <div class="ap-main">
-      ${thumb}
-      <div class="ap-meta"><span class="ap-name">${escapeHtml(a.name || 'file')}</span>${sub ? `<span class="ap-sub">${escapeHtml(sub)}</span>` : ''}</div>
-      <button id="ap-remove" title="Remove">${icon('xmark')}</button>
-    </div>
-    <div class="ap-tools">
-      <button type="button" class="ap-tool${spoilerOn ? ' on' : ''}" id="ap-spoiler" title="Hide this attachment behind a spoiler until it is clicked">
-        ${icon('eye')}<span>Spoiler</span>
-      </button>
-      <label class="ap-desc">
-        ${icon('pencil')}
-        <input id="ap-desc" type="text" maxlength="200" placeholder="Add a description (optional)" value="${escapeHtml(a.description || '')}" autocomplete="off" spellcheck="false">
-      </label>
+    <div class="ap-card">
+      <div class="ap-main">
+        ${thumb}
+        <div class="ap-meta">
+          <span class="ap-name">${escapeHtml(a.name || 'file')}</span>
+          <span class="ap-sub"><span class="ap-kind">${escapeHtml(kindLabel)}</span>${sizeText ? `<i class="ap-dot"></i>${escapeHtml(sizeText)}` : ''}</span>
+        </div>
+        <div class="ap-actions">
+          <button type="button" class="ap-icon-btn" id="ap-view" title="Preview attachment" aria-label="Preview attachment">${icon('eye')}</button>
+          <button type="button" class="ap-icon-btn ap-danger" id="ap-remove" title="Remove attachment" aria-label="Remove attachment">${icon('xmark')}</button>
+        </div>
+      </div>
+      <div class="ap-options">
+        <div class="ap-options-head">
+          <span class="ap-options-title">${icon('sliders')}<span>Attachment options</span></span>
+          <span class="ap-options-hint">Optional</span>
+        </div>
+        <div class="ap-option-grid">
+          <div class="ap-option${spoilerOn ? ' is-on' : ''}" id="ap-option-spoiler">
+            <span class="ap-option-ico">${icon('eye')}</span>
+            <div class="ap-option-text">
+              <strong>Spoiler</strong>
+              <em>Hidden behind a blur until clicked</em>
+            </div>
+            <button type="button" class="toggle${spoilerOn ? ' on' : ''}" id="ap-spoiler" role="switch" aria-checked="${spoilerOn}" aria-label="Mark attachment as spoiler"></button>
+          </div>
+          <label class="ap-option ap-option-desc" for="ap-desc">
+            <span class="ap-option-ico">${icon('pencil')}</span>
+            <div class="ap-option-text">
+              <strong>Description</strong>
+              <em>Alt text shown under the media</em>
+            </div>
+            <input id="ap-desc" class="ap-desc-input" type="text" maxlength="200" placeholder="Add a description\u2026" value="${escapeHtml(a.description || '')}" autocomplete="off" spellcheck="false">
+          </label>
+        </div>
+      </div>
     </div>`;
+  const viewBtn = $('ap-view');
+  if (viewBtn) viewBtn.addEventListener('click', () => {
+    const cur = state.pendingAttachment;
+    if (!cur) return;
+    if (isImage) lightbox(cur.url, 'image', cur.name || '');
+    else if (isVideo) lightbox(cur.url, 'video', cur.name || '');
+    else window.open(cur.url, '_blank', 'noopener');
+  });
   $('ap-remove').addEventListener('click', clearAttachment);
   const spoilerBtn = $('ap-spoiler');
+  const spoilerWrap = $('ap-option-spoiler');
   if (spoilerBtn) spoilerBtn.addEventListener('click', () => {
     if (!state.pendingAttachment) return;
     state.pendingAttachment.spoiler = !state.pendingAttachment.spoiler;
     spoilerBtn.classList.toggle('on', state.pendingAttachment.spoiler);
+    spoilerBtn.setAttribute('aria-checked', String(!!state.pendingAttachment.spoiler));
+    if (spoilerWrap) spoilerWrap.classList.toggle('is-on', !!state.pendingAttachment.spoiler);
   });
   const descInput = $('ap-desc');
   if (descInput) descInput.addEventListener('input', () => {

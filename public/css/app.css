@@ -424,18 +424,58 @@ button:active, .rail-item:active, .channel:active, .dm-item:active, .member:acti
 .reply-bar .rb-text b { color: var(--text-normal); }
 .reply-bar button { color: var(--text-muted); font-size: 15px; }
 .reply-bar button:hover { color: var(--text-header); }
-.attach-preview { display: flex; align-items: center; gap: 14px; background: var(--card); border-radius: var(--radius) var(--radius) 0 0; padding: 12px 16px; border-bottom: 1px solid var(--divider); }
-.attach-preview img { width: 72px; height: 72px; border-radius: 8px; object-fit: contain; flex: 0 0 auto; background: var(--input-bg); }
-.attach-preview video { width: 72px; height: 72px; border-radius: 8px; object-fit: contain; flex: 0 0 auto; background: #000; }
-.attach-preview .ap-thumb { position: relative; flex: 0 0 auto; }
-.attach-preview .ap-thumb .ap-badge { position: absolute; bottom: 4px; left: 4px; font-size: 9px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: #fff; background: rgba(0,0,0,.6); padding: 1px 5px; border-radius: 4px; }
-.attach-preview .ap-file { width: 72px; height: 72px; border-radius: 8px; background: var(--brand); display: grid; place-items: center; color: #fff; flex: 0 0 auto; }
-.attach-preview .ap-file .ic { width: 30px; height: 30px; }
-.attach-preview .ap-meta { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.attach-preview {
+  display: block;
+  background: var(--card);
+  border-radius: var(--radius) var(--radius) 0 0;
+  border-bottom: 1px solid var(--divider);
+  padding: 12px 14px 14px;
+  animation: apIn .18s ease;
+}
+@keyframes apIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+
+/* --- header: thumbnail + file identity + quick actions --- */
+.attach-preview .ap-card { display: flex; flex-direction: column; gap: 12px; }
+.attach-preview .ap-main { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.attach-preview img { width: 56px; height: 56px; border-radius: 10px; object-fit: cover; flex: 0 0 auto; background: var(--input-bg); border: 1px solid var(--divider); }
+.attach-preview video { width: 56px; height: 56px; border-radius: 10px; object-fit: cover; flex: 0 0 auto; background: #000; border: 1px solid var(--divider); }
+.attach-preview .ap-thumb { position: relative; flex: 0 0 auto; line-height: 0; }
+.attach-preview .ap-thumb .ap-badge { position: absolute; bottom: 3px; left: 3px; font-size: 8.5px; font-weight: 800; letter-spacing: .05em; text-transform: uppercase; color: #fff; background: rgba(0,0,0,.72); padding: 1px 4px; border-radius: 4px; backdrop-filter: blur(2px); }
+.attach-preview .ap-file { width: 56px; height: 56px; border-radius: 10px; background: linear-gradient(135deg, var(--brand), color-mix(in srgb, var(--brand) 55%, #000)); display: grid; place-items: center; color: #fff; flex: 0 0 auto; }
+.attach-preview .ap-file .ic { width: 26px; height: 26px; }
+.attach-preview .ap-meta { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
 .attach-preview .ap-name { font-size: 14px; font-weight: 600; color: var(--text-header); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.attach-preview .ap-sub { font-size: 12px; color: var(--text-muted); }
-.attach-preview button { color: var(--text-muted); font-size: 16px; width: 30px; height: 30px; border-radius: 6px; display: grid; place-items: center; flex: 0 0 auto; }
-.attach-preview button:hover { color: var(--text-header); background: var(--hover); }
+.attach-preview .ap-sub { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-muted); }
+.attach-preview .ap-kind { font-weight: 600; color: var(--text-faint); text-transform: uppercase; font-size: 10.5px; letter-spacing: .04em; }
+.attach-preview .ap-dot { width: 3px; height: 3px; border-radius: 50%; background: var(--text-faint); display: inline-block; }
+.attach-preview .ap-actions { display: flex; align-items: center; gap: 4px; flex: 0 0 auto; }
+.attach-preview .ap-icon-btn { color: var(--text-muted); width: 32px; height: 32px; border-radius: 8px; display: grid; place-items: center; flex: 0 0 auto; transition: background .15s, color .15s; }
+.attach-preview .ap-icon-btn .ic { width: 17px; height: 17px; }
+.attach-preview .ap-icon-btn:hover { color: var(--text-header); background: var(--hover); }
+.attach-preview .ap-icon-btn.ap-danger:hover { color: #fff; background: var(--red); }
+
+/* --- options panel --- */
+.attach-preview .ap-options { border: 1px solid var(--divider); border-radius: var(--radius); background: color-mix(in srgb, var(--input-bg) 60%, transparent); padding: 9px 10px 10px; }
+.attach-preview .ap-options-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; padding: 0 2px; }
+.attach-preview .ap-options-title { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--text-faint); }
+.attach-preview .ap-options-title .ic { width: 13px; height: 13px; }
+.attach-preview .ap-options-hint { font-size: 11px; color: var(--text-faint); font-weight: 500; }
+.attach-preview .ap-option-grid { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1.35fr); gap: 8px; }
+@media (max-width: 720px) { .attach-preview .ap-option-grid { grid-template-columns: 1fr; } }
+.attach-preview .ap-option { display: flex; align-items: center; gap: 10px; min-width: 0; padding: 8px 10px; border-radius: 8px; background: var(--card); border: 1px solid transparent; transition: border-color .15s, background .15s; }
+.attach-preview .ap-option:hover { background: color-mix(in srgb, var(--card) 70%, var(--hover)); }
+.attach-preview .ap-option.is-on { border-color: color-mix(in srgb, var(--brand) 55%, transparent); background: color-mix(in srgb, var(--brand) 12%, var(--card)); }
+.attach-preview .ap-option-ico { width: 28px; height: 28px; border-radius: 7px; display: grid; place-items: center; flex: 0 0 auto; background: color-mix(in srgb, var(--brand) 18%, transparent); color: color-mix(in srgb, var(--brand) 70%, #fff); }
+.attach-preview .ap-option-ico .ic { width: 15px; height: 15px; }
+.attach-preview .ap-option.is-on .ap-option-ico { background: var(--brand); color: #fff; }
+.attach-preview .ap-option-text { display: flex; flex-direction: column; gap: 1px; min-width: 0; flex: 1; }
+.attach-preview .ap-option-text strong { font-size: 12.5px; font-weight: 600; color: var(--text-header); }
+.attach-preview .ap-option-text em { font-style: normal; font-size: 11px; color: var(--text-faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.attach-preview .ap-option-desc { cursor: text; }
+.attach-preview .ap-desc-input { flex: 0 0 46%; min-width: 0; max-width: 220px; height: 30px; padding: 0 10px; border-radius: 7px; background: var(--input-bg); border: 1px solid var(--divider); color: var(--text-normal); font: inherit; font-size: 12.5px; outline: none; transition: border-color .15s, box-shadow .15s; }
+.attach-preview .ap-desc-input::placeholder { color: var(--text-faint); }
+.attach-preview .ap-desc-input:focus { border-color: var(--brand); box-shadow: 0 0 0 3px color-mix(in srgb, var(--brand) 22%, transparent); }
+@media (max-width: 720px) { .attach-preview .ap-desc-input { flex: 1 1 auto; max-width: none; } }
 .composer-box { display: flex; align-items: flex-end; gap: 8px; background: var(--input-bg); border-radius: var(--radius); padding: 0 16px; }
 .composer-box.attached, .composer-box.replying { border-radius: 0 0 var(--radius) var(--radius); }
 .composer-box textarea { flex: 1; background: none; border: none; outline: none; resize: none; color: var(--text-normal); font-size: 16px; line-height: 1.375; padding: 11px 0; max-height: 50vh; }

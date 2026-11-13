@@ -9,6 +9,17 @@ const multer = require('multer');
 const { Server } = require('socket.io');
 
 const db = require('./db');
+
+/* Belt-and-braces schema self-heal. db.js already performs the additive
+   migrations, but if a restored database ever lands without the newest message
+   columns, message sending must never break. This is additive only. */
+try {
+  const _mcols = db.prepare('PRAGMA table_info(messages)').all().map(c => c.name);
+  if (!_mcols.includes('attachment_spoiler')) db.exec('ALTER TABLE messages ADD COLUMN attachment_spoiler INTEGER DEFAULT 0');
+  if (!_mcols.includes('attachment_description')) db.exec('ALTER TABLE messages ADD COLUMN attachment_description TEXT');
+  if (!_mcols.includes('content_plain')) db.exec('ALTER TABLE messages ADD COLUMN content_plain TEXT');
+} catch (e) { console.error('[migrate] message columns:', e.message); }
+
 const persist = require('./persist');
 const { newId, newInviteCode, randomColor, randomDiscriminator } = require('./util');
 
@@ -2229,7 +2240,7 @@ app.post('/api/channels/:id/messages', auth, (req, res) => {
       }
     }
   }
-  const { content, plain: plainIn, attachment_url, attachment_name, attachment_type, attachment_size, reply_to_id, mentions: mentionsIn, broadcast: broadcastIn } = req.body || {};
+  const { content, plain: plainIn, attachment_url, attachment_name, attachment_type, attachment_size, attachment_spoiler, attachment_description, reply_to_id, mentions: mentionsIn, broadcast: broadcastIn } = req.body || {};
   if ((!content || !content.trim()) && !attachment_url) return res.status(400).json({ error: 'Message cannot be empty' });
 
   const sSettings = getServerSettings(srv.id);
@@ -2451,7 +2462,7 @@ app.post('/api/dms/:id/messages', auth, (req, res) => {
   const dm = db.prepare('SELECT * FROM dm_channels WHERE id = ?').get(req.params.id);
   if (!dm || (dm.user1_id !== req.user.id && dm.user2_id !== req.user.id)) return res.status(404).json({ error: 'DM not found' });
   if (req.user.muted) return res.status(403).json({ error: 'You are muted by a platform administrator.' });
-  const { content, plain: plainIn, attachment_url, attachment_name, attachment_type, attachment_size, reply_to_id, mentions: mentionsIn } = req.body || {};
+  const { content, plain: plainIn, attachment_url, attachment_name, attachment_type, attachment_size, attachment_spoiler, attachment_description, reply_to_id, mentions: mentionsIn } = req.body || {};
   if ((!content || !content.trim()) && !attachment_url) return res.status(400).json({ error: 'Message cannot be empty' });
   const id = newId();
   const now = Date.now();
@@ -3532,7 +3543,7 @@ admin.post('/broadcast', (req, res) => {
   const kind = ['info', 'success', 'warning', 'danger'].includes((req.body || {}).kind) ? req.body.kind : 'info';
   if (!text) return res.status(400).json({ error: 'Message text is required' });
   const payload = { text, kind, at: Date.now(), from: req.user.username };
-  io.emit('system_notice', payload);
+  try { io.emit('system_notice', payload); } catch (e) { console.error('[admin] broadcast emit:', e.message); }
   adminAudit(req, 'broadcast.send', 'platform', '', text);
   res.json({ ok: true, delivered: io.engine.clientsCount || 0 });
 });
@@ -3588,6 +3599,19 @@ app.get('/api/global-messages', auth, (req, res) => {
 /* ---------------- SPA fallback ---------------- */
 app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
+
+/* ---------------- Error handler ----------------
+   Always answer API calls with JSON so the client can show the real reason
+   instead of a generic "Request failed" banner. */
+app.use((err, req, res, next) => {
+  console.error('[error]', req.method, req.originalUrl, err && err.stack ? err.stack : err);
+  if (res.headersSent) return next(err);
+  const status = err && (err.status || err.statusCode) ? (err.status || err.statusCode) : 500;
+  if (req.originalUrl && req.originalUrl.startsWith('/api/')) {
+    return res.status(status).json({ error: (err && err.message) ? String(err.message) : 'Something went wrong' });
+  }
+  res.status(status).send('Something went wrong');
 });
 
 /* ---------------- Socket.io ---------------- */

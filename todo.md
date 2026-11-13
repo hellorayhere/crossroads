@@ -1,22 +1,22 @@
-# Round 18 — UI/UX overhaul (additive only, no data loss)
+# Crossroads — current round
 
-## Core fixes
-- [x] GIF avatars animate only on message hover / profile click
-- [x] Space server rail icons when user has >1 server
-- [x] Admin Console "CR" icon -> favicon image
-- [x] Site-wide lag/delay reductions (batched GIF poster observer, waiter map)
-- [x] Revamp Appearance -> Scale UI (grouped controls, 3x3 alignment pad, slider fill)
-- [x] Custom Status inline beside avatar/name (Discord-style)
-- [x] Server banner taller (340 -> 440px)
-- [x] Upload options: spoiler + description tools
-- [x] Notifications use live avatars/GIFs in real time
-- [x] Admin "Manage": new tab with platform controls, live broadcast, storage health, bulk maintenance
-- [x] Maintenance UI: remove ONLY the "Live" pill
-- [x] GIF support for server icons/banners (50 MB)
-- [x] Profile avatar/GIF click -> zoom
-- [x] Emoji board: all 1724 emojis across 9 categories
-- [x] Fix aspect-ratio distortion for all images/GIFs (flex-shrink squash + lightbox clamp)
+## A. Fix "Request failed" on send (root cause)
+- [x] Diagnose: both message routes used `attachment_spoiler`/`attachment_description` in the INSERT without destructuring them from `req.body` -> ReferenceError -> 500 HTML -> generic "Request failed"
+- [x] Add the two fields to the channel + DM destructures
+- [x] Add startup schema self-heal in server.js (additive only)
+- [x] Add JSON error handler so API failures return a real message
+- [x] Wrap admin broadcast `io.emit` in try/catch
+- [x] Local E2E test: plain message, attachment message, DM attachment message all 200
 
-## Ship
+## B. Attachment options UI polish
+- [x] Rebuild `renderAttachmentPreview` markup: file header + quick actions + options panel
+- [x] Spoiler as a real site toggle switch with icon tile + description
+- [x] Description as a styled inline field with icon + helper text
+- [x] Preview + remove icon buttons with hover/danger states
+- [x] Responsive grid (stacks under 720px), light/dark theme tokens
+- [x] Visual verification in browser (2-col grid, 40px toggle, no overflow)
+
+## C. Ship
 - [ ] Commit + push to main
-- [ ] Trigger Render deploy + verify live
+- [ ] Trigger Render deploy, poll until live
+- [ ] Verify live site loads and CSS contains new rules
