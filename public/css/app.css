@@ -158,6 +158,13 @@ button:active, .rail-item:active, .channel:active, .dm-item:active, .member:acti
 .rail-item.add:hover, .rail-item.explore:hover { background: #404249; color: #fff; }
 /* Drag-to-reorder server icons */
 .rail-item[draggable="true"] { cursor: grab; }
+/* The server stack needs its own vertical rhythm: without it every tile sits
+   flush against the next one, which is what made multi-server rails look
+   cramped. Each tile is spaced normally, and when the user is in more than one
+   server (.many) every tile gains an extra 5% of breathing room. */
+.rail-servers { display: flex; flex-direction: column; align-items: center; width: 100%; gap: 12px; }
+.server-rail.many .rail-servers { gap: calc(12px * 1.05); }
+.server-rail.many .rail-servers .rail-item { margin-bottom: 5%; }
 .rail-item.rail-dragging-item { opacity: .4; cursor: grabbing; }
 .rail-item.drop-before { box-shadow: inset 0 3px 0 0 #fff; }
 .rail-item.drop-after { box-shadow: inset 0 -3px 0 0 #fff; }
@@ -4604,3 +4611,7 @@ body[data-theme="light"] .update-card { box-shadow: 0 24px 70px rgba(0, 0, 0, .2
   .ss-panel-pad { padding: 14px 14px 22px; }
   .ss-group-body .ss-field-grid { grid-template-columns: 1fr; }
 }
+
+/* Compact button used inside dense admin lists (e.g. join requests). */
+.btn.btn-sm { padding: 4px 10px; font-size: 12px; line-height: 1.4; gap: 5px; border-radius: 6px; }
+.btn.btn-sm svg { width: 14px; height: 14px; }

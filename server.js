@@ -676,8 +676,29 @@ const SETTINGS_DEFAULTS = {
   nsfw: 0,
   invite_expiry: 0,
   invite_max_uses: 0,
-  allow_attachments: 1
+  allow_attachments: 1,
+  join_requests: 0
 };
+
+/* Hard membership limits. A user may belong to at most 50 servers and own at
+   most 5 of their own. Enforced on every path that adds a membership so the
+   numbers can never be exceeded by racing requests. */
+const MAX_SERVERS_PER_USER = 50;
+const MAX_OWNED_SERVERS = 5;
+
+function joinedServerCount(userId) {
+  return db.prepare('SELECT COUNT(*) c FROM server_members WHERE user_id = ?').get(userId).c;
+}
+function ownedServerCount(userId) {
+  return db.prepare('SELECT COUNT(*) c FROM servers WHERE owner_id = ?').get(userId).c;
+}
+/* Returns an error string when the user cannot join another server. */
+function joinLimitError(userId) {
+  if (joinedServerCount(userId) >= MAX_SERVERS_PER_USER) {
+    return `You are in the maximum of ${MAX_SERVERS_PER_USER} servers. Leave one before joining another.`;
+  }
+  return null;
+}
 
 /* Fetch a server's settings row, creating it (with defaults) on first use.
    Purely additive — never touches existing data. */
@@ -2017,6 +2038,10 @@ app.post('/api/servers', auth, (req, res) => {
   let { name, icon, icon_url, banner_url, description } = req.body || {};
   name = (name || '').trim();
   if (!name) return res.status(400).json({ error: 'Server name required' });
+  /* Ownership cap: a user may own at most 5 servers of their own. */
+  if (ownedServerCount(req.user.id) >= MAX_OWNED_SERVERS) {
+    return res.status(403).json({ error: `You can own a maximum of ${MAX_OWNED_SERVERS} servers.` });
+  }
   const id = newId();
   const now = Date.now();
   db.prepare('INSERT INTO servers (id, name, icon, icon_url, banner_url, description, owner_id, created_at) VALUES (?,?,?,?,?,?,?,?)')
@@ -2028,7 +2053,7 @@ app.post('/api/servers', auth, (req, res) => {
 });
 
 app.post('/api/servers/join', auth, (req, res) => {
-  let { invite } = req.body || {};
+  let { invite, message } = req.body || {};
   invite = (invite || '').trim();
   if (!invite) return res.status(400).json({ error: 'Invite code required' });
   const code = normalizeInviteCode(invite);
@@ -2036,29 +2061,109 @@ app.post('/api/servers/join', auth, (req, res) => {
   // 1) New-style invite codes (16-char, may expire / be limited).
   const found = getInvite(code);
   let srv = null;
+  let inviteCode = '';
   if (found) {
     if (found.expired) return res.status(410).json({ error: 'This invite has expired' });
     if (found.maxed) return res.status(410).json({ error: 'This invite has reached its maximum uses' });
     srv = db.prepare('SELECT * FROM servers WHERE id = ?').get(found.invite.server_id);
     if (!srv) return res.status(404).json({ error: 'Invalid invite code' });
-    if (isBanned(srv.id, req.user.id)) return res.status(403).json({ error: 'You are banned from this server' });
-    const already = db.prepare('SELECT 1 FROM server_members WHERE server_id = ? AND user_id = ?').get(srv.id, req.user.id);
-    if (!already) {
-      db.prepare('INSERT INTO server_members (server_id, user_id, joined_at, role) VALUES (?,?,?,?)').run(srv.id, req.user.id, Date.now(), 'member');
-      db.prepare('UPDATE invites SET uses = uses + 1 WHERE code = ?').run(found.invite.code);
-    }
-    return res.json({ server: publicServer(srv), invite: { code: found.invite.code, server_id: srv.id } });
+    inviteCode = found.invite.code;
+  } else {
+    // 2) Legacy: raw server id (or a link ending in the server id).
+    srv = db.prepare('SELECT * FROM servers WHERE id = ?').get(code);
+    if (!srv) return res.status(404).json({ error: 'Invalid invite code' });
+  }
+  if (isBanned(srv.id, req.user.id)) return res.status(403).json({ error: 'You are banned from this server' });
+
+  const already = db.prepare('SELECT 1 FROM server_members WHERE server_id = ? AND user_id = ?').get(srv.id, req.user.id);
+  if (already) {
+    return res.json({ server: publicServer(srv), invite: inviteCode ? { code: inviteCode, server_id: srv.id } : undefined });
   }
 
-  // 2) Legacy: raw server id (or a link ending in the server id).
-  srv = db.prepare('SELECT * FROM servers WHERE id = ?').get(code);
-  if (!srv) return res.status(404).json({ error: 'Invalid invite code' });
-  if (isBanned(srv.id, req.user.id)) return res.status(403).json({ error: 'You are banned from this server' });
-  const existing = db.prepare('SELECT 1 FROM server_members WHERE server_id = ? AND user_id = ?').get(srv.id, req.user.id);
-  if (!existing) {
-    db.prepare('INSERT INTO server_members (server_id, user_id, joined_at, role) VALUES (?,?,?,?)').run(srv.id, req.user.id, Date.now(), 'member');
+  /* Membership cap is checked before anything else so a user who is already in
+     50 servers cannot queue up requests they could never be approved for. */
+  const limitErr = joinLimitError(req.user.id);
+  if (limitErr) return res.status(403).json({ error: limitErr });
+
+  /* Servers with "require approval to join" enabled do not admit anyone
+     directly: a pending join request is created instead and an owner/admin has
+     to approve it. Re-requesting while a request is pending is a no-op. */
+  const st = getServerSettings(srv.id);
+  if (st.join_requests) {
+    const existing = db.prepare("SELECT * FROM join_requests WHERE server_id = ? AND user_id = ? AND status = 'pending'").get(srv.id, req.user.id);
+    if (!existing) {
+      const rid = newId();
+      db.prepare('INSERT INTO join_requests (id, server_id, user_id, message, status, created_at, invite_code) VALUES (?,?,?,?,?,?,?)')
+        .run(rid, srv.id, req.user.id, String(message || '').slice(0, 300), 'pending', Date.now(), inviteCode);
+      /* Let every owner/admin know something is waiting on them. */
+      const admins = db.prepare('SELECT user_id FROM server_members WHERE server_id = ?').all(srv.id)
+        .filter(r => isServerAdmin(srv, r.user_id));
+      for (const a of admins) {
+        createNotification(a.user_id, 'join_request', { server_id: srv.id, server_name: srv.name, request_id: rid, user: publicUser(req.user) });
+      }
+    }
+    return res.json({ pending: true, server: publicServer(srv) });
   }
-  res.json({ server: publicServer(srv) });
+
+  db.prepare('INSERT INTO server_members (server_id, user_id, joined_at, role) VALUES (?,?,?,?)').run(srv.id, req.user.id, Date.now(), 'member');
+  if (found) db.prepare('UPDATE invites SET uses = uses + 1 WHERE code = ?').run(found.invite.code);
+  res.json({ server: publicServer(srv), invite: inviteCode ? { code: inviteCode, server_id: srv.id } : undefined });
+});
+
+/* ---------------- Join requests (approval-to-join) ---------------- */
+
+/* Pending requests for a server. Owners/admins only. */
+app.get('/api/servers/:id/join-requests', auth, (req, res) => {
+  const srv = getServerForUser(req.params.id, req.user.id);
+  if (!srv) return res.status(404).json({ error: 'Server not found' });
+  if (!isServerAdmin(srv, req.user.id)) return res.status(403).json({ error: 'You need to be an owner or admin' });
+  const rows = db.prepare("SELECT * FROM join_requests WHERE server_id = ? AND status = 'pending' ORDER BY created_at ASC").all(srv.id);
+  const requests = rows.map(r => {
+    const u = db.prepare('SELECT * FROM users WHERE id = ?').get(r.user_id);
+    return {
+      id: r.id,
+      user: u ? publicUser(u) : { id: r.user_id, username: 'Unknown user' },
+      message: r.message || '',
+      created_at: r.created_at
+    };
+  });
+  res.json({ requests });
+});
+
+/* The caller's own pending request for a server (used to show "Pending"). */
+app.get('/api/servers/:id/join-request/mine', auth, (req, res) => {
+  const row = db.prepare("SELECT * FROM join_requests WHERE server_id = ? AND user_id = ? AND status = 'pending'").get(req.params.id, req.user.id);
+  res.json({ pending: !!row, request: row ? { id: row.id, message: row.message || '', created_at: row.created_at } : null });
+});
+
+/* Approve or deny a request. Owners/admins only. */
+app.post('/api/servers/:id/join-requests/:rid', auth, (req, res) => {
+  const srv = getServerForUser(req.params.id, req.user.id);
+  if (!srv) return res.status(404).json({ error: 'Server not found' });
+  if (!isServerAdmin(srv, req.user.id)) return res.status(403).json({ error: 'You need to be an owner or admin' });
+  const action = (req.body || {}).action === 'deny' ? 'deny' : 'approve';
+  const jr = db.prepare('SELECT * FROM join_requests WHERE id = ? AND server_id = ?').get(req.params.rid, srv.id);
+  if (!jr) return res.status(404).json({ error: 'Request not found' });
+  if (jr.status !== 'pending') return res.status(400).json({ error: 'This request was already handled' });
+
+  if (action === 'deny') {
+    db.prepare("UPDATE join_requests SET status = 'denied', resolved_at = ?, resolved_by = ? WHERE id = ?").run(Date.now(), req.user.id, jr.id);
+    createNotification(jr.user_id, 'join_request_denied', { server_id: srv.id, server_name: srv.name });
+    return res.json({ ok: true, status: 'denied' });
+  }
+
+  const limitErr = joinLimitError(jr.user_id);
+  if (limitErr) return res.status(400).json({ error: limitErr });
+  if (isBanned(srv.id, jr.user_id)) return res.status(400).json({ error: 'That user is banned from this server' });
+
+  const already = db.prepare('SELECT 1 FROM server_members WHERE server_id = ? AND user_id = ?').get(srv.id, jr.user_id);
+  if (!already) {
+    db.prepare('INSERT INTO server_members (server_id, user_id, joined_at, role) VALUES (?,?,?,?)').run(srv.id, jr.user_id, Date.now(), 'member');
+    if (jr.invite_code) db.prepare('UPDATE invites SET uses = uses + 1 WHERE code = ?').run(jr.invite_code);
+  }
+  db.prepare("UPDATE join_requests SET status = 'approved', resolved_at = ?, resolved_by = ? WHERE id = ?").run(Date.now(), req.user.id, jr.id);
+  createNotification(jr.user_id, 'join_request_approved', { server_id: srv.id, server_name: srv.name });
+  res.json({ ok: true, status: 'approved' });
 });
 
 app.get('/api/servers/:id', auth, (req, res) => {
@@ -2612,16 +2717,17 @@ app.patch('/api/servers/:id/settings', auth, (req, res) => {
     nsfw: 'nsfw' in body ? (body.nsfw ? 1 : 0) : cur.nsfw,
     invite_expiry: 'invite_expiry' in body ? Math.max(0, Math.min(2592000, parseInt(body.invite_expiry, 10) || 0)) : cur.invite_expiry,
     invite_max_uses: 'invite_max_uses' in body ? Math.max(0, Math.min(1000, parseInt(body.invite_max_uses, 10) || 0)) : cur.invite_max_uses,
-    allow_attachments: 'allow_attachments' in body ? (body.allow_attachments ? 1 : 0) : cur.allow_attachments
+    allow_attachments: 'allow_attachments' in body ? (body.allow_attachments ? 1 : 0) : cur.allow_attachments,
+    join_requests: 'join_requests' in body ? (body.join_requests ? 1 : 0) : cur.join_requests
   };
   db.prepare(`UPDATE server_settings SET verification_level=?, explicit_filter=?, allow_everyone=?, default_notifications=?, slow_mode=?, system_channel_id=?,
       welcome_message=?, rules=?, allow_member_invites=?, afk_channel_id=?, afk_timeout=?, require_2fa=?, raid_protection=?, system_welcome=?, default_role_id=?, invite_splash=?, community_name=?,
-      discoverable=?, automod=?, automod_links=?, automod_spam=?, mention_limit=?, nsfw=?, invite_expiry=?, invite_max_uses=?, allow_attachments=?, updated_at=?
+      discoverable=?, automod=?, automod_links=?, automod_spam=?, mention_limit=?, nsfw=?, invite_expiry=?, invite_max_uses=?, allow_attachments=?, join_requests=?, updated_at=?
       WHERE server_id=?`)
     .run(next.verification_level, next.explicit_filter, next.allow_everyone, next.default_notifications, next.slow_mode, next.system_channel_id,
       next.welcome_message, next.rules, next.allow_member_invites, next.afk_channel_id, next.afk_timeout, next.require_2fa, next.raid_protection,
       next.system_welcome, next.default_role_id, next.invite_splash, next.community_name,
-      next.discoverable, next.automod, next.automod_links, next.automod_spam, next.mention_limit, next.nsfw, next.invite_expiry, next.invite_max_uses, next.allow_attachments, Date.now(), srv.id);
+      next.discoverable, next.automod, next.automod_links, next.automod_spam, next.mention_limit, next.nsfw, next.invite_expiry, next.invite_max_uses, next.allow_attachments, next.join_requests, Date.now(), srv.id);
   addAudit(srv.id, req.user.id, 'settings_update', null, '');
   io.emit('server_settings_update', { server_id: srv.id, settings: getServerSettings(srv.id) });
   res.json({ settings: getServerSettings(srv.id) });
@@ -2933,12 +3039,16 @@ app.get('/api/invites/:code', auth, (req, res) => {
   if (!srv) return res.status(404).json({ error: 'Invalid invite code' });
   const stats = serverStats(srv.id);
   const alreadyMember = !!db.prepare('SELECT 1 FROM server_members WHERE server_id = ? AND user_id = ?').get(srv.id, req.user.id);
+  const invSettings = getServerSettings(srv.id);
+  const pendingRequest = !!db.prepare("SELECT 1 FROM join_requests WHERE server_id = ? AND user_id = ? AND status = 'pending'").get(srv.id, req.user.id);
   res.json({
     invite: invitePublic(found.invite),
     valid: found.valid,
     expired: found.expired,
     maxed: found.maxed,
     already_member: alreadyMember,
+    requires_approval: !!invSettings.join_requests,
+    request_pending: pendingRequest,
     server: {
       id: srv.id,
       name: srv.name,
@@ -3165,6 +3275,24 @@ function canAccessMessage(m, userId) {
   return null;
 }
 
+/* Pinning is a moderation action: in server channels only the owner, admins or
+   members with Manage Messages may pin/unpin. DMs stay open to both people in
+   the conversation. */
+function canPinMessage(m, userId) {
+  if (m.channel_id) {
+    const ch = db.prepare('SELECT * FROM channels WHERE id = ?').get(m.channel_id);
+    if (!ch) return false;
+    const srv = getServerForUser(ch.server_id, userId);
+    if (!srv) return false;
+    return isServerAdmin(srv, userId) || hasPerm(srv, userId, 'manage_messages');
+  }
+  if (m.dm_id) {
+    const dm = db.prepare('SELECT * FROM dm_channels WHERE id = ?').get(m.dm_id);
+    return !!dm && (dm.user1_id === userId || dm.user2_id === userId);
+  }
+  return false;
+}
+
 app.get('/api/channels/:id/pins', auth, (req, res) => {
   const ch = db.prepare('SELECT * FROM channels WHERE id = ?').get(req.params.id);
   if (!ch) return res.status(404).json({ error: 'Channel not found' });
@@ -3185,6 +3313,7 @@ app.post('/api/messages/:id/pin', auth, (req, res) => {
   const m = db.prepare('SELECT * FROM messages WHERE id = ?').get(req.params.id);
   if (!m) return res.status(404).json({ error: 'Message not found' });
   if (!canAccessMessage(m, req.user.id)) return res.status(403).json({ error: 'You cannot pin this message' });
+  if (!canPinMessage(m, req.user.id)) return res.status(403).json({ error: 'Only the server owner or admins can pin messages' });
   db.prepare('UPDATE messages SET pinned = 1 WHERE id = ?').run(m.id);
   const payload = { message_id: m.id, pinned: true, channel_id: m.channel_id, dm_id: m.dm_id };
   if (m.channel_id) io.to(`channel:${m.channel_id}`).emit('message_pin', payload);
@@ -3196,6 +3325,7 @@ app.delete('/api/messages/:id/pin', auth, (req, res) => {
   const m = db.prepare('SELECT * FROM messages WHERE id = ?').get(req.params.id);
   if (!m) return res.status(404).json({ error: 'Message not found' });
   if (!canAccessMessage(m, req.user.id)) return res.status(403).json({ error: 'You cannot unpin this message' });
+  if (!canPinMessage(m, req.user.id)) return res.status(403).json({ error: 'Only the server owner or admins can unpin messages' });
   db.prepare('UPDATE messages SET pinned = 0 WHERE id = ?').run(m.id);
   const payload = { message_id: m.id, pinned: false, channel_id: m.channel_id, dm_id: m.dm_id };
   if (m.channel_id) io.to(`channel:${m.channel_id}`).emit('message_pin', payload);

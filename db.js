@@ -177,6 +177,24 @@ CREATE TABLE IF NOT EXISTS server_settings (
   updated_at INTEGER
 );
 
+/* Join requests: servers can require owner/admin approval before an invite
+   actually admits someone. A row is created when a non-member tries to join a
+   server with the join_requests setting enabled; it stays 'pending' until an admin
+   approves or denies it. Purely additive — servers without the setting never
+   create rows and behave exactly as before. */
+CREATE TABLE IF NOT EXISTS join_requests (
+  id TEXT PRIMARY KEY,
+  server_id TEXT NOT NULL,
+  user_id TEXT NOT NULL,
+  message TEXT DEFAULT '',
+  status TEXT DEFAULT 'pending',
+  created_at INTEGER NOT NULL,
+  resolved_at INTEGER,
+  resolved_by TEXT,
+  invite_code TEXT DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_join_requests_server ON join_requests(server_id, status);
+
 /* Banned members. A ban removes the member and blocks them from rejoining. */
 CREATE TABLE IF NOT EXISTS server_bans (
   server_id TEXT NOT NULL,
@@ -336,6 +354,13 @@ function migrate() {
     try { db.exec("ALTER TABLE servers ADD COLUMN banner_position TEXT DEFAULT '50% 50%'"); } catch (e) {}
   }
 
+  /* Additive: remember which invite a join request came from so approving it
+     can consume one of that invite's uses, exactly like a normal join would. */
+  try {
+    const jrCols = db.prepare('PRAGMA table_info(join_requests)').all().map(c => c.name);
+    if (!jrCols.includes('invite_code')) db.exec("ALTER TABLE join_requests ADD COLUMN invite_code TEXT DEFAULT ''");
+  } catch (e) {}
+
   /* 1c-1b. Additive migration: richer per-server settings. These power the new
      Community tab (welcome message, rules, member invites, AFK channel, 2FA
      requirement, raid protection). Every column is added only when missing and
@@ -361,7 +386,8 @@ function migrate() {
     nsfw: 'INTEGER DEFAULT 0',
     invite_expiry: 'INTEGER DEFAULT 0',
     invite_max_uses: 'INTEGER DEFAULT 0',
-    allow_attachments: 'INTEGER DEFAULT 1'
+    allow_attachments: 'INTEGER DEFAULT 1',
+    join_requests: 'INTEGER DEFAULT 0'
   };
   for (const [col, def] of Object.entries(ssAdditions)) {
     if (!ssCols.includes(col)) {

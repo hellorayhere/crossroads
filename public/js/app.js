@@ -6607,18 +6607,23 @@ function openMemberContextMenu(x, y, m) {
 }
 
 function openMessageContextMenu(x, y, m) {
-  const items = [
-    { label: 'Add Reaction', icon: 'smile-plus', onClick: () => openReactionPickerAt(x, y, m.id) },
-    { label: 'Reply', icon: 'reply', onClick: () => setReplyTo(m) },
-    { label: m.pinned ? 'Unpin Message' : 'Pin Message', icon: 'pin', onClick: () => togglePin(m) },
-    { label: 'Copy Text', icon: 'copy', onClick: () => { navigator.clipboard.writeText(m.content || '').then(() => toast('Copied to clipboard', 'success')).catch(() => {}); } },
-    { label: 'Copy Message Link', icon: 'link', onClick: () => { navigator.clipboard.writeText(location.origin + '/app.html?msg=' + m.id).then(() => toast('Message link copied', 'success')).catch(() => {}); } }
-  ];
   const mine = m.author.id === me.id;
   /* Server owner / admins / Manage Messages can remove anyone's message,
      media or file in their server. DMs remain author-only. */
   const canModerate = !!(state.channel && state.server &&
     (state.server.owner_id === me.id || amIAdmin() || can('manage_messages') || can('manage_channels')));
+  /* Pinning is moderation-only inside server channels; in DMs both people in
+     the conversation can still pin. */
+  const canPin = state.channel ? canModerate : true;
+  const items = [
+    { label: 'Add Reaction', icon: 'smile-plus', onClick: () => openReactionPickerAt(x, y, m.id) },
+    { label: 'Reply', icon: 'reply', onClick: () => setReplyTo(m) }
+  ];
+  if (canPin) items.push({ label: m.pinned ? 'Unpin Message' : 'Pin Message', icon: 'pin', onClick: () => togglePin(m) });
+  items.push(
+    { label: 'Copy Text', icon: 'copy', onClick: () => { navigator.clipboard.writeText(m.content || '').then(() => toast('Copied to clipboard', 'success')).catch(() => {}); } },
+    { label: 'Copy Message Link', icon: 'link', onClick: () => { navigator.clipboard.writeText(location.origin + '/app.html?msg=' + m.id).then(() => toast('Message link copied', 'success')).catch(() => {}); } }
+  );
   if (mine || canModerate) {
     items.push({ sep: true });
     if (mine) items.push({ label: 'Edit Message', icon: 'pencil', onClick: () => editMessage(m) });
@@ -6772,6 +6777,9 @@ function notifInfo(n) {
   else if (n.type === 'here') { ico = 'megaphone'; plain = `${name} pinged @here ${where}`; html = `<b>${escapeHtml(name)}</b> pinged <b>@here</b> ${escapeHtml(where)}`; }
   else if (n.type === 'call') { ico = 'phone'; plain = `${name} is calling you`; html = `<b>${escapeHtml(name)}</b> is calling you`; }
   else if (n.type === 'call_out') { ico = 'phone'; plain = `You called ${name}`; html = `You called <b>${escapeHtml(name)}</b>`; }
+  else if (n.type === 'join_request') { ico = 'user-plus'; plain = `${name} asked to join ${d.server_name || 'your server'}`; html = `<b>${escapeHtml(name)}</b> asked to join <b>${escapeHtml(d.server_name || 'your server')}</b>`; }
+  else if (n.type === 'join_request_approved') { ico = 'check'; plain = `You were approved to join ${d.server_name || 'a server'}`; html = `You were approved to join <b>${escapeHtml(d.server_name || 'a server')}</b>`; }
+  else if (n.type === 'join_request_denied') { ico = 'xmark'; plain = `Your request to join ${d.server_name || 'a server'} was declined`; html = `Your request to join <b>${escapeHtml(d.server_name || 'a server')}</b> was declined`; }
   return { ico, plain, html, preview, user: u, where };
 }
 
@@ -6867,6 +6875,14 @@ async function goToNotification(n) {
   const u = d.user || (d.message && d.message.author);
   if (n.type === 'friend_request' || n.type === 'friend_accepted') {
     if (u) openProfile(u);
+    return;
+  }
+  if (n.type === 'join_request' && d.server_id) {
+    try { await loadServers(); await openServer(d.server_id); openServerSettings(); } catch (e) {}
+    return;
+  }
+  if (n.type === 'join_request_approved' && d.server_id) {
+    try { await loadServers(); await openServer(d.server_id); } catch (e) {}
     return;
   }
   if ((n.type === 'call' || n.type === 'call_out') && d.dm_id) {
@@ -7389,6 +7405,13 @@ function openImageEditor(file, opts = {}) {
 
 /* ---------------- Create / join server ---------------- */
 function openCreateServer() {
+  /* Ownership cap: at most 5 servers of your own. Checked here so the user gets
+     an immediate, friendly explanation instead of a failed submit. */
+  const owned = (state.servers || []).filter(s => s.owner_id === me.id).length;
+  if (owned >= 5) {
+    toast('You can own a maximum of 5 servers. Delete one before creating another.', 'error');
+    return;
+  }
   const templates = [
     { id: 'friends', label: 'Friends', icon: 'users', desc: 'A place for me and my friends to hang out.' },
     { id: 'community', label: 'Community', icon: 'globe', desc: 'A community space to share ideas and chat.' },
@@ -7524,9 +7547,14 @@ function openJoinServer(prefill) {
     const invite = $('js-invite').value.trim();
     if (!invite) { toast('Invite required', 'error'); return; }
     try {
-      const { server } = await api('/api/servers/join', { method: 'POST', body: JSON.stringify({ invite }) });
-      closeModal(); await loadServers(); openServer(server.id);
-      toast('Joined ' + server.name, 'success');
+      const res = await api('/api/servers/join', { method: 'POST', body: JSON.stringify({ invite }) });
+      if (res.pending) {
+        closeModal();
+        toast('Join request sent to ' + res.server.name + '. An admin will review it.', 'success');
+        return;
+      }
+      closeModal(); await loadServers(); openServer(res.server.id);
+      toast('Joined ' + res.server.name, 'success');
     } catch (e) { toast(e.message, 'error'); }
   });
   $('js-invite').focus();
@@ -7559,11 +7587,17 @@ async function openInviteConfirm(rawCode) {
     ? `<img class="icf-icon" src="${escapeHtml(s.icon_url)}" alt="">`
     : `<div class="icf-icon icf-icon-fallback">${escapeHtml((s.name || '?')[0].toUpperCase())}</div>`;
 
+  const needsApproval = !!data.requires_approval;
+  const pendingReq = !!data.request_pending;
   const statusLine = already
     ? 'You are already a member of this server.'
     : !data.valid
       ? (data.expired ? 'This invite has expired.' : 'This invite has reached its maximum number of uses.')
-      : 'You have been invited to join this server.';
+      : pendingReq
+        ? 'Your request to join is waiting for an owner or admin to approve it.'
+        : needsApproval
+          ? 'This server requires approval. Send a request and an owner or admin will review it.'
+          : 'You have been invited to join this server.';
 
   openModal(`
     <div class="icf-banner" style="${bannerStyle}"><div class="icf-banner-shade"></div></div>
@@ -7582,7 +7616,7 @@ async function openInviteConfirm(rawCode) {
       <div class="icf-note${valid ? '' : ' bad'}${already ? ' already' : ''}">${escapeHtml(statusLine)}</div>
       <div class="icf-actions">
         <button class="icf-btn ghost" id="icf-nevermind">Nevermind</button>
-        <button class="icf-btn primary" id="icf-join"${valid ? '' : ' disabled'}>${already ? 'Open Server' : 'Join Server'}</button>
+        <button class="icf-btn primary" id="icf-join"${(valid && !pendingReq) ? '' : ' disabled'}>${already ? 'Open Server' : (pendingReq ? 'Request Pending' : (needsApproval ? 'Request to Join' : 'Join Server'))}</button>
       </div>
     </div>`, { modalClass: 'invite-confirm-modal' });
   hydrateIcons($('modal'));
@@ -7592,16 +7626,21 @@ async function openInviteConfirm(rawCode) {
   if (joinBtn) joinBtn.addEventListener('click', async () => {
     if (!valid) return;
     joinBtn.disabled = true;
-    joinBtn.textContent = already ? 'Opening\u2026' : 'Joining\u2026';
+    joinBtn.textContent = already ? 'Opening\u2026' : (needsApproval ? 'Sending request\u2026' : 'Joining\u2026');
     try {
       const res = await api('/api/servers/join', { method: 'POST', body: JSON.stringify({ invite: code }) });
+      if (res.pending) {
+        closeModal();
+        toast('Join request sent to ' + res.server.name + '. An admin will review it.', 'success');
+        return;
+      }
       closeModal();
       await loadServers();
       openServer(res.server.id);
       if (!already) toast('Joined ' + res.server.name, 'success');
     } catch (e) {
       joinBtn.disabled = false;
-      joinBtn.textContent = already ? 'Open Server' : 'Join Server';
+      joinBtn.textContent = already ? 'Open Server' : (needsApproval ? 'Request to Join' : 'Join Server');
       toast(e.message, 'error');
     }
   });
@@ -11500,8 +11539,10 @@ function renderServerTab(tab, s, isOwner) {
           </div>
           <div class="ss-member-actions">${actions}</div>
         </div>`;
-      }).join('') || '<div class="inv-empty">No members.</div>'}</div>`;
+      }).join('') || '<div class="inv-empty">No members.</div>'}</div>
+      ${admin ? '<div id="ss-join-requests"></div>' : ''}`;
     hydrateIcons(body);
+    if (admin) loadJoinRequests(s);
     body.querySelectorAll('[data-promote]').forEach(b => b.addEventListener('click', () => setMemberRole(s, b.dataset.promote, 'admin')));
     body.querySelectorAll('[data-demote]').forEach(b => b.addEventListener('click', () => setMemberRole(s, b.dataset.demote, 'member')));
     body.querySelectorAll('[data-role-for]').forEach(sel => sel.addEventListener('change', () => assignCustomRole(s, sel.dataset.roleFor, sel.value || null)));
@@ -11713,6 +11754,49 @@ const ROLE_PERMISSIONS = [
   ['mention_everyone', 'Mention Everyone', 'Use @everyone and @here in messages.', 'Members', 'at-sign']
 ];
 const PERM_GROUPS = ['General', 'Channels', 'Members'];
+
+/* Pending join requests for servers with "Require Approval to Join" enabled.
+   Rendered into the Members tab for owners/admins with Approve / Deny buttons. */
+async function loadJoinRequests(s) {
+  const host = $('ss-join-requests');
+  if (!host) return;
+  let requests = [];
+  try { requests = (await api('/api/servers/' + s.id + '/join-requests')).requests || []; }
+  catch (e) { return; }
+  if (!requests.length) { host.innerHTML = ''; return; }
+  host.innerHTML = `<div class="ss-section-title" style="margin-top:18px">Join Requests \u2014 ${requests.length} pending</div>
+    <div class="ss-members">${requests.map(r => `
+      <div class="ss-member-row">
+        ${avatarHTML(r.user, 36, r.user.status || 'offline')}
+        <div class="ss-member-info">
+          <div class="ss-member-name">${escapeHtml(r.user.display_name || r.user.username)}</div>
+          <div class="ss-member-tag">${escapeHtml(fullTag(r.user))}${r.message ? ' \u00b7 ' + escapeHtml(r.message) : ''}</div>
+        </div>
+        <div class="ss-member-actions">
+          <button class="btn btn-sm" data-jr-approve="${r.id}">${icon('check')} Approve</button>
+          <button class="ss-icon-btn ban" data-jr-deny="${r.id}" title="Deny request">${icon('xmark')}</button>
+        </div>
+      </div>`).join('')}</div>`;
+  hydrateIcons(host);
+  host.querySelectorAll('[data-jr-approve]').forEach(b => b.addEventListener('click', () => resolveJoinRequest(s, b.dataset.jrApprove, 'approve')));
+  host.querySelectorAll('[data-jr-deny]').forEach(b => b.addEventListener('click', () => resolveJoinRequest(s, b.dataset.jrDeny, 'deny')));
+}
+
+async function resolveJoinRequest(s, rid, action) {
+  try {
+    await api('/api/servers/' + s.id + '/join-requests/' + rid, { method: 'POST', body: JSON.stringify({ action }) });
+    toast(action === 'approve' ? 'Member approved' : 'Request denied', 'success');
+    if (action === 'approve') {
+      try {
+        const data = await api('/api/servers/' + s.id);
+        state.members = data.members || state.members;
+        renderServerTab('members', s, s.owner_id === me.id);
+        return;
+      } catch (e) {}
+    }
+    loadJoinRequests(s);
+  } catch (e) { toast(e.message, 'error'); }
+}
 
 function renderRolesTab(body, s) {
   const admin = amIAdmin();
@@ -12187,6 +12271,7 @@ function renderCommunityTab(body, s) {
       ${ssField('Default Max Uses', `<input type="number" id="ss-invite-max" min="0" max="1000" value="${Number(st.invite_max_uses) || 0}" ${dis}>`, '0 = unlimited. New invites stop working after this many joins.')}
     </div>
     ${ssToggleRow('allow_member_invites', 'Allow Member Invites', 'Let regular members create their own invite links. When off, only owners and admins can invite.', st.allow_member_invites)}
+    ${ssToggleRow('join_requests', 'Require Approval to Join', 'New members must be approved by an owner or admin before they can enter. Requests appear in the Members tab.', st.join_requests)}
   `, 'link');
 
   const afk = ssGroup('Voice & AFK', 'Move idle members out of voice channels automatically.', `
@@ -12221,6 +12306,7 @@ async function saveCommunitySettings(s) {
     invite_expiry: parseInt($('ss-invite-expiry').value, 10) || 0,
     invite_max_uses: parseInt($('ss-invite-max').value, 10) || 0,
     allow_member_invites: ssToggleVal('allow_member_invites'),
+    join_requests: ssToggleVal('join_requests'),
     system_welcome: ssToggleVal('system_welcome'),
     invite_splash: ssToggleVal('invite_splash'),
     discoverable: ssToggleVal('discoverable')
