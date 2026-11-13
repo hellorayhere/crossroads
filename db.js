@@ -9,12 +9,18 @@ if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
 /* Restore the database from durable storage (private GitHub repo) BEFORE it is
    opened. Render's free plan has an ephemeral disk, so this is what keeps user
    data alive across deploys. Runs in a child process so this synchronous module
-   can block until the download finishes. No-op unless GH_DATA_REPO is set. */
+   can block until the download finishes. No-op unless GH_DATA_REPO is set.
+
+   Only the DATABASE is fetched here (a few hundred KB). Uploaded media can be
+   hundreds of megabytes, and downloading it inside this blocking child used to
+   exceed the timeout below - which aborted the whole restore and left every
+   image/video/audio file 404ing. Media is now streamed in by the server after
+   it starts listening (see persist.restoreUploads / fetchUpload). */
 if (process.env.GH_DATA_REPO && process.env.GH_DATA_TOKEN) {
   try {
-    execFileSync(process.execPath, [path.join(__dirname, 'persist.js'), 'restore'], {
+    execFileSync(process.execPath, [path.join(__dirname, 'persist.js'), 'restore', '--db-only'], {
       stdio: 'inherit',
-      timeout: 120000,
+      timeout: 90000,
       env: process.env
     });
   } catch (e) {

@@ -125,9 +125,41 @@ app.use('/uploads', express.static(UPLOAD_DIR, {
 }));
 /* A missing upload must 404, not fall through to the SPA HTML. Serving
    index.html for /uploads/... made <img> silently fail (an invisible, broken
-   attachment) instead of letting the client show a clear placeholder. */
-app.use('/uploads', (req, res) => {
-  res.status(404).type('text/plain').send('Not found');
+   attachment) instead of letting the client show a clear placeholder.
+
+   Before giving up we try the durable store: if the file exists in the data
+   repo but has not been streamed down yet (cold start, or a restart mid
+   transfer), fetch just that one file and serve it. This is what makes old
+   images, videos and audio play immediately instead of showing "unavailable". */
+const uploadMissCache = new Map(); // name -> timestamp of last confirmed miss
+const UPLOAD_MISS_TTL = 5 * 60 * 1000;
+
+app.use('/uploads', async (req, res) => {
+  const raw = decodeURIComponent(req.path || '').replace(/^\/+/, '');
+  const name = path.basename(raw);
+  if (!persist.enabled || !name || name !== raw || name.startsWith('.')) {
+    return res.status(404).type('text/plain').send('Not found');
+  }
+  const missedAt = uploadMissCache.get(name);
+  if (missedAt && Date.now() - missedAt < UPLOAD_MISS_TTL) {
+    return res.status(404).type('text/plain').send('Not found');
+  }
+  let ok = false;
+  try { ok = await persist.fetchUpload(name); } catch (e) { ok = false; }
+  if (!ok) {
+    uploadMissCache.set(name, Date.now());
+    return res.status(404).type('text/plain').send('Not found');
+  }
+  uploadMissCache.delete(name);
+  res.set('X-Content-Type-Options', 'nosniff');
+  res.set('Content-Security-Policy', "default-src 'none'; img-src 'self'; media-src 'self'; style-src 'unsafe-inline'");
+  res.sendFile(path.join(UPLOAD_DIR, name), {
+    maxAge: '365d',
+    immutable: true,
+    headers: { 'Cache-Control': 'public, max-age=31536000, immutable' }
+  }, (err) => {
+    if (err && !res.headersSent) res.status(404).type('text/plain').send('Not found');
+  });
 });
 app.use(express.static(path.join(__dirname, 'public')));
 
@@ -3970,9 +4002,15 @@ server.listen(PORT, () => {
   if (persist.enabled) {
     console.log(`[persist] durable storage active -> ${process.env.GH_DATA_REPO}`);
     persist.startAutoBackup(db);
-    /* Repair any upload that a previous failed/raced backup left out of the
-       data repo, so it survives the next restart. */
-    persist.reconcileUploads().catch(e => console.error('[persist] reconcile error:', e.message));
+    /* Pull the uploaded media in the background, in parallel, AFTER we are
+       already serving traffic. This is what used to be done inside the blocking
+       DB-restore child and timed out, leaving every attachment 404. */
+    persist.restoreUploads()
+      /* Repair any upload that a previous failed/raced backup left out of the
+         data repo, so it survives the next restart. Runs after the restore so
+         we never read a half-written file. */
+      .then(() => persist.reconcileUploads())
+      .catch(e => console.error('[persist] upload restore error:', e.message));
   } else {
     console.log('[persist] durable storage disabled (no GH_DATA_REPO set)');
   }

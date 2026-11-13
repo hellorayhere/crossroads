@@ -153,54 +153,147 @@ async function commitFilesOnce(files, message, attempt) {
     }
     throw e;
   }
+  /* Our view of the remote tree is now stale (this commit added files). */
+  treeCache = null;
   return commit.sha;
 }
 
 /* ---------------------------------------------------------------- restore */
 
-async function restore() {
+/* Cached view of the remote tree, so an on-demand upload fetch does not need a
+   fresh API round-trip per file. Invalidated whenever we push a commit. */
+let treeCache = null;
+let treeCacheAt = 0;
+const TREE_TTL_MS = 60 * 1000;
+
+async function remoteEntries(force) {
+  if (!force && treeCache && Date.now() - treeCacheAt < TREE_TTL_MS) return treeCache;
+  const { entries } = await getTree();
+  treeCache = entries;
+  treeCacheAt = Date.now();
+  return entries;
+}
+
+function uploadNames(entries) {
+  return entries
+    .filter(e => e.type === 'blob' && e.path.startsWith('uploads/'))
+    .map(e => ({ name: e.path.slice('uploads/'.length), sha: e.sha, size: e.size }))
+    .filter(e => e.name && !e.name.includes('/'));
+}
+
+/* Download the database only. This is small (a few hundred KB) and MUST happen
+   before better-sqlite3 opens the file, so it stays in the blocking child
+   process. Uploads are deliberately NOT downloaded here: they can total
+   hundreds of megabytes, which used to blow the parent's execFileSync timeout
+   and leave every attachment 404ing. */
+async function restoreDb() {
   if (!enabled) {
     console.log('[persist] disabled (set GH_DATA_REPO + GH_DATA_TOKEN to enable)');
-    return { db: false, uploads: 0 };
+    return { db: false };
   }
-  console.log(`[persist] restoring from ${REPO}@${BRANCH}`);
+  console.log(`[persist] restoring database from ${REPO}@${BRANCH}`);
   let entries = [];
   try {
-    ({ entries } = await getTree());
+    entries = await remoteEntries(true);
   } catch (e) {
     console.error('[persist] could not read remote tree:', e.message);
-    return { db: false, uploads: 0 };
+    return { db: false };
   }
-
-  let dbOk = false;
   const dbEntry = entries.find(e => e.type === 'blob' && e.path === 'db/crossroads.db');
-  if (dbEntry) {
-    try {
-      const n = await downloadBlob(dbEntry.sha, DB_PATH);
-      dbOk = true;
-      lastDbHash = hashFile(DB_PATH);
-      console.log(`[persist] restored database (${n} bytes)`);
-    } catch (e) {
-      console.error('[persist] db restore failed:', e.message);
-    }
-  } else {
+  if (!dbEntry) {
     console.log('[persist] no remote database yet (first run)');
+    return { db: false };
   }
+  try {
+    const n = await downloadBlob(dbEntry.sha, DB_PATH);
+    lastDbHash = hashFile(DB_PATH);
+    console.log(`[persist] restored database (${n} bytes)`);
+    return { db: true };
+  } catch (e) {
+    console.error('[persist] db restore failed:', e.message);
+    return { db: false };
+  }
+}
 
-  let count = 0;
-  for (const e of entries) {
-    if (e.type !== 'blob' || !e.path.startsWith('uploads/')) continue;
-    const name = e.path.slice('uploads/'.length);
-    if (!name || name.includes('/')) continue;
-    try {
-      await downloadBlob(e.sha, path.join(UPLOAD_DIR, name));
-      count++;
-    } catch (err) {
-      console.error('[persist] upload restore failed:', name, err.message);
-    }
+/* Restore every upload in parallel (bounded), skipping files that already
+   exist locally at the right size. Runs AFTER the server starts listening so a
+   cold boot is never blocked by media, and so a slow/failed transfer can only
+   ever affect that one file. */
+const RESTORE_CONCURRENCY = 8;
+
+async function restoreUploads() {
+  if (!enabled) return { uploads: 0, skipped: 0 };
+  let entries;
+  try {
+    entries = await remoteEntries(true);
+  } catch (e) {
+    console.error('[persist] upload restore: cannot read tree:', e.message);
+    return { uploads: 0, skipped: 0 };
   }
-  console.log(`[persist] restored ${count} upload(s)`);
-  return { db: dbOk, uploads: count };
+  const list = uploadNames(entries);
+  let done = 0;
+  let skipped = 0;
+  let failed = 0;
+  let next = 0;
+  const worker = async () => {
+    while (next < list.length) {
+      const item = list[next++];
+      const dest = path.join(UPLOAD_DIR, item.name);
+      try {
+        if (fs.existsSync(dest)) {
+          const st = fs.statSync(dest);
+          if (!item.size || st.size === item.size) { skipped++; continue; }
+        }
+        await downloadBlob(item.sha, dest);
+        done++;
+      } catch (err) {
+        failed++;
+        console.error('[persist] upload restore failed:', item.name, err.message);
+      }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(RESTORE_CONCURRENCY, list.length || 1) }, worker));
+  console.log(`[persist] uploads ready: ${done} downloaded, ${skipped} already present, ${failed} failed (of ${list.length})`);
+  return { uploads: done, skipped, failed, total: list.length };
+}
+
+/* Fetch a single upload on demand. Used by the /uploads route when a file is
+   missing locally (e.g. the background restore has not reached it yet, or the
+   instance was restarted mid-transfer). Returns true if the file now exists. */
+const fetching = new Map();
+async function fetchUpload(name) {
+  if (!enabled || !name || name.includes('/') || name.includes('..')) return false;
+  if (fetching.has(name)) return fetching.get(name);
+  const job = (async () => {
+    const dest = path.join(UPLOAD_DIR, name);
+    if (fs.existsSync(dest) && fs.statSync(dest).size > 0) return true;
+    let entries;
+    try { entries = await remoteEntries(); } catch (e) { return false; }
+    let entry = entries.find(e => e.type === 'blob' && e.path === 'uploads/' + name);
+    if (!entry) {
+      /* Maybe the file was just uploaded and our tree cache is stale. */
+      try { entries = await remoteEntries(true); } catch (e) { return false; }
+      entry = entries.find(e => e.type === 'blob' && e.path === 'uploads/' + name);
+    }
+    if (!entry) return false;
+    try {
+      await downloadBlob(entry.sha, dest);
+      console.log('[persist] fetched upload on demand:', name);
+      return true;
+    } catch (e) {
+      console.error('[persist] on-demand fetch failed:', name, e.message);
+      return false;
+    }
+  })();
+  fetching.set(name, job);
+  try { return await job; } finally { fetching.delete(name); }
+}
+
+/* Backwards-compatible full restore (db + uploads). */
+async function restore() {
+  const { db: dbOk } = await restoreDb();
+  const up = await restoreUploads();
+  return { db: dbOk, uploads: up.uploads };
 }
 
 /* ---------------------------------------------------------------- backup */
@@ -300,6 +393,9 @@ function startAutoBackup(db) {
 module.exports = {
   enabled,
   restore,
+  restoreDb,
+  restoreUploads,
+  fetchUpload,
   reconcileUploads,
   backupDb,
   backupUpload,
@@ -313,7 +409,8 @@ module.exports = {
 if (require.main === module) {
   const cmd = process.argv[2];
   if (cmd === 'restore') {
-    restore()
+    const onlyDb = process.argv.includes('--db-only');
+    (onlyDb ? restoreDb() : restore())
       .then(() => process.exit(0))
       .catch((e) => { console.error('[persist] restore error:', e.message); process.exit(1); });
   } else {

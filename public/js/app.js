@@ -421,6 +421,7 @@ const ICONS = {
   'crown': '<path d="M5 16L3 5l5.5 5L12 4l3.5 6L21 5l-2 11H5z"/><path d="M5 19h14"/>',
   'ghost': '<path d="M9 10h.01M15 10h.01M12 2a8 8 0 0 0-8 8v12l3-3 2.5 2.5L12 19l2.5 2.5L17 19l3 3V10a8 8 0 0 0-8-8z"/>',
   'server': '<rect x="2" y="2" width="20" height="8" rx="2" ry="2"/><rect x="2" y="14" width="20" height="8" rx="2" ry="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/>',
+  'music': '<path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/>',
   'file': '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/>',
   'plug': '<path d="M9 2v6M15 2v6M6 8h12v3a6 6 0 0 1-12 0V8zM12 17v5"/>',
   'link': '<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>',
@@ -4800,11 +4801,17 @@ function updatePinIndicator(mid, pinned) {
 /* Custom video player.
    Collapsed: poster frame + large centred play button (screenshot 1).
    Playing:    control bar with play/pause, time, seek, volume, fullscreen (screenshot 2). */
-function videoPlayerNode(url, name) {
+function videoPlayerNode(url, name, mime) {
   const player = document.createElement('div');
   player.className = 'vp';
+  /* A <source> with an explicit type lets the browser pick the right decoder
+     instead of guessing from the URL; some browsers refuse to start a video
+     that only has a bare src (which is what made clips look "unavailable"). */
+  const typeAttr = mime ? ` type="${escapeHtml(mime)}"` : '';
   player.innerHTML = `
-    <video class="vp-video" src="${escapeHtml(url)}" preload="metadata" playsinline webkit-playsinline></video>
+    <video class="vp-video" preload="metadata" playsinline webkit-playsinline>
+      <source src="${escapeHtml(url)}"${typeAttr}>
+    </video>
     <button class="vp-big-play" type="button" aria-label="Play video">${icon('play')}</button>
     <div class="vp-controls">
       <button class="vp-btn vp-toggle" type="button" aria-label="Play">${icon('play')}</button>
@@ -4961,18 +4968,25 @@ function bindVideoAvailability(player, wrap, url, name, sizeText) {
   let settled = false;
   let userStarted = false;
 
-  /* Once the person presses play we stop touching the element: the old code
-     reset src/load() during retries, which killed an in-progress playback and
-     made videos look like they refused to play. */
+  /* Once the person presses play we stop touching the element: resetting
+     src/load() during retries killed in-progress playback and made videos look
+     like they refused to play. */
   video.addEventListener('play', () => { userStarted = true; });
 
-  const showMissing = () => {
+  const card = (title, sub, withLink) => {
     if (settled || !wrap.isConnected) return;
     settled = true;
     wrap.classList.remove('video-attachment');
     wrap.classList.add('attachment-missing');
-    wrap.innerHTML = `<div class="file-card missing"><div class="fi">${icon('film')}</div><div class="fc-meta"><span class="missing-name">${escapeHtml(name)}</span><div class="fsize">Video unavailable \u2022 ${escapeHtml(sizeText || 'file missing')}</div></div></div>`;
+    const link = withLink
+      ? `<a class="fc-open" href="${escapeHtml(url)}" target="_blank" rel="noopener">Open video</a>`
+      : '';
+    wrap.innerHTML = `<div class="file-card missing"><div class="fi">${icon('film')}</div><div class="fc-meta"><span class="missing-name">${escapeHtml(name)}</span><div class="fsize">${escapeHtml(title)}${sub ? ' \u2022 ' + escapeHtml(sub) : ''}</div>${link}</div></div>`;
   };
+  const showMissing = () => card('Video unavailable', sizeText || 'file missing', true);
+  /* The file is there but this browser cannot decode it (e.g. HEVC in Chrome).
+     Offering the raw file is far more useful than claiming it is unavailable. */
+  const showUnsupported = () => card('This format can\u2019t play in your browser', sizeText || 'tap to open', true);
 
   /* Probe the URL to learn the real HTTP status. Only a definitive 404/410
      means the file is gone; anything else (network error, 5xx, timeout) is
@@ -4980,39 +4994,52 @@ function bindVideoAvailability(player, wrap, url, name, sizeText) {
   const probe = async () => {
     try {
       let res = await fetch(url, { method: 'HEAD', cache: 'no-store' });
-      /* Some static hosts don't answer HEAD; fall back to a ranged GET. */
       if (res.status === 405 || res.status === 501) {
         res = await fetch(url, { method: 'GET', headers: { Range: 'bytes=0-0' }, cache: 'no-store' });
       }
-      if (res.status === 404 || res.status === 410) { showMissing(); return true; }
-      return false;
+      return res.status;
     } catch (e) {
-      return false; /* network hiccup - not proof the file is missing */
+      return 0; /* network hiccup - not proof the file is missing */
     }
   };
 
-  /* Reload the media element only while it has no metadata yet, and never once
-     the user has started playback. */
+  /* Reload with a cache-busting URL only while there is no metadata yet, and
+     never once the user has started playback. A stale cached 404 or a partial
+     first response is the usual cause of a "broken" video that is fine on
+     reload. */
   const retry = () => {
     if (settled || userStarted || !video.isConnected) return;
-    if (video.readyState >= 1) return;          /* metadata arrived - all good */
+    if (video.readyState >= 1) return;
     if (attempts >= 3) return;
     attempts++;
     setTimeout(() => {
       if (settled || userStarted || !video.isConnected || video.readyState >= 1) return;
-      try { video.load(); } catch (e) { /* ignore */ }
+      const base = url.split('?')[0];
+      try {
+        video.src = `${base}?r=${attempts}&t=${Date.now()}`;
+        video.load();
+      } catch (e) { /* ignore */ }
       retry();
     }, 700 * attempts);
   };
 
   video.addEventListener('error', async () => {
-    if (settled) return;
-    /* MEDIA_ERR_ABORTED (1) is usually our own src reset - ignore it. */
+    if (settled || userStarted) return;
     const code = video.error ? video.error.code : 0;
-    if (code === 1) return;
-    const gone = await probe();
-    if (!gone) retry();
+    if (code === 1) return;                       /* our own abort - ignore */
+    const status = await probe();
+    if (status === 404 || status === 410) { showMissing(); return; }
+    if (code === 4 && status >= 200 && status < 400) { showUnsupported(); return; }
+    retry();
   });
+
+  /* If the element never fires error but also never loads (some browsers stall
+     silently), fall back to a probe after a grace period. */
+  setTimeout(async () => {
+    if (settled || userStarted || !video.isConnected || video.readyState >= 1) return;
+    const status = await probe();
+    if (status === 404 || status === 410) showMissing();
+  }, 12000);
 }
 
 function attachmentNode(m) {
@@ -5055,13 +5082,39 @@ function attachmentNode(m) {
     /* Videos show a poster frame with a centred play button; pressing play
        reveals a full custom control bar (seek, volume, fullscreen). */
     wrap.classList.add('video-attachment');
-    const vp = videoPlayerNode(url, m.attachment_name || '');
+    const vp = videoPlayerNode(url, m.attachment_name || '', m.attachment_type || '');
     bindVideoAvailability(vp, wrap, url, m.attachment_name || 'video', sizeText);
     wrap.appendChild(vp);
     if (sizeText) wrap.insertAdjacentHTML('beforeend', `<span class="att-size">${sizeText}</span>`);
   } else if (t.startsWith('audio/')) {
-    wrap.classList.add('media');
-    wrap.innerHTML = `<audio src="${escapeHtml(url)}" controls style="width:320px"></audio>`;
+    /* Audio gets the same treatment as video: an explicit type hint, a couple
+       of cache-busting retries, and a usable fallback link instead of a silent
+       dead player. */
+    wrap.classList.add('media', 'audio-attachment');
+    wrap.innerHTML = `<audio controls preload="metadata" style="width:320px">
+      <source src="${escapeHtml(url)}"${t ? ` type="${escapeHtml(t)}"` : ''}>
+    </audio>`;
+    const audio = wrap.querySelector('audio');
+    let aTries = 0;
+    const audioFallback = () => {
+      wrap.classList.remove('media', 'audio-attachment');
+      wrap.classList.add('attachment-missing');
+      wrap.innerHTML = `<div class="file-card missing"><div class="fi">${icon('music')}</div><div class="fc-meta"><span class="missing-name">${escapeHtml(m.attachment_name || 'audio')}</span><div class="fsize">Audio unavailable \u2022 ${escapeHtml(sizeText || 'file missing')}</div><a class="fc-open" href="${escapeHtml(url)}" target="_blank" rel="noopener">Open audio</a></div></div>`;
+    };
+    audio.addEventListener('error', () => {
+      if (!audio.isConnected) return;
+      if (aTries < 2) {
+        aTries++;
+        const base = url.split('?')[0];
+        setTimeout(() => {
+          if (!audio.isConnected) return;
+          audio.src = `${base}?r=${aTries}&t=${Date.now()}`;
+          try { audio.load(); } catch (e) {}
+        }, 700 * aTries);
+        return;
+      }
+      audioFallback();
+    });
     if (sizeText) wrap.insertAdjacentHTML('beforeend', `<span class="att-size">${sizeText}</span>`);
   } else {
     const meta = [sizeText, 'Click to download'].filter(Boolean).join(' \u2022 ');

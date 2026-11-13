@@ -3917,3 +3917,21 @@ body[data-theme="light"] .update-card { box-shadow: 0 24px 70px rgba(0, 0, 0, .2
 .blocked-profile .bp-ico svg { width: 30px; height: 30px; }
 .blocked-profile .bp-title { font-size: 20px; font-weight: 800; color: var(--text-header); }
 .blocked-profile .bp-sub { font-size: 14px; color: var(--text-muted); max-width: 380px; line-height: 1.5; }
+
+/* ---- Media fallback cards ------------------------------------------------
+   When a file is genuinely gone or uses a codec the browser cannot decode we
+   show a clear card with a direct link, instead of a dead black box. */
+.file-card.missing .fc-open {
+  display: inline-block;
+  margin-top: 6px;
+  padding: 4px 10px;
+  border-radius: 4px;
+  background: var(--brand, #5865f2);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+  text-decoration: none;
+}
+.file-card.missing .fc-open:hover { filter: brightness(1.1); }
+.attachment.audio-attachment audio { display: block; max-width: 100%; }
+.attachment.audio-attachment { padding: 6px 0; }
