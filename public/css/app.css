@@ -465,7 +465,7 @@ button:active, .rail-item:active, .channel:active, .dm-item:active, .member:acti
    plus max-* bounds means the browser scales both axes together, and
    `flex: 0 0 auto` stops the flex parent from shrinking only the width
    (which used to squash wide images and GIFs). */
-.attachment img, .attachment video { width: auto; height: auto; max-width: min(400px, 100%); max-height: 320px; border-radius: var(--radius); display: block; cursor: pointer; border: 1px solid var(--divider); object-fit: contain; }
+.attachment img, .attachment video { width: auto; height: auto; max-width: min(520px, 100%); max-height: 400px; border-radius: var(--radius); display: block; cursor: pointer; border: 1px solid var(--divider); object-fit: contain; }
 .attachment.media > img, .attachment.media > video,
 .attachment.video-attachment > img, .attachment.video-attachment > video,
 .attachment.media > .vp, .attachment.video-attachment > .vp { flex: 0 0 auto; align-self: flex-end; }
@@ -474,7 +474,7 @@ button:active, .rail-item:active, .channel:active, .dm-item:active, .member:acti
 .attachment.media { margin-top: 5px; }
 .attachment.media img, .attachment.media video { border: none; border-radius: 8px; box-shadow: none; }
 .attachment.media img:hover, .attachment.media video:hover { filter: brightness(1.04); }
-.attachment.media.gif img { width: auto; height: auto; max-width: min(360px, 100%); max-height: 300px; }
+.attachment.media.gif img { width: auto; height: auto; max-width: min(480px, 100%); max-height: 380px; }
 .attachment .file-card { display: inline-flex; align-items: center; gap: 12px; background: var(--card); border: 1px solid var(--divider); border-radius: var(--radius); padding: 12px 16px; max-width: 400px; }
 .attachment .file-card .fi { width: 40px; height: 40px; border-radius: var(--radius-sm); background: var(--brand); display: grid; place-items: center; font-size: 17px; color: #fff; }
 .attachment .file-card a { color: var(--link); text-decoration: none; font-weight: 600; }
@@ -821,7 +821,7 @@ button:active, .rail-item:active, .channel:active, .dm-item:active, .member:acti
 .member:hover { background: var(--hover); }
 .member.offline { opacity: .55; }
 /* Bigger, clearer presence dot in the member list so statuses read at a glance. */
-.member .avatar .status-dot { width: 16px; height: 16px; min-width: 16px; min-height: 16px; border-width: 3px; border-color: var(--members-bg); }
+.member .avatar .status-dot { width: 18px; height: 18px; min-width: 18px; min-height: 18px; border-width: 3.5px; border-color: var(--members-bg); }
 .member .mname { font-size: 15px; font-weight: 500; color: var(--text-normal); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: flex; align-items: center; gap: 4px; }
 .member .mname .mtag { color: var(--text-muted); font-weight: 400; font-size: 13px; }
 .member .owner-crown { color: var(--yellow); font-size: 12px; }
@@ -1377,6 +1377,8 @@ button:active, .rail-item:active, .channel:active, .dm-item:active, .member:acti
 .dm-body .dm-name { flex: 0 0 auto; line-height: 1.25; }
 .dm-status { font-size: 11.5px; line-height: 1.2; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; opacity: .9; }
 .dm-item.active .dm-name, .dm-item:hover .dm-name { color: var(--text-header); }
+/* Presence dot on DM avatars: same legible size as the member list. */
+.dm-item .avatar .status-dot { width: 16px; height: 16px; min-width: 16px; min-height: 16px; border-width: 3px; border-color: var(--sidebar-bg); }
 .dm-item .dm-ic { display: grid; place-items: center; width: 32px; height: 32px; flex: 0 0 auto; color: var(--text-muted); }
 .dm-item .dm-ic .ic { width: 20px; height: 20px; }
 .dm-item.friends-entry .dm-name { color: var(--text-normal); font-weight: 500; }
@@ -2961,13 +2963,13 @@ body[data-theme="light"].has-custom-bg {
 body[data-theme="light"] .toast { box-shadow: 0 8px 24px rgba(0, 0, 0, .12); }
 
 /* ---------- Inline media embeds (Giphy / Tenor / direct files) ---------- */
-.embed-media-wrap { margin-top: 6px; max-width: min(420px, 100%); }
+.embed-media-wrap { margin-top: 6px; max-width: min(520px, 100%); }
 .embed-media {
   display: block;
   width: auto;
   height: auto;
   max-width: 100%;
-  max-height: 320px;
+  max-height: 400px;
   border-radius: var(--radius);
   border: 1px solid var(--divider);
   background: var(--input-bg);
