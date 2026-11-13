@@ -2242,6 +2242,18 @@ function connectSocket() {
     }
     if ($('notif-panel')) renderNotifList();
   });
+  /* The server clears call notifications for both sides when a call is
+     answered or ends - reflect that without a reload. */
+  socket.on('notifications_read', ({ ids } = {}) => {
+    if (!Array.isArray(ids) || !ids.length) return;
+    const set = new Set(ids);
+    let changed = 0;
+    state.notifications.forEach(n => { if (set.has(n.id) && !n.read) { n.read = true; changed++; } });
+    if (!changed) return;
+    state.unread = Math.max(0, state.unread - changed);
+    renderNotifBadge();
+    if ($('notif-panel')) renderNotifList();
+  });
 
   /* ---------------- Voice signaling ---------------- */
   socket.on('voice_joined', ({ peers }) => {
@@ -6217,7 +6229,11 @@ function openNotifPanel() {
   if (state.unread > 0) {
     api('/api/notifications/read', { method: 'POST' }).catch(() => {});
     state.unread = 0;
+    /* Clear the per-item highlight too, otherwise the list keeps showing the
+       old unread styling until the next full reload. */
+    state.notifications.forEach(n => { n.read = true; });
     renderNotifBadge();
+    renderNotifList();
   }
 }
 
@@ -6233,7 +6249,7 @@ async function goToNotification(n) {
     if (u) openProfile(u);
     return;
   }
-  if (n.type === 'call' && d.dm_id) {
+  if ((n.type === 'call' || n.type === 'call_out') && d.dm_id) {
     try {
       await loadDMs();
       const dm = state.dms.find(x => x.id === d.dm_id);

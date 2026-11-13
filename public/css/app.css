@@ -3538,6 +3538,9 @@ body[data-theme="light"] .update-card { box-shadow: 0 24px 70px rgba(0, 0, 0, .2
 .member-body { display: flex; flex-direction: column; min-width: 0; gap: 1px; flex: 1; }
 .member-body .mname { min-width: 0; display: inline-flex; align-items: center; flex-wrap: wrap; gap: 3px; }
 .member-body .mname .badge-row { margin-left: 4px; }
+/* Custom status line under a member's name. Without this the text inherited
+   the 15px name size and pushed the row out of shape. */
+.member-body .mstatus { font-size: 11.5px; line-height: 1.35; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
 
 /* Server roles shown on a profile */
 .profile-roles { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }

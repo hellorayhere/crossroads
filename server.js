@@ -23,6 +23,16 @@ try {
 const persist = require('./persist');
 const { newId, newInviteCode, randomColor, randomDiscriminator } = require('./util');
 
+/* One bad socket event (a malformed payload, a race on a deleted row) must not
+   take the whole service down - Render would restart the instance and every
+   live connection would drop. Log loudly and keep serving. */
+process.on('uncaughtException', (err) => {
+  console.error('[uncaught]', err && (err.stack || err.message || err));
+});
+process.on('unhandledRejection', (reason) => {
+  console.error('[unhandledRejection]', reason && (reason.stack || reason.message || reason));
+});
+
 const PORT = process.env.PORT || 3000;
 const JWT_SECRET = process.env.JWT_SECRET || 'crossroads-dev-secret-change-me';
 /* Stable identifier for the code that is currently running. Render injects
@@ -759,7 +769,30 @@ function dmCallPublic(call) {
   };
 }
 
+/* A call generates a "call" notification for the callee and a "call_out"
+   one for the caller. Once the call is answered or over those should not sit
+   in the notification centre as unread (they would leave a permanent red
+   badge after every call). Mark them read and tell the clients. */
+function markCallNotificationsRead(dmId) {
+  if (!dmId) return;
+  try {
+    const rows = db.prepare(
+      "SELECT id, user_id FROM notifications WHERE type IN ('call','call_out') AND read = 0 AND data LIKE ?"
+    ).all('%' + dmId + '%');
+    if (!rows.length) return;
+    const upd = db.prepare('UPDATE notifications SET read = 1 WHERE id = ?');
+    const byUser = new Map();
+    for (const r of rows) {
+      upd.run(r.id);
+      if (!byUser.has(r.user_id)) byUser.set(r.user_id, []);
+      byUser.get(r.user_id).push(r.id);
+    }
+    for (const [userId, ids] of byUser) io.to(`user:${userId}`).emit('notifications_read', { ids });
+  } catch (e) { /* never let notification housekeeping break a call */ }
+}
+
 function endDmCall(dmId, reason, exceptUserId) {
+  markCallNotificationsRead(dmId);
   const call = dmCalls.get(dmId);
   if (!call) return;
   if (call.timer) clearTimeout(call.timer);
@@ -3884,6 +3917,14 @@ app.get('/api/global-messages', auth, (req, res) => {
   res.json({ announcements: rows, maintenance: getGlobalSetting('maintenance_mode', false), motd: getGlobalSetting('motd', '') });
 });
 
+/* Unknown API paths must answer with JSON, never the SPA HTML. The HTML
+   fallback used to hand a 200 text/html page back to fetch(), which the
+   client parsed as an empty object - so a mistyped endpoint looked like a
+   silent success instead of a clear 404. */
+app.use('/api', (req, res) => {
+  res.status(404).json({ error: 'Not found' });
+});
+
 /* ---------------- SPA fallback ---------------- */
 app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
@@ -4056,6 +4097,7 @@ io.on('connection', (socket) => {
     if (call.timer) { clearTimeout(call.timer); call.timer = null; }
     call.state = 'active';
     call.started_at = Date.now();
+    markCallNotificationsRead(dm_id);
     const payload = { dm_id, call: dmCallPublic(call) };
     io.to(`user:${call.caller_id}`).emit('dm_call_accepted', payload);
     io.to(`user:${call.callee_id}`).emit('dm_call_accepted', payload);
@@ -4066,6 +4108,7 @@ io.on('connection', (socket) => {
     if (!call || call.callee_id !== uid) return;
     if (call.timer) clearTimeout(call.timer);
     dmCalls.delete(dm_id);
+    markCallNotificationsRead(dm_id);
     io.to(`user:${call.caller_id}`).emit('dm_call_declined', { dm_id, call: dmCallPublic(call) });
     socket.emit('dm_call_ended', { dm_id, reason: 'declined', call: dmCallPublic(call) });
   });
