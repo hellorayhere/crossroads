@@ -36,7 +36,7 @@ const UPLOAD_DIR = process.env.UPLOAD_DIR ? path.resolve(process.env.UPLOAD_DIR)
 const DB_PATH = path.join(DATA_DIR, 'crossroads.db');
 
 const enabled = !!(TOKEN && REPO);
-const BACKUP_INTERVAL_MS = parseInt(process.env.BACKUP_INTERVAL_MS || '20000', 10);
+const BACKUP_INTERVAL_MS = parseInt(process.env.BACKUP_INTERVAL_MS || '60000', 10);
 
 function headers(extra) {
   return Object.assign({
@@ -97,8 +97,27 @@ function hashFile(p) {
 
 let lastDbHash = null;
 
-/* Commit a set of files (path -> Buffer) in a single commit. */
-async function commitFiles(files, message) {
+/* Commit a set of files (path -> Buffer) in a single commit.
+
+   IMPORTANT: GitHub's Git Data API is compare-and-swap on the branch ref. If
+   two commits are built from the same base commit, the second PATCH fails with
+   422 (not a fast-forward) and that file is silently lost forever. Because
+   uploads and the periodic DB backup used to run concurrently, uploads were
+   occasionally dropped this way (which is why some attachments later showed up
+   missing/blank). Every commit now goes through a single serialized queue and
+   retries from a fresh base if the ref moved underneath us. */
+let commitChain = Promise.resolve();
+
+function commitFiles(files, message) {
+  const run = () => commitFilesOnce(files, message);
+  const next = commitChain.then(run, run);
+  /* Keep the chain alive even if this commit rejects. */
+  commitChain = next.catch(() => {});
+  return next;
+}
+
+async function commitFilesOnce(files, message, attempt) {
+  attempt = attempt || 1;
   const { baseCommitSha, baseTreeSha } = await getTree();
   const treeEntries = [];
   for (const [repoPath, buf] of Object.entries(files)) {
@@ -118,11 +137,23 @@ async function commitFiles(files, message) {
     tree: tree.sha,
     parents
   });
-  if (baseCommitSha) {
-    await gh('PATCH', `/repos/${REPO}/git/refs/heads/${BRANCH}`, { sha: commit.sha, force: false });
-  } else {
-    await gh('POST', `/repos/${REPO}/git/refs`, { ref: `refs/heads/${BRANCH}`, sha: commit.sha });
+  try {
+    if (baseCommitSha) {
+      await gh('PATCH', `/repos/${REPO}/git/refs/heads/${BRANCH}`, { sha: commit.sha, force: false });
+    } else {
+      await gh('POST', `/repos/${REPO}/git/refs`, { ref: `refs/heads/${BRANCH}`, sha: commit.sha });
+    }
+  } catch (e) {
+    /* The branch moved between our read and our write (another writer, a
+       manual push, or a retried request). Rebuild from the new head. */
+    const conflict = /\b(409|422)\b/.test(e.message || '');
+    if (conflict && attempt < 5) {
+      await new Promise(r => setTimeout(r, 250 * attempt));
+      return commitFilesOnce(files, message, attempt + 1);
+    }
+    throw e;
   }
+  return commit.sha;
 }
 
 /* ---------------------------------------------------------------- restore */
@@ -199,16 +230,50 @@ async function backupDb(db, reason) {
 }
 
 async function backupUpload(filename) {
-  if (!enabled) return;
+  if (!enabled) return false;
   const local = path.join(UPLOAD_DIR, filename);
-  if (!fs.existsSync(local)) return;
+  if (!fs.existsSync(local)) return false;
   try {
     const buf = fs.readFileSync(local);
+    if (!buf.length) {
+      console.error('[persist] refusing to back up empty upload:', filename);
+      return false;
+    }
     await commitFiles({ ['uploads/' + filename]: buf }, `upload ${filename}`);
     console.log('[persist] upload backed up:', filename);
+    return true;
   } catch (e) {
     console.error('[persist] upload backup failed:', filename, e.message);
+    return false;
   }
+}
+
+/* After a restore, make sure every file we have locally is also in the data
+   repo. This repairs uploads that were dropped by an earlier failed/raced
+   backup, so a future restart cannot lose them. */
+async function reconcileUploads() {
+  if (!enabled) return { checked: 0, uploaded: 0 };
+  let names = [];
+  try { names = fs.readdirSync(UPLOAD_DIR).filter(n => n && !n.startsWith('.')); } catch (e) { return { checked: 0, uploaded: 0 }; }
+  if (!names.length) return { checked: 0, uploaded: 0 };
+  let entries = [];
+  try { ({ entries } = await getTree()); } catch (e) { return { checked: names.length, uploaded: 0 }; }
+  const remote = new Set(entries.filter(e => e.type === 'blob').map(e => e.path));
+  let uploaded = 0;
+  for (const name of names) {
+    if (remote.has('uploads/' + name)) continue;
+    const local = path.join(UPLOAD_DIR, name);
+    try {
+      const buf = fs.readFileSync(local);
+      if (!buf.length) continue;
+      await commitFiles({ ['uploads/' + name]: buf }, `reconcile upload ${name}`);
+      uploaded++;
+    } catch (e) {
+      console.error('[persist] reconcile failed for', name, e.message);
+    }
+  }
+  if (uploaded) console.log(`[persist] reconciled ${uploaded} missing upload(s)`);
+  return { checked: names.length, uploaded };
 }
 
 /* ---------------------------------------------------------------- runtime */
@@ -235,6 +300,7 @@ function startAutoBackup(db) {
 module.exports = {
   enabled,
   restore,
+  reconcileUploads,
   backupDb,
   backupUpload,
   startAutoBackup,

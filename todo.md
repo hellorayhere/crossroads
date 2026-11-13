@@ -125,3 +125,15 @@ https://crossroadsv2.onrender.com/app.html **without wiping any data**
 - [x] Fix "Unable to decrypt this message": device keyring + cross-account keys + retry + graceful label
 - [x] Ensure channel messages encrypt for every server member (fresh member fetch)
 - [x] Syntax checks, local smoke test, commit + push, Render deploy, verify live, data preserved
+
+# Round 15 — Invisible media + "Encrypted message" + real-time loading
+- [x] Fix invisible media in the dissociate server (serialized GitHub commit queue + conflict retry so uploads are never dropped; reconcileUploads() repairs missing files at boot)
+- [x] Serve a real 404 for missing /uploads instead of the SPA HTML (so broken media fails visibly, not silently)
+- [x] Visible "Image/Video unavailable" card when a file is genuinely missing (client error handlers)
+- [x] Password-encrypted key escrow: PBKDF2-SHA256 + AES-256-GCM backup of the private key so old messages decrypt on any device after sign-in (server stores only ciphertext it cannot open)
+- [x] Additive migration: e2e_keys.escrow column; POST /api/e2e/keys accepts escrow; GET /api/e2e/escrow returns owner's backups
+- [x] auth.js hands the just-used password to the app once (sessionStorage, consumed + deleted on boot) to restore escrowed keys
+- [x] One corrupt recipient public key no longer forces the whole message to plaintext (wrap per-key, skip unusable keys)
+- [x] Real-time loading delay: key registration + decryption no longer block socket renders (render first, decrypt in place, retry failed)
+- [x] Verified: escrow round-trip restores a key from password only and decrypts; probe1→probe2 multiuser round trip decrypts to exact plaintext; client encrypt/decrypt match
+- [x] Syntax checks, local smoke test, commit + push, Render deploy, verify live, data preserved

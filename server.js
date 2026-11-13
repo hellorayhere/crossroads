@@ -106,6 +106,12 @@ app.use('/uploads', express.static(UPLOAD_DIR, {
     }
   }
 }));
+/* A missing upload must 404, not fall through to the SPA HTML. Serving
+   index.html for /uploads/... made <img> silently fail (an invisible, broken
+   attachment) instead of letting the client show a clear placeholder. */
+app.use('/uploads', (req, res) => {
+  res.status(404).type('text/plain').send('Not found');
+});
 app.use(express.static(path.join(__dirname, 'public')));
 
 /* ---------------- Health check + keep-alive ----------------
@@ -2438,7 +2444,7 @@ app.post('/api/dms/:id/messages', auth, (req, res) => {
    entirely in the browser. */
 
 app.post('/api/e2e/keys', auth, (req, res) => {
-  const { key_id, public_jwk } = req.body || {};
+  const { key_id, public_jwk, escrow } = req.body || {};
   if (!key_id || typeof key_id !== 'string' || key_id.length > 120) return res.status(400).json({ error: 'Invalid key id' });
   if (!public_jwk || typeof public_jwk !== 'string' || public_jwk.length > 4000) return res.status(400).json({ error: 'Invalid public key' });
   let parsed;
@@ -2450,10 +2456,43 @@ app.post('/api/e2e/keys', auth, (req, res) => {
      hijack an existing id. */
   const existing = db.prepare('SELECT user_id FROM e2e_keys WHERE key_id = ?').get(key_id);
   if (existing && existing.user_id !== req.user.id) return res.status(409).json({ error: 'Key id already registered' });
-  db.prepare(`INSERT INTO e2e_keys (key_id, user_id, public_jwk, created_at) VALUES (?,?,?,?)
-              ON CONFLICT(key_id) DO UPDATE SET public_jwk = excluded.public_jwk`)
-    .run(key_id, req.user.id, public_jwk, Date.now());
+  /* Optional password-encrypted backup of the private key. We validate the
+     shape/size but can never read it: the wrapping key is derived from the
+     user's password in the browser. Storing it lets the owner restore the key
+     on a new device and decrypt their old messages. */
+  let escrowJson = null;
+  if (escrow && typeof escrow === 'object') {
+    if (typeof escrow.ct === 'string' && typeof escrow.iv === 'string' && typeof escrow.salt === 'string' && escrow.ct.length < 8000) {
+      escrowJson = JSON.stringify({
+        ct: escrow.ct, iv: escrow.iv, salt: escrow.salt,
+        iter: Math.min(Math.max(parseInt(escrow.iter) || 150000, 10000), 2000000),
+        kdf: 'pbkdf2-sha256'
+      });
+    }
+  }
+  if (escrowJson) {
+    db.prepare(`INSERT INTO e2e_keys (key_id, user_id, public_jwk, created_at, escrow) VALUES (?,?,?,?,?)
+                ON CONFLICT(key_id) DO UPDATE SET public_jwk = excluded.public_jwk, escrow = excluded.escrow`)
+      .run(key_id, req.user.id, public_jwk, Date.now(), escrowJson);
+  } else {
+    db.prepare(`INSERT INTO e2e_keys (key_id, user_id, public_jwk, created_at) VALUES (?,?,?,?)
+                ON CONFLICT(key_id) DO UPDATE SET public_jwk = excluded.public_jwk`)
+      .run(key_id, req.user.id, public_jwk, Date.now());
+  }
   res.json({ ok: true });
+});
+
+/* Return this user's password-encrypted key backups. The client tries each one
+   with the password it just signed in with; a successful unwrap restores the
+   private key so old messages become readable again. Only the owner can read
+   their own escrows. */
+app.get('/api/e2e/escrow', auth, (req, res) => {
+  const rows = db.prepare('SELECT key_id, escrow FROM e2e_keys WHERE user_id = ? AND escrow IS NOT NULL').all(req.user.id);
+  const escrows = [];
+  for (const r of rows) {
+    try { escrows.push({ key_id: r.key_id, escrow: JSON.parse(r.escrow) }); } catch (e) { /* skip corrupt */ }
+  }
+  res.json({ escrows });
 });
 
 app.get('/api/e2e/keys', auth, (req, res) => {
@@ -2462,6 +2501,50 @@ app.get('/api/e2e/keys', auth, (req, res) => {
   const ph = ids.map(() => '?').join(',');
   const rows = db.prepare(`SELECT key_id, user_id, public_jwk FROM e2e_keys WHERE user_id IN (${ph})`).all(...ids);
   res.json({ keys: rows.map(r => ({ key_id: r.key_id, user_id: r.user_id, public_jwk: r.public_jwk })) });
+});
+
+/* Key re-sharing. A device that can already read a message may extend access
+   to other devices by adding freshly wrapped copies of the message key to the
+   envelope. This is what lets a message become readable for everyone again
+   after a member joins, rotates their key, or reads from a new browser - the
+   server still never sees the key or the plaintext, it only stores the extra
+   wrapped copies. Additive only: existing entries are never removed. */
+app.post('/api/messages/:id/keys', auth, (req, res) => {
+  const m = db.prepare('SELECT * FROM messages WHERE id = ?').get(req.params.id);
+  if (!m) return res.status(404).json({ error: 'Message not found' });
+  /* Permission: must be able to see the conversation. */
+  if (m.channel_id) {
+    const ch = db.prepare('SELECT * FROM channels WHERE id = ?').get(m.channel_id);
+    if (!ch || !getServerForUser(ch.server_id, req.user.id)) return res.status(403).json({ error: 'Not allowed' });
+  } else if (m.dm_id) {
+    const dm = db.prepare('SELECT * FROM dm_channels WHERE id = ?').get(m.dm_id);
+    if (!dm || (dm.user1_id !== req.user.id && dm.user2_id !== req.user.id)) return res.status(403).json({ error: 'Not allowed' });
+  } else {
+    return res.status(403).json({ error: 'Not allowed' });
+  }
+  const PREFIX = '\u0001E2E1:';
+  if (typeof m.content !== 'string' || !m.content.startsWith(PREFIX)) return res.status(400).json({ error: 'Not an encrypted message' });
+  let env;
+  try { env = JSON.parse(m.content.slice(PREFIX.length)); } catch (e) { return res.status(400).json({ error: 'Bad envelope' }); }
+  const incoming = req.body && req.body.keys;
+  if (!incoming || typeof incoming !== 'object') return res.status(400).json({ error: 'No keys supplied' });
+  env.keys = env.keys || {};
+  let added = 0;
+  for (const [keyId, entry] of Object.entries(incoming)) {
+    if (!keyId || typeof keyId !== 'string' || keyId.length > 120) continue;
+    if (env.keys[keyId]) continue; /* never overwrite an existing wrap */
+    if (!entry || typeof entry !== 'object') continue;
+    if (typeof entry.e !== 'object' || typeof entry.i !== 'string' || typeof entry.k !== 'string') continue;
+    if (entry.i.length > 200 || entry.k.length > 600 || (entry.s && String(entry.s).length > 200)) continue;
+    env.keys[keyId] = { e: entry.e, i: entry.i, k: entry.k, s: entry.s, d: entry.d || 'hkdf' };
+    added++;
+    if (added >= 200) break;
+  }
+  if (!added) return res.json({ ok: true, added: 0 });
+  const next = PREFIX + JSON.stringify(env);
+  if (next.length > 200000) return res.status(413).json({ error: 'Envelope too large' });
+  db.prepare('UPDATE messages SET content = ? WHERE id = ?').run(next, m.id);
+  res.json({ ok: true, added });
 });
 
 /* The explicit-content word list is not sensitive, and handing it to the
@@ -3479,6 +3562,9 @@ server.listen(PORT, () => {
   if (persist.enabled) {
     console.log(`[persist] durable storage active -> ${process.env.GH_DATA_REPO}`);
     persist.startAutoBackup(db);
+    /* Repair any upload that a previous failed/raced backup left out of the
+       data repo, so it survives the next restart. */
+    persist.reconcileUploads().catch(e => console.error('[persist] reconcile error:', e.message));
   } else {
     console.log('[persist] durable storage disabled (no GH_DATA_REPO set)');
   }

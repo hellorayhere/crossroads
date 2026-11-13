@@ -991,7 +991,7 @@ async function e2eImportSaved(entry) {
   if (!entry || !entry.priv || !entry.pub || !entry.keyId) return null;
   try {
     const priv = await crypto.subtle.importKey('jwk', entry.priv, { name: 'ECDH', namedCurve: 'P-256' }, false, ['deriveBits']);
-    return { priv, pub: entry.pub, keyId: entry.keyId };
+    return { priv, pub: entry.pub, keyId: entry.keyId, privJwk: entry.priv };
   } catch (e) {
     console.warn('[e2e] could not import saved key', entry.keyId, e);
     return null;
@@ -1035,7 +1035,7 @@ async function e2eInit() {
     e2e.keyring = imported;
 
     if (current) {
-      e2e.priv = current.priv; e2e.pub = current.pub; e2e.keyId = current.keyId;
+      e2e.priv = current.priv; e2e.pub = current.pub; e2e.keyId = current.keyId; e2e.privJwk = current.privJwk;
     } else {
       /* No usable key yet (first run, cleared storage, or a corrupt entry):
          generate a fresh device keypair rather than failing outright. */
@@ -1046,6 +1046,7 @@ async function e2eInit() {
         e2e.keyId = 'k_' + Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
         e2e.priv = kp.privateKey;
         e2e.pub = pubJwk;
+        e2e.privJwk = privJwk;
         const record = { priv: privJwk, pub: pubJwk, keyId: e2e.keyId };
         localStorage.setItem(e2eStorageKey(), JSON.stringify(record));
         ring.push(record);
@@ -1062,16 +1063,141 @@ async function e2eInit() {
       localStorage.setItem(e2eKeyringKey(), JSON.stringify(ring));
     } catch (e) { /* quota */ }
 
-    /* Register (or refresh) this device's public key. A network hiccup here
-       must not disable decryption of messages we already have keys for. */
-    try {
-      await api('/api/e2e/keys', { method: 'POST', body: JSON.stringify({ key_id: e2e.keyId, public_jwk: JSON.stringify(e2e.pub) }) });
-    } catch (err) {
-      console.warn('[e2e] key registration failed (will retry on next send)', err);
-    }
+    /* Register (or refresh) this device's public key IN THE BACKGROUND. This
+       used to be awaited, which meant a slow or stalled request delayed (or
+       completely blocked) every message render - the "nothing loads in real
+       time" symptom. Decryption only needs local keys, so registration can
+       happen whenever the network gets round to it. */
+    e2eRegisterKey().catch(() => {});
     return true;
   })();
   return e2e.ready;
+}
+
+/* Publish this device's public key. Safe to call repeatedly; retries quietly
+   so a temporary network failure does not leave us unregistered (which would
+   make our own messages unreadable on other devices). */
+let e2eRegistering = false;
+async function e2eRegisterKey(attempt) {
+  attempt = attempt || 1;
+  if (!e2e.keyId || !e2e.pub || e2eRegistering) return;
+  e2eRegistering = true;
+  try {
+    await api('/api/e2e/keys', { method: 'POST', body: JSON.stringify({ key_id: e2e.keyId, public_jwk: JSON.stringify(e2e.pub) }) });
+  } catch (err) {
+    console.warn('[e2e] key registration failed (attempt ' + attempt + ')', err && err.message);
+    if (attempt < 4) setTimeout(() => { e2eRegistering = false; e2eRegisterKey(attempt + 1); }, 1500 * attempt);
+  } finally {
+    e2eRegistering = false;
+  }
+}
+
+/* Never let key setup stall a render: if it has not settled quickly we carry on
+   and try the message again on the next retry pass. */
+function e2eInitWithTimeout(ms) {
+  return Promise.race([
+    e2eInit().catch(() => false),
+    new Promise(resolve => setTimeout(() => resolve(false), ms || 4000))
+  ]);
+}
+
+/* ---- Password-encrypted key escrow -------------------------------------
+   A device's private key normally lives only in that browser's localStorage.
+   Sign in on a new device (or clear storage) and the key is gone, so every
+   message wrapped to it shows "Encrypted message" forever. To fix that we keep
+   a password-encrypted backup on the server:
+        PBKDF2-SHA256(password) -> AES-256-GCM(private JWK)
+   The server only ever holds ciphertext it cannot open (it never sees the
+   password); the owner restores the key on any device simply by signing in. */
+const E2E_ESCROW_ITER = 150000;
+
+async function e2eEscrowDeriveKey(password, salt, iter) {
+  const base = await crypto.subtle.importKey('raw', new TextEncoder().encode(password), { name: 'PBKDF2' }, false, ['deriveKey']);
+  return crypto.subtle.deriveKey(
+    { name: 'PBKDF2', salt, iterations: iter || E2E_ESCROW_ITER, hash: 'SHA-256' },
+    base, { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']
+  );
+}
+
+async function e2eMakeEscrow(password) {
+  if (!password || !e2e.privJwk) return null;
+  try {
+    const salt = crypto.getRandomValues(new Uint8Array(16));
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    const key = await e2eEscrowDeriveKey(password, salt, E2E_ESCROW_ITER);
+    const ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, new TextEncoder().encode(JSON.stringify(e2e.privJwk)));
+    return { ct: e2eB64e(ct), iv: e2eB64e(iv), salt: e2eB64e(salt), iter: E2E_ESCROW_ITER, kdf: 'pbkdf2-sha256' };
+  } catch (e) { console.warn('[e2e] escrow build failed', e); return null; }
+}
+
+/* Upload an encrypted backup of the CURRENT key (idempotent). */
+async function e2eEscrowSync(password) {
+  if (!password || !e2e.keyId || !e2e.pub || !e2e.privJwk) return false;
+  try {
+    const escrow = await e2eMakeEscrow(password);
+    if (!escrow) return false;
+    await api('/api/e2e/keys', { method: 'POST', body: JSON.stringify({ key_id: e2e.keyId, public_jwk: JSON.stringify(e2e.pub), escrow }) });
+    return true;
+  } catch (e) { console.warn('[e2e] escrow sync failed', e && e.message); return false; }
+}
+
+/* Restore every escrowed key this account owns, using the password just used to
+   sign in. Each recovered keypair joins the keyring so messages wrapped to it
+   decrypt again. Returns how many were recovered. */
+async function e2eEscrowRestore(password) {
+  if (!password) return 0;
+  let data;
+  try { data = await api('/api/e2e/escrow'); } catch (e) { return 0; }
+  const escrows = (data && data.escrows) || [];
+  if (!escrows.length) return 0;
+  let ring = [];
+  try { ring = JSON.parse(localStorage.getItem(e2eKeyringKey()) || '[]') || []; } catch (e) { ring = []; }
+  if (!Array.isArray(ring)) ring = [];
+  const have = new Set((e2e.keyring || []).map(k => k.keyId).concat(ring.map(r => r && r.keyId)));
+  let restored = 0;
+  for (const item of escrows) {
+    if (!item || !item.escrow || have.has(item.key_id)) continue;
+    try {
+      const e = item.escrow;
+      const key = await e2eEscrowDeriveKey(password, e2eB64d(e.salt), e.iter);
+      const pt = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: e2eB64d(e.iv) }, key, e2eB64d(e.ct));
+      const privJwk = JSON.parse(new TextDecoder().decode(pt));
+      const pubJwk = { kty: privJwk.kty, crv: privJwk.crv, x: privJwk.x, y: privJwk.y, ext: true };
+      const priv = await crypto.subtle.importKey('jwk', privJwk, { name: 'ECDH', namedCurve: 'P-256' }, false, ['deriveBits']);
+      const entry = { priv: privJwk, pub: pubJwk, keyId: item.key_id };
+      ring.push(entry);
+      e2e.keyring.push({ priv, pub: pubJwk, keyId: item.key_id, privJwk });
+      have.add(item.key_id);
+      restored++;
+    } catch (e) { /* wrong password or corrupt escrow - skip this one */ }
+  }
+  if (restored) {
+    try { localStorage.setItem(e2eKeyringKey(), JSON.stringify(ring)); } catch (e) { /* quota */ }
+  }
+  return restored;
+}
+
+/* Runs once on app boot. auth.js leaves the just-used password in
+   sessionStorage; we consume it, restore any escrowed keys, make sure the
+   current key is backed up, then delete it immediately. */
+let e2eEscrowBooted = false;
+async function e2eBootstrapEscrow() {
+  if (e2eEscrowBooted) return;
+  let password = '';
+  try { password = sessionStorage.getItem('cr_e2e_pw') || ''; } catch (e) { password = ''; }
+  if (!password) return;
+  e2eEscrowBooted = true;
+  try {
+    await e2eInit();
+    const restored = await e2eEscrowRestore(password);
+    await e2eEscrowSync(password);
+    if (restored) {
+      /* Keys arrived after the first render may have already failed; retry
+         every failed message now that the restored keys are in the keyring. */
+      await e2eRetryFailed();
+    }
+  } catch (e) { console.warn('[e2e] escrow bootstrap failed', e && e.message); }
+  finally { try { sessionStorage.removeItem('cr_e2e_pw'); } catch (e) {} }
 }
 
 async function e2eConfig() {
@@ -1135,8 +1261,18 @@ async function e2eEncrypt(content, recipientIds) {
     const iv = crypto.getRandomValues(new Uint8Array(12));
     const aad = new TextEncoder().encode('E2E1|v2');
     const ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv, additionalData: aad }, key, new TextEncoder().encode(content));
+    /* Wrap the message key for each recipient. A single corrupt/unusable
+       public key must NOT force the whole message to plaintext for everyone:
+       we wrap the ones we can and skip the broken ones (a device we could not
+       wrap for simply cannot read this message until a peer re-shares the key,
+       which e2eShareKeys handles). We only fall back to plaintext if we cannot
+       wrap for ANYONE. */
     const wrapped = {};
-    for (const k of keys) wrapped[k.key_id] = await e2eWrapKey(JSON.parse(k.public_jwk), raw, k.key_id);
+    for (const k of keys) {
+      try { wrapped[k.key_id] = await e2eWrapKey(JSON.parse(k.public_jwk), raw, k.key_id); }
+      catch (e) { console.warn('[e2e] skipping unusable key', k.key_id); }
+    }
+    if (!Object.keys(wrapped).length) return { content, encrypted: false };
     const env = { v: 2, iv: e2eB64e(iv), ct: e2eB64e(ct), keys: wrapped };
     return { content: E2E_PREFIX + JSON.stringify(env), encrypted: true };
   } catch (e) {
@@ -1146,8 +1282,17 @@ async function e2eEncrypt(content, recipientIds) {
 }
 
 async function e2eDecrypt(content) {
+  const r = await e2eDecryptFull(content);
+  if (r === null) return null;
+  if (typeof r === 'string') return r;
+  return r.text;
+}
+
+/* Same as e2eDecrypt but also returns the unwrapped message key, so a device
+   that can read a message can re-wrap that key for devices that cannot. */
+async function e2eDecryptFull(content) {
   if (typeof content !== 'string' || !content.startsWith(E2E_PREFIX)) return content;
-  const ok = await e2eInit();
+  const ok = await e2eInitWithTimeout(4000);
   if (!ok) return null;
   let env;
   try { env = JSON.parse(content.slice(E2E_PREFIX.length)); } catch (e) { return null; }
@@ -1175,12 +1320,46 @@ async function e2eDecrypt(content) {
       const key = await crypto.subtle.importKey('raw', raw, { name: 'AES-GCM' }, false, ['decrypt']);
       const msgAad = isV2 ? new TextEncoder().encode('E2E1|v2') : undefined;
       const pt = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: e2eB64d(env.iv), additionalData: msgAad }, key, e2eB64d(env.ct));
-      return new TextDecoder().decode(pt);
+      return { text: new TextDecoder().decode(pt), raw: new Uint8Array(raw), env, keyId: cand.keyId };
     } catch (e) {
       /* try the next key */
     }
   }
   return null;
+}
+
+/* Devices we have already tried to share a given message with this session. */
+const e2eShared = new Set();
+
+/* Extend a message's envelope to any current participant whose device is
+   missing a wrapped key. Only a device that has already decrypted the message
+   can do this, so access is never widened by the server - just re-shared by
+   someone who legitimately has it. */
+async function e2eShareKeys(m, raw, env) {
+  if (!m || !m.id || !raw || !env || !env.keys) return;
+  if (e2eShared.has(m.id)) return;
+  e2eShared.add(m.id);
+  try {
+    const inChannel = m.channel_id && state.channel && m.channel_id === state.channel.id;
+    const inDm = m.dm_id && state.dm && m.dm_id === state.dm.id;
+    if (!inChannel && !inDm) return;
+    const ids = inChannel ? (state.members || []).map(x => x.id) : [me.id, state.dm.user.id];
+    if (!ids.length) return;
+    const keys = await e2eFetchKeys(ids);
+    const missing = keys.filter(k => !env.keys[k.key_id]);
+    if (!missing.length) return;
+    const wrapped = {};
+    for (const k of missing) {
+      try { wrapped[k.key_id] = await e2eWrapKey(JSON.parse(k.public_jwk), raw, k.key_id); } catch (e) { /* skip */ }
+    }
+    if (!Object.keys(wrapped).length) return;
+    await api('/api/messages/' + encodeURIComponent(m.id) + '/keys', {
+      method: 'POST', body: JSON.stringify({ keys: wrapped })
+    });
+    Object.assign(env.keys, wrapped);
+  } catch (e) {
+    e2eShared.delete(m.id); /* allow a later retry */
+  }
 }
 
 /* Decrypt in place so every downstream render path sees plaintext.
@@ -1194,9 +1373,13 @@ async function e2eDecryptMessage(m) {
     m.encrypted = true;
     /* Always (re)try: a previous failure may simply mean the keyring had not
        finished loading. Successful results are cached in m.content. */
-    const pt = await e2eDecrypt(m._e2eRaw);
-    if (pt == null) { m.content = ''; m.decrypt_failed = true; }
-    else { m.content = pt; m.decrypt_failed = false; }
+    const res = await e2eDecryptFull(m._e2eRaw);
+    if (res == null) { m.content = ''; m.decrypt_failed = true; }
+    else if (typeof res === 'string') { m.content = res; m.decrypt_failed = false; }
+    else {
+      m.content = res.text; m.decrypt_failed = false;
+      e2eShareKeys(m, res.raw, res.env);
+    }
   }
   if (m.reply_to) await e2eDecryptMessage(m.reply_to);
   return m;
@@ -1588,6 +1771,9 @@ async function init() {
   me = meData.user;
   /* Spin up end-to-end encryption for this device (non-blocking). */
   e2eInit().catch(() => {});
+  /* If we just signed in, restore any password-encrypted key backups so old
+     messages become readable on this device too (non-blocking). */
+  e2eBootstrapEscrow().catch(() => {});
   myChosenStatus = me.status || 'online';
   try { localStorage.setItem('cr_user', JSON.stringify(me)); } catch (err) { /* ignore */ }
   try {
@@ -1713,15 +1899,24 @@ function connectSocket() {
     lastPushedStatus = null;
     pushPresence(true);
   });
-  socket.on('message', async (m) => {
-    await e2eDecryptMessage(m);
+  /* Show the message the instant it arrives, then decrypt in place. Awaiting
+     decryption first made messages appear late (or not at all if key setup
+     stalled), which is the "nothing loads in real time" bug. */
+  socket.on('message', (m) => {
     if (state.channel && m.channel_id === state.channel.id) {
       state.messages.push(m); appendMessage(m);
+      e2eDecryptMessage(m).then(() => updateMessageNode(m)).catch(() => {});
+    } else {
+      e2eDecryptMessage(m).catch(() => {});
     }
   });
-  socket.on('dm_message', async (m) => {
-    await e2eDecryptMessage(m);
-    if (state.dm && m.dm_id === state.dm.id) { state.messages.push(m); appendMessage(m); }
+  socket.on('dm_message', (m) => {
+    if (state.dm && m.dm_id === state.dm.id) {
+      state.messages.push(m); appendMessage(m);
+      e2eDecryptMessage(m).then(() => updateMessageNode(m)).catch(() => {});
+    } else {
+      e2eDecryptMessage(m).catch(() => {});
+    }
     scheduleDMsReload();
   });
   socket.on('dm_notify', async (data) => {
@@ -1739,11 +1934,11 @@ function connectSocket() {
     if (node) node.remove();
     state.messages = state.messages.filter(x => x.id !== data.id);
   });
-  socket.on('message_updated', async (m) => {
-    await e2eDecryptMessage(m);
+  socket.on('message_updated', (m) => {
     const idx = state.messages.findIndex(x => x.id === m.id);
     if (idx >= 0) state.messages[idx] = m;
     updateMessageNode(m);
+    e2eDecryptMessage(m).then(() => updateMessageNode(m)).catch(() => {});
   });
   socket.on('reaction', (data) => {
     const m = state.messages.find(x => x.id === data.message_id);
@@ -3690,7 +3885,9 @@ function messageNode(m, grouped, animate) {
     </div>`;
   /* A message that is nothing but a GIF link should show only the GIF. */
   const failed = !!m.decrypt_failed;
-  const bodyText = failed ? '' : (isEmbeddableMediaUrl((extractUrls(m.content || '')[0] || ''))
+  /* Arrived over the socket but not decrypted yet - never flash ciphertext. */
+  const pending = !failed && typeof m.content === 'string' && m.content.startsWith(E2E_PREFIX);
+  const bodyText = (failed || pending) ? '' : (isEmbeddableMediaUrl((extractUrls(m.content || '')[0] || ''))
     ? stripEmbeddableUrls(m.content)
     : m.content);
   /* Discord enlarges messages that are nothing but emoji ("jumbo" emoji). */
@@ -3698,7 +3895,7 @@ function messageNode(m, grouped, animate) {
   const nEmoji = emojiOnly ? emojiCount(bodyText || '') : 0;
   const jumboCls = emojiOnly ? (nEmoji <= 3 ? ' jumbo' : (nEmoji <= 6 ? ' jumbo lg' : '')) : '';
   node.innerHTML = `${toolbar}${gutter}<div class="body">${m.reply_to ? replyRefHTML(m.reply_to) : ''}${head}
-    <div class="text" data-content>${m.pinned ? `<span class="msg-pin" title="Pinned message">${icon('pin')}</span>` : ''}${failed ? `<span class="text-body msg-undecryptable" title="This message was encrypted for a different device and cannot be read here">${icon('lock')} Encrypted message</span>` : `<span class="text-body${jumboCls}">${formatContent(bodyText)}</span>`}${m.edited_at ? `<span class="msg-edited" title="Edited ${escapeHtml(formatTime(m.edited_at))}">(edited)</span>` : ''}</div>
+    <div class="text" data-content>${m.pinned ? `<span class="msg-pin" title="Pinned message">${icon('pin')}</span>` : ''}${failed ? `<span class="text-body msg-undecryptable" title="This message was encrypted for a different device and cannot be read here">${icon('lock')} Encrypted message</span>` : (pending ? `<span class="text-body msg-pending">Decrypting\u2026</span>` : `<span class="text-body${jumboCls}">${formatContent(bodyText)}</span>`)}${m.edited_at ? `<span class="msg-edited" title="Edited ${escapeHtml(formatTime(m.edited_at))}">(edited)</span>` : ''}</div>
     <div class="attachment-slot"></div>
     <div class="embed-slot"></div>
     <div class="reactions">${reactionsHTML(m.reactions)}</div>
@@ -4093,13 +4290,30 @@ function attachmentNode(m) {
     wrap.classList.add('media');
     if (isGif) wrap.classList.add('gif');
     wrap.innerHTML = `<img src="${escapeHtml(url)}" alt="${escapeHtml(m.attachment_name || '')}" loading="lazy" decoding="async">`;
-    wrap.querySelector('img').addEventListener('click', () => lightbox(url, 'image', m.attachment_name || '', sizeText));
+    const imgEl = wrap.querySelector('img');
+    imgEl.addEventListener('click', () => lightbox(url, 'image', m.attachment_name || '', sizeText));
+    /* A missing or corrupt file used to leave an invisible, zero-height image.
+       Swap in a clear card so the attachment is always visible. */
+    imgEl.addEventListener('error', () => {
+      if (!imgEl.isConnected) return;
+      wrap.classList.remove('media', 'gif');
+      wrap.classList.add('attachment-missing');
+      wrap.innerHTML = `<div class="file-card missing"><div class="fi">${icon('image')}</div><div class="fc-meta"><span class="missing-name">${escapeHtml(m.attachment_name || 'image')}</span><div class="fsize">Image unavailable \u2022 ${escapeHtml(sizeText || 'file missing')}</div></div></div>`;
+    });
     if (sizeText) wrap.insertAdjacentHTML('beforeend', `<span class="att-size">${sizeText}</span>`);
   } else if (t.startsWith('video/')) {
     /* Videos show a poster frame with a centred play button; pressing play
        reveals a full custom control bar (seek, volume, fullscreen). */
     wrap.classList.add('video-attachment');
-    wrap.appendChild(videoPlayerNode(url, m.attachment_name || ''));
+    const vp = videoPlayerNode(url, m.attachment_name || '');
+    const vEl = vp.querySelector('video');
+    if (vEl) vEl.addEventListener('error', () => {
+      if (!vp.isConnected) return;
+      wrap.classList.remove('video-attachment');
+      wrap.classList.add('attachment-missing');
+      wrap.innerHTML = `<div class="file-card missing"><div class="fi">${icon('film')}</div><div class="fc-meta"><span class="missing-name">${escapeHtml(m.attachment_name || 'video')}</span><div class="fsize">Video unavailable \u2022 ${escapeHtml(sizeText || 'file missing')}</div></div></div>`;
+    });
+    wrap.appendChild(vp);
     if (sizeText) wrap.insertAdjacentHTML('beforeend', `<span class="att-size">${sizeText}</span>`);
   } else if (t.startsWith('audio/')) {
     wrap.classList.add('media');

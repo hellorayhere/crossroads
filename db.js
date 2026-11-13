@@ -515,6 +515,15 @@ function migrate() {
     )`);
   } catch (e) {}
   try { db.exec('CREATE INDEX IF NOT EXISTS idx_e2e_keys_user ON e2e_keys(user_id)'); } catch (e) {}
+  /* Additive: password-encrypted backup of a device's PRIVATE key. The server
+     only ever stores ciphertext that it cannot open (the key is derived from
+     the user's password in the browser). It exists so a user who signs in on a
+     new device can restore the key that old messages were encrypted to, instead
+     of being permanently locked out ("Encrypted message"). Never destructive. */
+  try {
+    const e2eCols = db.prepare('PRAGMA table_info(e2e_keys)').all().map(c => c.name);
+    if (!e2eCols.includes('escrow')) db.exec('ALTER TABLE e2e_keys ADD COLUMN escrow TEXT');
+  } catch (e) {}
 
   // Private staff notes attached to an account (never shown to the user).
   try {

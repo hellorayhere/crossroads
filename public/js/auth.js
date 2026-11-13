@@ -196,6 +196,9 @@
       const data = await post('/api/login', { identifier, password, code, trust_device: trustDevice, device_token: deviceToken });
       localStorage.setItem('cr_token', data.token);
       localStorage.setItem('cr_user', JSON.stringify(data.user));
+      /* Hand the password to the app for a one-time E2E key restore (it is
+         consumed and deleted on boot; never persisted beyond this tab). */
+      try { sessionStorage.setItem('cr_e2e_pw', password); } catch (e) { /* ignore */ }
       if (data.trusted_device_token) {
         try { localStorage.setItem('cr_trusted_device', data.trusted_device_token); } catch (e) { /* ignore */ }
       }
@@ -268,6 +271,7 @@
       const data = await post('/api/register', { username, password });
       localStorage.setItem('cr_token', data.token);
       localStorage.setItem('cr_user', JSON.stringify(data.user));
+      try { sessionStorage.setItem('cr_e2e_pw', password); } catch (e) { /* ignore */ }
       window.location.href = '/app.html';
     } catch (err) {
       showError(err.message);
