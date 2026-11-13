@@ -38,7 +38,8 @@ const state = {
      member, not just admins. collapsedCats remembers which groups are folded. */
   categories: [],
   collapsedCats: {},
-  mention: { active: false, query: '', items: [], sel: 0, start: 0 }
+  mention: { active: false, query: '', items: [], sel: 0, start: 0 },
+  channelMention: { active: false, query: '', items: [], sel: 0, start: 0 }
 };
 
 /* Monotonic token guarding every "navigate to a conversation" async load.
@@ -4685,7 +4686,8 @@ function renderMessages() {
 
   let prev = null;
   for (const m of state.messages) {
-    const grouped = prev && prev.author && m.author && m.kind !== 'call' && prev.kind !== 'call' && prev.author.id === m.author.id && (m.created_at - prev.created_at) < 5 * 60 * 1000 && !m.reply_to;
+    if (needsGapDivider(prev, m)) inner.appendChild(gapDividerNode(m.created_at));
+    const grouped = prev && prev.author && m.author && m.kind !== 'call' && prev.kind !== 'call' && prev.author.id === m.author.id && (m.created_at - prev.created_at) < 10 * 60 * 1000 && !m.reply_to && !needsGapDivider(prev, m);
     inner.appendChild(messageNode(m, grouped));
     prev = m;
   }
@@ -4814,6 +4816,22 @@ function callEventNode(m) {
   return node;
 }
 
+/* A slim rule with a timestamp, dropped into the transcript when a
+   conversation goes quiet for 10+ minutes (or rolls over midnight). It gives
+   long channels and DMs visual breathing room instead of one unbroken wall of
+   stacked messages. */
+function gapDividerNode(ts) {
+  const el = document.createElement('div');
+  el.className = 'msg-divider';
+  el.innerHTML = `<span class="msg-divider-line"></span><span class="msg-divider-label">${escapeHtml(formatTime(ts))}</span><span class="msg-divider-line"></span>`;
+  return el;
+}
+function needsGapDivider(prev, m) {
+  if (!prev || !m) return false;
+  if ((m.created_at - prev.created_at) > 10 * 60 * 1000) return true;
+  return new Date(prev.created_at).toDateString() !== new Date(m.created_at).toDateString();
+}
+
 function messageNode(m, grouped, animate) {
   if (m && m.kind === 'call') return callEventNode(m);
   /* Discord highlights a message when it is a reply to *you*: a soft tint plus
@@ -4920,7 +4938,9 @@ function appendMessage(m) {
   const inner = $('messages-inner');
   if (!inner) { renderMessages(); return; }
   const prev = state.messages[state.messages.length - 2];
-  const grouped = prev && prev.author && m.author && m.kind !== 'call' && prev.kind !== 'call' && prev.author.id === m.author.id && (m.created_at - prev.created_at) < 5 * 60 * 1000 && !m.reply_to;
+  const gap = needsGapDivider(prev, m);
+  if (gap) inner.appendChild(gapDividerNode(m.created_at));
+  const grouped = prev && prev.author && m.author && m.kind !== 'call' && prev.kind !== 'call' && prev.author.id === m.author.id && (m.created_at - prev.created_at) < 10 * 60 * 1000 && !m.reply_to && !gap;
   const node = messageNode(m, grouped, true);
   inner.appendChild(node);
   typewriterMessage(node, m);
@@ -5058,7 +5078,7 @@ function formatContent(text) {
       return `<span class="mention${isMe ? ' me' : ''}${special}"${uidAttr}>@${name}</span>`;
     });
     // #channel links
-    s = s.replace(/(^|[\s(])#([a-z0-9-]+)/g, '$1<span class="mention" data-channel="$2">#$2</span>');
+    s = s.replace(/(^|[\s(])#([a-z0-9._-]+)/g, '$1<span class="mention" data-channel="$2">#$2</span>');
     // Bare domains (Discord auto-links these too): example.com/path, www.example.com
     s = s.replace(/(^|[\s(])((?:www\.)?[a-z0-9-]+(?:\.[a-z0-9-]+)*\.[a-z]{2,}(?:\/[^\s<)]*)?)/gi,
       (m, pre, url) => `${pre}<a href="https://${url}" target="_blank" rel="noopener noreferrer">${url}</a>`);
@@ -5669,25 +5689,89 @@ function mediaEmbedNode(media) {
   return wrap;
 }
 
+/* Favicon service for arbitrary hosts. DuckDuckGo's icon proxy is reliable and
+   CORS-friendly, so every embed gets a real site glyph without an extra
+   round-trip through our own server. */
+function embedFavicon(host) {
+  return 'https://icons.duckduckgo.com/ip3/' + encodeURIComponent(host || '') + '.ico';
+}
+function embedHostOf(url) {
+  try { return new URL(url).hostname.replace(/^www\./i, ''); } catch (e) { return String(url || ''); }
+}
+/* Shimmering skeleton shown while metadata is in flight. */
+function embedSkeletonHTML() {
+  return `<div class="embed-body embed-loading">
+    <div class="embed-head"><span class="embed-fav-skel"></span><span class="embed-site-skel"></span></div>
+    <div class="embed-main"><div class="embed-text">
+      <span class="embed-line w80"></span><span class="embed-line w95"></span><span class="embed-line w55"></span>
+    </div><span class="embed-thumb-skel"></span></div>
+  </div>`;
+}
+/* Compact, always-legible card used when metadata can't be fetched in time. */
+function embedFallbackHTML(url, site) {
+  const host = site || embedHostOf(url);
+  return `<div class="embed-body embed-fallback">
+    <div class="embed-head"><img class="embed-fav" src="${embedFavicon(host)}" alt="" loading="lazy" onerror="this.style.visibility='hidden'"><span class="embed-site">${escapeHtml(host)}</span></div>
+    <a class="embed-title" href="${escapeHtml(url)}" target="_blank" rel="noopener">${escapeHtml(url)}</a>
+    <div class="embed-foot"><span class="embed-url">${escapeHtml(url)}</span><span class="embed-open">${icon('external-link')}</span></div>
+  </div>`;
+}
 function embedNode(url) {
   const wrap = document.createElement('div');
-  wrap.className = 'embed';
-  wrap.innerHTML = `<div class="embed-content"><div class="embed-site">Loading preview\u2026</div></div>`;
+  wrap.className = 'embed is-loading';
+  wrap.innerHTML = embedSkeletonHTML();
+  let settled = false;
+  /* Never leave the placeholder spinning forever: if the metadata request
+     stalls (slow origin, bot wall, dead host) swap in the fallback card after
+     8s so the transcript always has a usable link. */
+  const timer = setTimeout(() => {
+    if (settled) return;
+    settled = true;
+    wrap.classList.remove('is-loading');
+    wrap.innerHTML = embedFallbackHTML(url);
+  }, 8000);
   api('/api/embed?url=' + encodeURIComponent(url)).then(data => {
-    if (!data) return;
+    if (settled) return;
+    settled = true;
+    clearTimeout(timer);
+    if (!data) { wrap.classList.remove('is-loading'); wrap.innerHTML = embedFallbackHTML(url); return; }
     /* The server resolved a real GIF/MP4 for us (Giphy/Tenor oEmbed). */
     if (data.media && data.media.url) {
       const node = mediaEmbedNode({ type: data.media.type || 'image', url: data.media.url });
       wrap.replaceWith(node);
       return;
     }
-    const desc = data.description ? (data.description.length > 200 ? data.description.slice(0, 200) + '\u2026' : data.description) : '';
-    wrap.innerHTML = `<div class="embed-content">
-        <div class="embed-site">${escapeHtml(data.site || '')}</div>
-        <div class="embed-title"><a href="${escapeHtml(url)}" target="_blank" rel="noopener">${escapeHtml(data.title || url)}</a></div>
-        ${desc ? `<div class="embed-desc">${escapeHtml(desc)}</div>` : ''}
-      </div>${data.image ? `<img class="embed-thumb" src="${escapeHtml(data.image)}" alt="" loading="lazy" decoding="async" onerror="this.remove()">` : ''}`;
-  }).catch(() => { wrap.remove(); });
+    const host = data.site || embedHostOf(url);
+    const title = data.title && data.title !== url ? data.title : '';
+    const desc = data.description ? (data.description.length > 300 ? data.description.slice(0, 300) + '\u2026' : data.description) : '';
+    /* Nothing useful came back -> a tidy fallback rather than a blank shell. */
+    if (!title && !desc && !data.image) {
+      wrap.classList.remove('is-loading');
+      wrap.innerHTML = embedFallbackHTML(url, host);
+      return;
+    }
+    wrap.classList.remove('is-loading');
+    wrap.innerHTML = `<div class="embed-body">
+        <div class="embed-head">
+          <img class="embed-fav" src="${embedFavicon(host)}" alt="" loading="lazy" onerror="this.style.visibility='hidden'">
+          <span class="embed-site">${escapeHtml(host)}</span>
+        </div>
+        <div class="embed-main">
+          <div class="embed-text">
+            <a class="embed-title" href="${escapeHtml(url)}" target="_blank" rel="noopener">${escapeHtml(title || host)}</a>
+            ${desc ? `<div class="embed-desc">${escapeHtml(desc)}</div>` : ''}
+          </div>
+          ${data.image ? `<a class="embed-thumb-link" href="${escapeHtml(url)}" target="_blank" rel="noopener"><img class="embed-thumb" src="${escapeHtml(data.image)}" alt="" loading="lazy" decoding="async" onerror="this.parentNode.remove()"></a>` : ''}
+        </div>
+        <div class="embed-foot"><span class="embed-url">${escapeHtml(url)}</span><span class="embed-open">${icon('external-link')}</span></div>
+      </div>`;
+  }).catch(() => {
+    if (settled) return;
+    settled = true;
+    clearTimeout(timer);
+    wrap.classList.remove('is-loading');
+    wrap.innerHTML = embedFallbackHTML(url);
+  });
   return wrap;
 }
 
@@ -5966,6 +6050,7 @@ async function sendMessage() {
   clearAttachment();
   setReplyTo(null);
   closeMentionPop();
+  closeChannelPop();
   try {
     let res;
     if (t.kind === 'channel') res = await api('/api/channels/' + t.id + '/messages', { method: 'POST', body: JSON.stringify(payload) });
@@ -6092,6 +6177,87 @@ function insertMention(u) {
 function closeMentionPop() {
   const el = $('mention-pop'); if (el) el.remove();
   state.mention.active = false;
+}
+
+/* ---------------- # channel autocomplete ----------------
+   Typing "#" in the composer of a server channel opens a filterable list of
+   that server's text channels. Picking one inserts "#name " which the message
+   renderer already turns into a clickable channel link. */
+function channelCandidates() {
+  if (!state.server || !Array.isArray(state.channels)) return [];
+  return state.channels.filter(c => c && (c.type === 'text' || !c.type));
+}
+function updateChannelAutocomplete() {
+  const ta = $('message-input');
+  if (!ta) return;
+  if (!state.server) { closeChannelPop(); return; }
+  const caret = ta.selectionStart;
+  const before = ta.value.slice(0, caret);
+  /* Only fire at the start of a word so markdown headings ("# Title") and
+     hashtags mid-word never open the picker. */
+  const m = before.match(/(?:^|[\s(])#([a-z0-9._-]{0,32})$/i);
+  if (!m) { closeChannelPop(); return; }
+  const q = m[1].toLowerCase();
+  const start = caret - m[1].length - 1;
+  const cands = channelCandidates().filter(c => !q || (c.name || '').toLowerCase().includes(q))
+    .sort((a, b) => {
+      const an = (a.name || '').toLowerCase().startsWith(q) ? 0 : 1;
+      const bn = (b.name || '').toLowerCase().startsWith(q) ? 0 : 1;
+      if (an !== bn) return an - bn;
+      return (a.name || '').localeCompare(b.name || '');
+    }).slice(0, 9);
+  if (!cands.length) { closeChannelPop(); return; }
+  state.channelMention = { active: true, query: q, items: cands, sel: 0, start };
+  renderChannelPop();
+}
+function renderChannelPop() {
+  const old = $('channel-pop'); if (old) old.remove();
+  if (!state.channelMention.active) return;
+  const boxEl = $('composer-box');
+  if (!boxEl) return;
+  const box = boxEl.getBoundingClientRect();
+  const pop = document.createElement('div');
+  pop.className = 'mention-pop channel-pop';
+  pop.id = 'channel-pop';
+  const cats = state.categories || [];
+  const catName = (c) => {
+    const cat = cats.find(x => x.id === c.category_id);
+    return cat ? cat.name : '';
+  };
+  pop.innerHTML = `<div class="mp-head">${icon('hash')}<span>Channels</span><span class="mp-hint">Enter to insert</span></div>` +
+    state.channelMention.items.map((c, i) => {
+      const cn = catName(c);
+      return `<div class="mp-item${i === state.channelMention.sel ? ' sel' : ''}" data-i="${i}">
+        <span class="mp-ico">${icon('hash')}</span>
+        <div class="mp-main"><div class="mp-name">${escapeHtml(c.name)}</div>${cn ? `<div class="mp-tag">${escapeHtml(cn)}</div>` : ''}</div>
+      </div>`;
+    }).join('');
+  document.body.appendChild(pop);
+  hydrateIcons(pop);
+  const ph = pop.offsetHeight;
+  pop.style.left = box.left + 'px';
+  pop.style.top = Math.max(8, box.top - ph - 8) + 'px';
+  pop.querySelectorAll('.mp-item').forEach(el => el.addEventListener('mousedown', (e) => {
+    e.preventDefault(); insertChannelMention(state.channelMention.items[+el.dataset.i]);
+  }));
+}
+function insertChannelMention(c) {
+  if (!c) return;
+  const ta = $('message-input');
+  const caret = ta.selectionStart;
+  const before = ta.value.slice(0, state.channelMention.start);
+  const after = ta.value.slice(caret);
+  const insert = '#' + c.name + ' ';
+  ta.value = before + insert + after;
+  const pos = (before + insert).length;
+  ta.setSelectionRange(pos, pos);
+  closeChannelPop();
+  ta.focus();
+  autoGrow(ta);
+}
+function closeChannelPop() {
+  const el = $('channel-pop'); if (el) el.remove();
+  state.channelMention.active = false;
 }
 
 /* ---------------- Attachments ---------------- */
@@ -6347,6 +6513,7 @@ function closePopovers() {
   closeMiniProfile();
   closeCustomSelects();
   closeMentionPop();
+  closeChannelPop();
 }
 
 async function deleteMessage(mid, instant) {
@@ -12656,16 +12823,30 @@ function bindGlobalEvents() {
   input.addEventListener('input', () => {
     autoGrow(input);
     updateMentionAutocomplete();
+    updateChannelAutocomplete();
     const now = Date.now();
     if (now - typingSent > 2000) { typingSent = now; emitTyping(); }
   });
   input.addEventListener('keydown', (e) => {
-    if (state.mention.active) {
-      const len = state.mention.items.length;
-      if (e.key === 'ArrowDown') { e.preventDefault(); state.mention.sel = (state.mention.sel + 1) % len; renderMentionPop(); return; }
-      if (e.key === 'ArrowUp') { e.preventDefault(); state.mention.sel = (state.mention.sel - 1 + len) % len; renderMentionPop(); return; }
-      if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); insertMention(state.mention.items[state.mention.sel]); return; }
-      if (e.key === 'Escape') { e.preventDefault(); closeMentionPop(); return; }
+    /* One popup is active at a time: @ members or # channels. */
+    const pop = state.mention.active ? state.mention : (state.channelMention.active ? state.channelMention : null);
+    if (pop) {
+      const isChannel = pop === state.channelMention;
+      const len = pop.items.length;
+      const repaint = () => (isChannel ? renderChannelPop() : renderMentionPop());
+      if (e.key === 'ArrowDown') { e.preventDefault(); pop.sel = (pop.sel + 1) % len; repaint(); return; }
+      if (e.key === 'ArrowUp') { e.preventDefault(); pop.sel = (pop.sel - 1 + len) % len; repaint(); return; }
+      if (e.key === 'Enter' || e.key === 'Tab') {
+        e.preventDefault();
+        const pick = pop.items[pop.sel];
+        if (isChannel) insertChannelMention(pick); else insertMention(pick);
+        return;
+      }
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        if (isChannel) closeChannelPop(); else closeMentionPop();
+        return;
+      }
     }
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
   });

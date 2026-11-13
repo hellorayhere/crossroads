@@ -3588,16 +3588,42 @@ async function resolveOembed(url, hostname) {
   } catch (e) { return null; }
 }
 
+/* In-memory cache of resolved link previews. Previews are immutable enough for
+   a short window, and caching means re-opening a channel (or a message that
+   scrolls back into view) paints instantly instead of re-fetching the origin
+   and risking the 7s timeout. Bounded so it can never grow without limit. */
+const embedCache = new Map();
+const EMBED_TTL = 30 * 60 * 1000;
+const EMBED_CACHE_MAX = 500;
+function embedCacheGet(url) {
+  const hit = embedCache.get(url);
+  if (!hit) return null;
+  if (Date.now() - hit.at > EMBED_TTL) { embedCache.delete(url); return null; }
+  return hit.data;
+}
+function embedCacheSet(url, data) {
+  if (embedCache.size >= EMBED_CACHE_MAX) {
+    const oldest = embedCache.keys().next().value;
+    if (oldest) embedCache.delete(oldest);
+  }
+  embedCache.set(url, { at: Date.now(), data });
+}
+
 app.get('/api/embed', auth, async (req, res) => {
   const url = req.query.url;
   if (!url || !/^https?:\/\//i.test(url)) return res.status(400).json({ error: 'Invalid URL' });
   let hostname = '';
   try { hostname = new URL(url).hostname; } catch (e) { return res.status(400).json({ error: 'Invalid URL' }); }
 
+  const cached = embedCacheGet(url);
+  if (cached) return res.json(cached);
+
   /* Fast path: known GIF providers resolve straight to the media file. */
   const media = await resolveOembed(url, hostname);
   if (media) {
-    return res.json({ url, site: hostname.replace(/^www\./i, ''), title: null, description: null, image: null, media });
+    const payload = { url, site: hostname.replace(/^www\./i, ''), title: null, description: null, image: null, media };
+    embedCacheSet(url, payload);
+    return res.json(payload);
   }
 
   try {
@@ -3612,9 +3638,13 @@ app.get('/api/embed', auth, async (req, res) => {
     let image = metaPick(html, 'og:image') || metaPick(html, 'twitter:image');
     const site = metaPick(html, 'og:site_name') || hostname;
     if (image && !/^https?:\/\//i.test(image)) { try { image = new URL(image, url).href; } catch (e) { image = null; } }
-    res.json({ url, site: decodeEntities(site), title: decodeEntities(title.trim()), description: description ? decodeEntities(description.trim()) : null, image: image || null });
+    const payload = { url, site: decodeEntities(site), title: decodeEntities(title.trim()), description: description ? decodeEntities(description.trim()) : null, image: image || null };
+    embedCacheSet(url, payload);
+    res.json(payload);
   } catch (e) {
-    res.json({ url, site: hostname, title: url, description: null, image: null });
+    /* Do NOT cache failures - the origin may recover, and the client shows its
+       own compact fallback card anyway. */
+    res.json({ url, site: hostname.replace(/^www\./i, ''), title: url, description: null, image: null });
   }
 });
 
