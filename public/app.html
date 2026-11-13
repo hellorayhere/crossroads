@@ -75,10 +75,9 @@
     .boot-gate .bg-logo {
       position: relative; width: 104px; height: 104px; border-radius: 30px;
       display: grid; place-items: center;
-      background: linear-gradient(160deg, #1c1e26 0%, #101116 100%);
+      background: #0b0c10;
       box-shadow:
-        0 0 0 1px rgba(255,255,255,.07),
-        inset 0 1px 0 rgba(255,255,255,.08),
+        0 0 0 1px rgba(255,255,255,.08),
         0 30px 70px -24px rgba(88,101,242,.65);
       animation: bgfloat 4.4s ease-in-out infinite;
     }
@@ -90,27 +89,12 @@
       filter: blur(3px); opacity: .85;
       animation: bgspin 3.6s linear infinite;
     }
-    .boot-gate .bg-logo::after {
-      content: ''; position: absolute; inset: 0; border-radius: 30px;
-      background: radial-gradient(60% 60% at 50% 30%, rgba(255,255,255,.10), transparent 70%);
-      pointer-events: none;
-    }
-    .boot-gate .bg-mark { position: relative; width: 52px; height: 52px; }
-    .boot-gate .bg-mark i {
-      position: absolute; left: 50%; top: 50%; width: 9px; height: 52px;
-      border-radius: 6px; transform: translate(-50%,-50%) rotate(45deg);
-      background: linear-gradient(180deg, #a7adff 0%, #5865f2 100%);
-      box-shadow: 0 0 18px rgba(88,101,242,.55);
-    }
-    .boot-gate .bg-mark i:nth-child(2) {
-      transform: translate(-50%,-50%) rotate(-45deg);
-      background: linear-gradient(180deg, #ffd77a 0%, #f0b232 100%);
-      box-shadow: 0 0 18px rgba(240,178,50,.45);
-    }
-    .boot-gate .bg-mark i:nth-child(3) {
-      width: 11px; height: 11px; border-radius: 50%;
-      background: #0d0e12; box-shadow: 0 0 0 3px rgba(255,255,255,.10);
-      transform: translate(-50%,-50%);
+    /* The mark is the site's own favicon artwork, so the boot screen and the
+       browser tab share exactly the same identity. */
+    .boot-gate .bg-icon {
+      position: relative; z-index: 1; display: block;
+      width: 100%; height: 100%; object-fit: cover;
+      border-radius: inherit;
     }
     @keyframes bgfloat { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-7px); } }
     @keyframes bgspin { to { transform: rotate(360deg); } }
@@ -235,7 +219,7 @@
   <div class="boot-gate" id="boot-gate" aria-hidden="true">
     <div class="bg-inner">
       <div class="bg-logo" aria-hidden="true">
-        <span class="bg-mark"><i></i><i></i><i></i></span>
+        <img class="bg-icon" src="/icon-512.png" alt="" draggable="false" />
       </div>
       <div class="bg-brand">Crossroads</div>
       <div class="bg-tag">hello, we now hangout here</div>
