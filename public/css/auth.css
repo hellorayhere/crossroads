@@ -115,19 +115,6 @@ body {
   object-fit: cover;
   object-position: center;
 }
-/* Crisp, scalable Discord mark replacing the old baked-in icon. */
-.discord-card .dc-logo {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  width: 62px;
-  height: auto;
-  transform: translate(-50%, -50%);
-  color: #fff;
-  filter: drop-shadow(0 4px 14px rgba(0, 0, 0, 0.55));
-  transition: transform 0.25s var(--ease-out);
-}
-.discord-card:hover .dc-logo { transform: translate(-50%, -50%) scale(1.06); }
 .discord-card .dc-body {
   display: flex;
   flex-direction: column;

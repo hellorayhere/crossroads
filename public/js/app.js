@@ -665,6 +665,19 @@ function accentInk(hex) {
   };
 }
 
+/* Resolve the colour used for a profile banner. `banner_color` is populated
+   with the blurple default (#5865F2) for every account, so it can't be treated
+   as "set" unless it differs from that default. When it is still the default we
+   fall back to the user's accent colour — this is what lets a custom accent
+   such as pure black (#000000) actually show on a profile instead of being
+   masked by the default blurple. */
+function effectiveBannerColor(user) {
+  if (!user) return '#5865F2';
+  const bc = user.banner_color;
+  if (bc && String(bc).toLowerCase() !== '#5865f2') return bc;
+  return user.accent_color || '#5865F2';
+}
+
 /* Apply an accent colour (and its matching ink/edge variables) to a container. */
 function applyAccent(el, hex) {
   if (!el) return;
@@ -7590,7 +7603,7 @@ async function openProfile(user, opts = {}) {
 /* ---------- Your own profile ---------- */
 function renderOwnProfile(user) {
   const displayName = user.display_name || user.username;
-  const bannerColor = user.banner_color || user.accent_color || '#5865F2';
+  const bannerColor = effectiveBannerColor(user);
   const bannerStyle = user.banner_url
     ? `background-image:url('${escapeHtml(user.banner_url)}');background-color:${escapeHtml(bannerColor)};background-size:cover;background-position:center`
     : `background:${bannerColor}`;
@@ -7668,7 +7681,7 @@ function renderOwnProfile(user) {
       me = updated; localStorage.setItem('cr_user', JSON.stringify(me));
       user.banner_url = null;
       const hero = document.querySelector('.profile-hero');
-      if (hero) { hero.style.backgroundImage = 'none'; hero.style.background = user.banner_color || '#5865F2'; }
+      if (hero) { hero.style.backgroundImage = 'none'; hero.style.background = effectiveBannerColor(user); }
       pfBannerRemove.remove();
       renderMe(); renderRail(); renderMembers();
       toast('Banner removed', 'success');
@@ -7757,9 +7770,7 @@ function renderOtherProfile(user, ctx) {
      defaults to blurple for every account, so preferring it here meant the
      accent never showed - only honour it when it was deliberately changed. */
   const accent = user.accent_color || '#5865F2';
-  const customBanner = user.banner_color && String(user.banner_color).toLowerCase() !== '#5865f2'
-    ? user.banner_color : null;
-  const tint = customBanner || accent;
+  const tint = effectiveBannerColor(user);
   const bannerStyle = user.banner_url
     ? `background-image:url('${escapeHtml(user.banner_url)}');background-color:${escapeHtml(tint)};background-size:cover;background-position:center`
     : `background:linear-gradient(180deg, ${escapeHtml(tint)} 0%, color-mix(in srgb, ${escapeHtml(tint)} 70%, #000) 100%)`;
@@ -12089,7 +12100,7 @@ function updateMiniProfileDom(u) {
   const banner = wrap.querySelector('.mini-banner');
   if (banner) {
     if (u.banner_url) { banner.style.background = `url('${u.banner_url}') center/cover no-repeat`; }
-    else { banner.style.background = u.banner_color || u.accent_color || '#5865F2'; }
+    else { banner.style.background = effectiveBannerColor(u); }
   }
 }
 
@@ -12210,7 +12221,7 @@ function openMiniProfile() {
   wrap.id = 'mini-profile';
   const bannerStyle = u.banner_url
     ? `background-image:url('${escapeHtml(u.banner_url)}')`
-    : `background:${escapeHtml(u.banner_color || u.accent_color || '#5865F2')}`;
+    : `background:${escapeHtml(effectiveBannerColor(u))}`;
   const statuses = [
     { id: 'online', label: 'Online' },
     { id: 'idle', label: 'Idle' },
