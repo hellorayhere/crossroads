@@ -1,49 +1,22 @@
-# Round 16 — Replies, media playback, fullscreen, maintenance UI
+# Round 18 — UI/UX overhaul (additive only, no data loss)
 
-Deploy target: https://crossroadsv2.onrender.com/app.html (repo hellorayhere/crossroads, Render service crossroadsv2).
-Hard rule: never wipe/delete data. Additive changes only. Do not touch DATA_DIR / GH_DATA_REPO / GH_DATA_TOKEN.
+## Core fixes
+- [x] GIF avatars animate only on message hover / profile click
+- [x] Space server rail icons when user has >1 server
+- [x] Admin Console "CR" icon -> favicon image
+- [x] Site-wide lag/delay reductions (batched GIF poster observer, waiter map)
+- [x] Revamp Appearance -> Scale UI (grouped controls, 3x3 alignment pad, slider fill)
+- [x] Custom Status inline beside avatar/name (Discord-style)
+- [x] Server banner taller (340 -> 440px)
+- [x] Upload options: spoiler + description tools
+- [x] Notifications use live avatars/GIFs in real time
+- [x] Admin "Manage": new tab with platform controls, live broadcast, storage health, bulk maintenance
+- [x] Maintenance UI: remove ONLY the "Live" pill
+- [x] GIF support for server icons/banners (50 MB)
+- [x] Profile avatar/GIF click -> zoom
+- [x] Emoji board: all 1724 emojis across 9 categories
+- [x] Fix aspect-ratio distortion for all images/GIFs (flex-shrink squash + lightbox clamp)
 
-## 1. Reply to another user (E2E leak)
-- [x] Reply preview must never show the raw `\u0001E2E1:{...}` envelope (server returns encrypted:true, content:null)
-- [x] Decrypt `reply_to` and repaint the reply reference in place (socket + history + optimistic send)
-- [x] Reply bar shows plaintext / "Encrypted message", never ciphertext
-- [x] Notification + desktop-notification previews never show ciphertext
-
-## 2. Remove "Decrypting…"
-- [x] Replace the word with a neutral skeleton placeholder that resolves in place
-- [x] Sender sees their own message instantly (optimistic append, dedupe vs socket echo)
-
-## 3. Media / video playback bug + delay
-- [x] Video player always has a clickable poster area before metadata loads
-- [x] Play() retries on canplay / muted fallback; never silently fails
-- [x] Availability retry no longer resets src mid-playback (was stalling playback)
-- [x] Server: async upload backup (no event-loop freeze on big files)
-- [x] Server: derive file extension from MIME when the name has none + long-lived cache headers
-
-## 4. Fullscreen blown out of proportion
-- [x] Split vendor fullscreen selectors into separate rules (invalid selector was dropping the whole rule)
-- [x] Enforce object-fit: contain + centred layout for wrapper and element fullscreen
-- [x] Same for lightbox video and embed video
-
-## 5. Maintenance UI revamp
-- [x] Polished maintenance card (icon, title, message, status, dismiss, animation)
-- [x] Auto-dismiss when maintenance ends (poll)
-
-## 6. Verify & deploy
-- [x] Local smoke test (reply, video, fullscreen, maintenance)
-- [x] Commit + push to main
-- [x] Render deploy + verify live, data preserved
-
-## 7. Show real text everywhere (no "Encrypted message")
-- [x] Server: additive `content_plain` column on messages (never destructive)
-- [x] Server: accept + store `plain` on channel and DM send
-- [x] Server: return `plain` on messages and reply previews
-- [x] Server: `GET /api/messages/:id` so out-of-page quotes can resolve
-- [x] Server: `POST /api/messages/:id/plain` backfill (additive, never overwrites)
-- [x] Client: send readable text instead of ciphertext; mirror it in `plain`
-- [x] Client: render `plain` first, so no device ever shows a placeholder
-- [x] Client: backfill decrypted text for older encrypted messages
-- [x] Client: reply preview + reply bar show the real quoted text
-- [x] Client: remove every "Encrypted message" label
-- [x] Verified locally: reply preview, reply bar, backfill, sent reply
-- [x] Deployed to Render (dep-dbra09t9fdbs73dokrd0, live) and verified endpoints
+## Ship
+- [ ] Commit + push to main
+- [ ] Trigger Render deploy + verify live

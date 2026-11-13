@@ -817,6 +817,8 @@ function replyPreviewOf(m) {
     attachment_name: orig.attachment_name,
     attachment_type: orig.attachment_type,
     attachment_size: orig.attachment_size || null,
+    attachment_spoiler: !!orig.attachment_spoiler,
+    attachment_description: orig.attachment_description || null,
     author: publicUser(author)
   };
 }
@@ -834,6 +836,8 @@ function messageWithMeta(m, currentUserId) {
     attachment_name: m.attachment_name,
     attachment_type: m.attachment_type,
     attachment_size: m.attachment_size || null,
+    attachment_spoiler: !!m.attachment_spoiler,
+    attachment_description: m.attachment_description || null,
     created_at: m.created_at,
     edited_at: m.edited_at,
     reply_to_id: m.reply_to_id || null,
@@ -899,6 +903,8 @@ function messagesWithMeta(rows, currentUserId) {
     attachment_name: m.attachment_name,
     attachment_type: m.attachment_type,
     attachment_size: m.attachment_size || null,
+    attachment_spoiler: !!m.attachment_spoiler,
+    attachment_description: m.attachment_description || null,
     created_at: m.created_at,
     edited_at: m.edited_at,
     reply_to_id: m.reply_to_id || null,
@@ -2245,9 +2251,9 @@ app.post('/api/channels/:id/messages', auth, (req, res) => {
   /* Only encrypted bodies need a separate readable copy. Plaintext messages
      already store their text in `content`. */
   const plainText = encryptedBody && typeof plainIn === 'string' && plainIn.trim() ? plainIn.slice(0, 4000) : null;
-  db.prepare(`INSERT INTO messages (id, channel_id, user_id, content, content_plain, attachment_url, attachment_name, attachment_type, attachment_size, created_at, reply_to_id, mentions)
-              VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`)
-    .run(id, ch.id, req.user.id, (content || '').trim(), plainText, attachment_url || null, attachment_name || null, attachment_type || null, Number.isFinite(attachment_size) ? attachment_size : null, now, reply_to_id || null, JSON.stringify(mentionIds));
+  db.prepare(`INSERT INTO messages (id, channel_id, user_id, content, content_plain, attachment_url, attachment_name, attachment_type, attachment_size, attachment_spoiler, attachment_description, created_at, reply_to_id, mentions)
+              VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+    .run(id, ch.id, req.user.id, (content || '').trim(), plainText, attachment_url || null, attachment_name || null, attachment_type || null, Number.isFinite(attachment_size) ? attachment_size : null, attachment_spoiler ? 1 : 0, attachment_description ? String(attachment_description).slice(0, 500) : null, now, reply_to_id || null, JSON.stringify(mentionIds));
   const m = db.prepare('SELECT * FROM messages WHERE id = ?').get(id);
   const full = messageWithMeta(m, req.user.id);
   io.to(`channel:${ch.id}`).emit('message', full);
@@ -2451,9 +2457,9 @@ app.post('/api/dms/:id/messages', auth, (req, res) => {
   const now = Date.now();
   const mentionIds = resolveMentionIds(content, mentionsIn, req.user.id);
   const plainText = isEncryptedContent(content) && typeof plainIn === 'string' && plainIn.trim() ? plainIn.slice(0, 4000) : null;
-  db.prepare(`INSERT INTO messages (id, dm_id, user_id, content, content_plain, attachment_url, attachment_name, attachment_type, attachment_size, created_at, reply_to_id, mentions)
-              VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`)
-    .run(id, dm.id, req.user.id, (content || '').trim(), plainText, attachment_url || null, attachment_name || null, attachment_type || null, Number.isFinite(attachment_size) ? attachment_size : null, now, reply_to_id || null, JSON.stringify(mentionIds));
+  db.prepare(`INSERT INTO messages (id, dm_id, user_id, content, content_plain, attachment_url, attachment_name, attachment_type, attachment_size, attachment_spoiler, attachment_description, created_at, reply_to_id, mentions)
+              VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+    .run(id, dm.id, req.user.id, (content || '').trim(), plainText, attachment_url || null, attachment_name || null, attachment_type || null, Number.isFinite(attachment_size) ? attachment_size : null, attachment_spoiler ? 1 : 0, attachment_description ? String(attachment_description).slice(0, 500) : null, now, reply_to_id || null, JSON.stringify(mentionIds));
   const m = db.prepare('SELECT * FROM messages WHERE id = ?').get(id);
   const full = messageWithMeta(m, req.user.id);
   // A new message un-hides the conversation for everyone in it.
@@ -3489,17 +3495,72 @@ admin.get('/settings', (req, res) => {
     maintenance_mode: getGlobalSetting('maintenance_mode', false),
     maintenance_message: getGlobalSetting('maintenance_message', ''),
     motd: getGlobalSetting('motd', ''),
-    max_upload_mb: getGlobalSetting('max_upload_mb', 50)
+    max_upload_mb: getGlobalSetting('max_upload_mb', 50),
+    read_only_mode: getGlobalSetting('read_only_mode', false),
+    require_verify: getGlobalSetting('require_verify', false),
+    allow_gifs: getGlobalSetting('allow_gifs', true),
+    slow_mode_global: getGlobalSetting('slow_mode_global', 0),
+    invites_enabled: getGlobalSetting('invites_enabled', true)
   });
 });
 
 admin.patch('/settings', (req, res) => {
-  const allowed = ['registration_open', 'maintenance_mode', 'maintenance_message', 'motd', 'max_upload_mb'];
+  const allowed = ['registration_open', 'maintenance_mode', 'maintenance_message', 'motd', 'max_upload_mb',
+    'read_only_mode', 'require_verify', 'allow_gifs', 'slow_mode_global', 'invites_enabled'];
   for (const k of allowed) {
     if (k in (req.body || {})) setGlobalSetting(k, req.body[k]);
   }
   adminAudit(req, 'settings.update', 'platform', '', JSON.stringify(req.body || {}).slice(0, 500));
+  /* Push the new state to every connected client so toggles take effect
+     immediately instead of on the next reload. */
+  try {
+    io.emit('platform_settings', {
+      maintenance_mode: getGlobalSetting('maintenance_mode', false),
+      maintenance_message: getGlobalSetting('maintenance_message', ''),
+      motd: getGlobalSetting('motd', ''),
+      read_only_mode: getGlobalSetting('read_only_mode', false)
+    });
+  } catch (e) {}
   res.json({ ok: true });
+});
+
+/* ---- Live broadcast ------------------------------------------------------
+   Sends an ephemeral system notice to every connected client. Nothing is
+   stored, so this cannot clutter or damage any existing data. */
+admin.post('/broadcast', (req, res) => {
+  const text = String((req.body || {}).text || '').trim().slice(0, 500);
+  const kind = ['info', 'success', 'warning', 'danger'].includes((req.body || {}).kind) ? req.body.kind : 'info';
+  if (!text) return res.status(400).json({ error: 'Message text is required' });
+  const payload = { text, kind, at: Date.now(), from: req.user.username };
+  io.emit('system_notice', payload);
+  adminAudit(req, 'broadcast.send', 'platform', '', text);
+  res.json({ ok: true, delivered: io.engine.clientsCount || 0 });
+});
+
+/* ---- Storage & health ---------------------------------------------------- */
+admin.get('/storage', (req, res) => {
+  const dataDir = process.env.DATA_DIR ? path.resolve(process.env.DATA_DIR) : path.join(__dirname, 'data');
+  let dbBytes = 0;
+  try { dbBytes = fs.statSync(path.join(dataDir, 'crossroads.db')).size; } catch (e) {}
+  let uploadFiles = 0, uploadBytes = 0;
+  try {
+    for (const f of fs.readdirSync(UPLOAD_DIR)) {
+      try { const st = fs.statSync(path.join(UPLOAD_DIR, f)); if (st.isFile()) { uploadFiles++; uploadBytes += st.size; } } catch (e) {}
+    }
+  } catch (e) {}
+  const count = (sql) => { try { return db.prepare(sql).get().c; } catch (e) { return 0; } };
+  res.json({
+    db_bytes: dbBytes,
+    upload_files: uploadFiles,
+    upload_bytes: uploadBytes,
+    messages: count('SELECT COUNT(*) c FROM messages'),
+    users: count('SELECT COUNT(*) c FROM users'),
+    servers: count('SELECT COUNT(*) c FROM servers'),
+    channels: count('SELECT COUNT(*) c FROM channels'),
+    uptime_sec: Math.round(process.uptime()),
+    memory_mb: Math.round(process.memoryUsage().rss / 1048576),
+    online: io.engine.clientsCount || 0
+  });
 });
 
 /* ---- Export (safe, no password hashes) ---- */

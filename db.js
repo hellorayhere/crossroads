@@ -284,6 +284,14 @@ function migrate() {
   if (!msgCols.includes('content_plain')) {
     try { db.exec('ALTER TABLE messages ADD COLUMN content_plain TEXT'); } catch (e) {}
   }
+  /* 1b-5. Additive migration: attachment spoiler + description. Spoiler hides
+     media behind a blur until clicked; description is optional alt text. */
+  if (!msgCols.includes('attachment_spoiler')) {
+    try { db.exec('ALTER TABLE messages ADD COLUMN attachment_spoiler INTEGER DEFAULT 0'); } catch (e) {}
+  }
+  if (!msgCols.includes('attachment_description')) {
+    try { db.exec('ALTER TABLE messages ADD COLUMN attachment_description TEXT'); } catch (e) {}
+  }
   // The pinned index must be created AFTER the column exists (safe for old DBs).
   try { db.exec('CREATE INDEX IF NOT EXISTS idx_messages_pinned ON messages(pinned)'); } catch (e) {}
 

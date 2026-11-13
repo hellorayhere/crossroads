@@ -48,58 +48,15 @@ try { Object.assign(state.settings, JSON.parse(localStorage.getItem('cr_settings
 
 /* Emoji set is used only for message content and reactions (a native chat feature). */
 const EMOJI_CATEGORIES = [
-  { id: 'smileys', label: 'Smileys & Emotion', icon: '\u{1F600}', emojis: [
-    '\u{1F600}','\u{1F603}','\u{1F604}','\u{1F601}','\u{1F606}','\u{1F605}','\u{1F602}','\u{1F923}',
-    '\u{1F642}','\u{1F643}','\u{1F609}','\u{1F60A}','\u{1F970}','\u{1F60D}','\u{1F929}','\u{1F618}',
-    '\u{1F617}','\u{1F61A}','\u{1F619}','\u{1F60B}','\u{1F61B}','\u{1F61C}','\u{1F92A}','\u{1F928}',
-    '\u{1F9D0}','\u{1F913}','\u{1F60E}','\u{1F973}','\u{1F60F}','\u{1F612}','\u{1F61E}','\u{1F614}',
-    '\u{1F61F}','\u{1F641}','\u{2639}\u{FE0F}','\u{1F623}','\u{1F616}','\u{1F62B}','\u{1F629}','\u{1F97A}',
-    '\u{1F622}','\u{1F62D}','\u{1F624}','\u{1F621}','\u{1F620}','\u{1F92C}','\u{1F92F}','\u{1F631}',
-    '\u{1F630}','\u{1F975}','\u{1F976}','\u{1F628}','\u{1F627}','\u{1F626}','\u{1F625}','\u{1F917}',
-    '\u{1F914}','\u{1F92D}','\u{1F92B}','\u{1F925}','\u{1F610}','\u{1F611}','\u{1F636}','\u{1F644}',
-    '\u{1F62F}','\u{1F626}','\u{1F627}','\u{1F62E}','\u{1F632}','\u{1F971}','\u{1F634}','\u{1F924}',
-    '\u{1F62A}','\u{1F635}','\u{1F910}','\u{1F974}','\u{1F922}','\u{1F92E}','\u{1F927}','\u{1F637}',
-    '\u{1F912}','\u{1F915}'
-  ] },
-  { id: 'people', label: 'People & Hands', icon: '\u{1F44D}', emojis: [
-    '\u{1F44D}','\u{1F44E}','\u{1F44C}','\u{270C}\u{FE0F}','\u{1F91E}','\u{1F91F}','\u{1F918}','\u{1F919}',
-    '\u{1F448}','\u{1F449}','\u{1F446}','\u{1F447}','\u{261D}\u{FE0F}','\u{270B}','\u{1F91A}','\u{1F590}\u{FE0F}',
-    '\u{1F596}','\u{1F44B}','\u{1F91D}','\u{1F64F}','\u{1F4AA}','\u{1F9BE}','\u{1FAF6}','\u{1F44F}',
-    '\u{1F64C}','\u{1F450}','\u{1F932}','\u{1F91C}','\u{1F91B}','\u{270A}','\u{1F44A}','\u{1FAE1}',
-    '\u{1FAE0}','\u{1F9B5}','\u{1F9B6}','\u{1F463}','\u{1F440}','\u{1F441}\u{FE0F}','\u{1F9E0}','\u{1FAC0}'
-  ] },
-  { id: 'nature', label: 'Animals & Nature', icon: '\u{1F436}', emojis: [
-    '\u{1F436}','\u{1F431}','\u{1F42D}','\u{1F439}','\u{1F430}','\u{1F98A}','\u{1F43B}','\u{1F43C}',
-    '\u{1F428}','\u{1F42F}','\u{1F981}','\u{1F42E}','\u{1F437}','\u{1F438}','\u{1F435}','\u{1F414}',
-    '\u{1F427}','\u{1F426}','\u{1F424}','\u{1F984}','\u{1F41D}','\u{1F98B}','\u{1F422}','\u{1F40D}',
-    '\u{1F419}','\u{1F980}','\u{1F42C}','\u{1F433}','\u{1F988}','\u{1F335}','\u{1F332}','\u{1F333}',
-    '\u{1F334}','\u{1F331}','\u{1F33F}','\u{1F340}','\u{1F341}','\u{1F342}','\u{1F338}','\u{1F33C}',
-    '\u{1F33B}','\u{1F31E}','\u{1F31D}','\u{2B50}','\u{1F31F}','\u{2728}','\u{26A1}','\u{1F525}',
-    '\u{1F308}','\u{2600}\u{FE0F}','\u{1F319}','\u{2744}\u{FE0F}'
-  ] },
-  { id: 'food', label: 'Food & Drink', icon: '\u{1F354}', emojis: [
-    '\u{1F34F}','\u{1F34E}','\u{1F350}','\u{1F34A}','\u{1F34B}','\u{1F34C}','\u{1F349}','\u{1F347}',
-    '\u{1F353}','\u{1FAD0}','\u{1F352}','\u{1F351}','\u{1F96D}','\u{1F34D}','\u{1F965}','\u{1F95D}',
-    '\u{1F345}','\u{1F951}','\u{1F966}','\u{1F955}','\u{1F33D}','\u{1F336}\u{FE0F}','\u{1F952}','\u{1F96C}',
-    '\u{1F354}','\u{1F35F}','\u{1F355}','\u{1F32D}','\u{1F96A}','\u{1F32E}','\u{1F32F}','\u{1F35C}',
-    '\u{1F35D}','\u{1F363}','\u{1F364}','\u{1F366}','\u{1F369}','\u{1F36A}','\u{1F382}','\u{1F370}',
-    '\u{1F36B}','\u{1F36C}','\u{1F36D}','\u{2615}','\u{1F375}','\u{1F9CB}','\u{1F37A}','\u{1F37B}','\u{1F942}'
-  ] },
-  { id: 'objects', label: 'Objects & Activities', icon: '\u{1F3AE}', emojis: [
-    '\u{1F3AE}','\u{1F579}\u{FE0F}','\u{1F3A7}','\u{1F3A4}','\u{1F3B8}','\u{1F3B9}','\u{1F941}','\u{1F3BA}',
-    '\u{1F3BB}','\u{1F3AC}','\u{1F4F7}','\u{1F4F8}','\u{1F4F1}','\u{1F4BB}','\u{1F5A5}\u{FE0F}','\u{2328}\u{FE0F}',
-    '\u{1F5B1}\u{FE0F}','\u{1F5A8}\u{FE0F}','\u{1F4BE}','\u{1F4BF}','\u{1F4C0}','\u{1F389}','\u{1F38A}','\u{1F381}',
-    '\u{1F3C6}','\u{1F947}','\u{1F948}','\u{1F949}','\u{26BD}','\u{1F3C0}','\u{1F3C8}','\u{26BE}',
-    '\u{1F3BE}','\u{1F3D0}','\u{1F3B1}','\u{1F3AF}','\u{1F3B2}','\u{1F0CF}','\u{1F004}','\u{1F3A8}','\u{1F58C}\u{FE0F}'
-  ] },
-  { id: 'symbols', label: 'Symbols & Hearts', icon: '\u{2764}\u{FE0F}', emojis: [
-    '\u{2764}\u{FE0F}','\u{1F9E1}','\u{1F49B}','\u{1F49A}','\u{1F499}','\u{1F49C}','\u{1F5A4}','\u{1F90D}',
-    '\u{1F90E}','\u{1F494}','\u{2763}\u{FE0F}','\u{1F495}','\u{1F49E}','\u{1F493}','\u{1F497}','\u{1F496}',
-    '\u{1F498}','\u{1F49D}','\u{1F4AF}','\u{1F4A2}','\u{1F4A5}','\u{1F4AB}','\u{1F4A6}','\u{1F4A8}',
-    '\u{1F4AC}','\u{1F5E8}\u{FE0F}','\u{1F534}','\u{1F7E0}','\u{1F7E1}','\u{1F7E2}','\u{1F535}','\u{1F7E3}',
-    '\u{26AB}','\u{26AA}','\u{1F7E5}','\u{1F7E7}','\u{1F7E8}','\u{1F7E9}','\u{1F7E6}','\u{1F7EA}','\u{2B1B}','\u{2B1C}',
-    '\u{2705}','\u{274C}','\u{2753}','\u{2757}','\u{203C}\u{FE0F}','\u{2049}\u{FE0F}','\u{2795}','\u{2796}','\u{2716}\u{FE0F}'
-  ] }
+  { id: 'smileys-emotion', label: 'Smileys & Emotion', icon: '😀', emojis: '😀 😃 😄 😁 😆 😅 🤣 😂 🙂 🙃 🫠 😉 😊 😇 🥰 😍 🤩 😘 😗 ☺️ 😚 😙 🥲 😋 😛 😜 🤪 😝 🤑 🤗 🤭 🫢 🫣 🤫 🤔 🫡 🤐 🤨 😐 😑 😶 🫥 😏 😒 🙄 😬 😮‍💨 🤥 🫨 😌 😔 😪 🤤 😴 😷 🤒 🤕 🤢 🤮 🤧 🥵 🥶 🥴 😵 😵‍💫 🤯 🤠 🥳 🥸 😎 🤓 🧐 😕 🫤 😟 🙁 ☹️ 😮 😯 😲 😳 🥺 🥹 😦 😧 😨 😰 😥 😢 😭 😱 😖 😣 😞 😓 😩 😫 🥱 😤 😡 😠 🤬 😈 👿 💀 ☠️ 💩 🤡 👹 👺 👻 👽 👾 🤖 😺 😸 😹 😻 😼 😽 🙀 😿 😾 🙈 🙉 🙊 💌 💘 💝 💖 💗 💓 💞 💕 💟 ❣️ 💔 ❤️ 🩷 🧡 💛 💚 💙 🩵 💜 🤎 🖤 🩶 🤍 💋 💯 💢 💥 💫 💦 💨 🕳️ 💬 🗨️ 🗯️ 💭 💤'.split(' ') },
+  { id: 'people-body', label: 'People & Body', icon: '👍', emojis: '👋 🤚 🖐️ ✋ 🖖 🫱 🫲 🫳 🫴 🫷 🫸 👌 🤌 🤏 ✌️ 🤞 🫰 🤟 🤘 🤙 👈 👉 👆 🖕 👇 ☝️ 🫵 👍 👎 ✊ 👊 🤛 🤜 👏 🙌 🫶 👐 🤲 🤝 🙏 ✍️ 💅 🤳 💪 🦾 🦿 🦵 🦶 👂 🦻 👃 🧠 🫀 🫁 🦷 🦴 👀 👁️ 👅 👄 🫦 👶 🧒 👦 👧 🧑 👱 👨 🧔 👨‍🦰 👨‍🦱 👨‍🦳 👨‍🦲 👩 👩‍🦰 🧑‍🦰 👩‍🦱 🧑‍🦱 👩‍🦳 🧑‍🦳 👩‍🦲 🧑‍🦲 🧓 👴 👵 🙍 🙎 🙅 🙆 💁 🙋 🧏 🙇 🤦 🤷 🧑‍🎓 👨‍🎓 👩‍🎓 🧑‍🏫 👨‍🏫 👩‍🏫 🧑‍🌾 👨‍🌾 👩‍🌾 🧑‍🍳 👨‍🍳 👩‍🍳 🧑‍🔧 👨‍🔧 👩‍🔧 🧑‍🏭 👨‍🏭 👩‍🏭 🧑‍💼 👨‍💼 👩‍💼 🧑‍🔬 👨‍🔬 👩‍🔬 🧑‍💻 👨‍💻 👩‍💻 🧑‍🎤 👨‍🎤 👩‍🎤 🧑‍🎨 👨‍🎨 👩‍🎨 🧑‍🚀 👨‍🚀 👩‍🚀 🧑‍🚒 👨‍🚒 👩‍🚒 👮 🕵️ 💂 🥷 👷 🫅 🤴 👸 👳 👲 🧕 🤵 👰 🤰 🫃 🫄 🤱 👩‍🍼 👨‍🍼 🧑‍🍼 👼 🎅 🤶 🧑‍🎄 🦸 🦹 🧙 🧚 🧛 🧜 🧝 🧞 🧟 🧌 💆 💇 🚶 🧍 🧎 🧑‍🦯 👨‍🦯 👩‍🦯 🧑‍🦼 👨‍🦼 👩‍🦼 🧑‍🦽 👨‍🦽 👩‍🦽 🏃 💃 🕺 🕴️ 👯 🧖 🧗 🤺 🏇 ⛷️ 🏂 🏌️ 🏄 🚣 🏊 ⛹️ 🏋️ 🚴 🚵 🤸 🤼 🤽 🤾 🤹 🧘 🛀 🛌 👭 👫 👬 💏 💑 👨‍👦 👨‍👧 👩‍👦 👩‍👧 🗣️ 👤 👥 🫂 👪 🧑‍🧒 👣'.split(' ') },
+  { id: 'animals-nature', label: 'Animals & Nature', icon: '🐶', emojis: '🐵 🐒 🦍 🦧 🐶 🐕 🦮 🐕‍🦺 🐩 🐺 🦊 🦝 🐱 🐈 🐈‍⬛ 🦁 🐯 🐅 🐆 🐴 🫎 🫏 🐎 🦄 🦓 🦌 🦬 🐮 🐂 🐃 🐄 🐷 🐖 🐗 🐽 🐏 🐑 🐐 🐪 🐫 🦙 🦒 🐘 🦣 🦏 🦛 🐭 🐁 🐀 🐹 🐰 🐇 🐿️ 🦫 🦔 🦇 🐻 🐨 🐼 🦥 🦦 🦨 🦘 🦡 🐾 🦃 🐔 🐓 🐣 🐤 🐥 🐦 🐧 🕊️ 🦅 🦆 🦢 🦉 🦤 🪶 🦩 🦚 🦜 🪽 🐦‍⬛ 🪿 🐦‍🔥 🐸 🐊 🐢 🦎 🐍 🐲 🐉 🦕 🦖 🐳 🐋 🐬 🦭 🐟 🐠 🐡 🦈 🐙 🐚 🪸 🪼 🐌 🦋 🐛 🐜 🐝 🪲 🐞 🦗 🪳 🕷️ 🕸️ 🦂 🦟 🪰 🪱 🦠 💐 🌸 💮 🪷 🏵️ 🌹 🥀 🌺 🌻 🌼 🌷 🪻 🌱 🪴 🌲 🌳 🌴 🌵 🌾 🌿 ☘️ 🍀 🍁 🍂 🍃 🪹 🪺 🍄'.split(' ') },
+  { id: 'food-drink', label: 'Food & Drink', icon: '🍔', emojis: '🍇 🍈 🍉 🍊 🍋 🍋‍🟩 🍌 🍍 🥭 🍎 🍏 🍐 🍑 🍒 🍓 🫐 🥝 🍅 🫒 🥥 🥑 🍆 🥔 🥕 🌽 🌶️ 🫑 🥒 🥬 🥦 🧄 🧅 🥜 🫘 🌰 🫚 🫛 🍄‍🟫 🍞 🥐 🥖 🫓 🥨 🥯 🥞 🧇 🧀 🍖 🍗 🥩 🥓 🍔 🍟 🍕 🌭 🥪 🌮 🌯 🫔 🥙 🧆 🥚 🍳 🥘 🍲 🫕 🥣 🥗 🍿 🧈 🧂 🥫 🍱 🍘 🍙 🍚 🍛 🍜 🍝 🍠 🍢 🍣 🍤 🍥 🥮 🍡 🥟 🥠 🥡 🦀 🦞 🦐 🦑 🦪 🍦 🍧 🍨 🍩 🍪 🎂 🍰 🧁 🥧 🍫 🍬 🍭 🍮 🍯 🍼 🥛 ☕ 🫖 🍵 🍶 🍾 🍷 🍸 🍹 🍺 🍻 🥂 🥃 🫗 🥤 🧋 🧃 🧉 🧊 🥢 🍽️ 🍴 🥄 🔪 🫙 🏺'.split(' ') },
+  { id: 'travel-places', label: 'Travel & Places', icon: '🚗', emojis: '🌍 🌎 🌏 🌐 🗺️ 🗾 🧭 🏔️ ⛰️ 🌋 🗻 🏕️ 🏖️ 🏜️ 🏝️ 🏞️ 🏟️ 🏛️ 🏗️ 🧱 🪨 🪵 🛖 🏘️ 🏚️ 🏠 🏡 🏢 🏣 🏤 🏥 🏦 🏨 🏩 🏪 🏫 🏬 🏭 🏯 🏰 💒 🗼 🗽 ⛪ 🕌 🛕 🕍 ⛩️ 🕋 ⛲ ⛺ 🌁 🌃 🏙️ 🌄 🌅 🌆 🌇 🌉 ♨️ 🎠 🛝 🎡 🎢 💈 🎪 🚂 🚃 🚄 🚅 🚆 🚇 🚈 🚉 🚊 🚝 🚞 🚋 🚌 🚍 🚎 🚐 🚑 🚒 🚓 🚔 🚕 🚖 🚗 🚘 🚙 🛻 🚚 🚛 🚜 🏎️ 🏍️ 🛵 🦽 🦼 🛺 🚲 🛴 🛹 🛼 🚏 🛣️ 🛤️ 🛢️ ⛽ 🛞 🚨 🚥 🚦 🛑 🚧 ⚓ 🛟 ⛵ 🛶 🚤 🛳️ ⛴️ 🛥️ 🚢 ✈️ 🛩️ 🛫 🛬 🪂 💺 🚁 🚟 🚠 🚡 🛰️ 🚀 🛸 🛎️ 🧳 ⌛ ⏳ ⌚ ⏰ ⏱️ ⏲️ 🕰️ 🕛 🕧 🕐 🕜 🕑 🕝 🕒 🕞 🕓 🕟 🕔 🕠 🕕 🕡 🕖 🕢 🕗 🕣 🕘 🕤 🕙 🕥 🕚 🕦 🌑 🌒 🌓 🌔 🌕 🌖 🌗 🌘 🌙 🌚 🌛 🌜 🌡️ ☀️ 🌝 🌞 🪐 ⭐ 🌟 🌠 🌌 ☁️ ⛅ ⛈️ 🌤️ 🌥️ 🌦️ 🌧️ 🌨️ 🌩️ 🌪️ 🌫️ 🌬️ 🌀 🌈 🌂 ☂️ ☔ ⛱️ ⚡ ❄️ ☃️ ⛄ ☄️ 🔥 💧 🌊'.split(' ') },
+  { id: 'activities', label: 'Activities', icon: '🎮', emojis: '🎃 🎄 🎆 🎇 🧨 ✨ 🎈 🎉 🎊 🎋 🎍 🎎 🎏 🎐 🎑 🧧 🎀 🎁 🎗️ 🎟️ 🎫 🎖️ 🏆 🏅 🥇 🥈 🥉 ⚽ ⚾ 🥎 🏀 🏐 🏈 🏉 🎾 🥏 🎳 🏏 🏑 🏒 🥍 🏓 🏸 🥊 🥋 🥅 ⛳ ⛸️ 🎣 🤿 🎽 🎿 🛷 🥌 🎯 🪀 🪁 🔫 🎱 🔮 🪄 🎮 🕹️ 🎰 🎲 🧩 🧸 🪅 🪩 🪆 ♠️ ♥️ ♦️ ♣️ ♟️ 🃏 🀄 🎴 🎭 🖼️ 🎨 🧵 🪡 🧶 🪢'.split(' ') },
+  { id: 'objects', label: 'Objects', icon: '💡', emojis: '👓 🕶️ 🥽 🥼 🦺 👔 👕 👖 🧣 🧤 🧥 🧦 👗 👘 🥻 🩱 🩲 🩳 👙 👚 🪭 👛 👜 👝 🛍️ 🎒 🩴 👞 👟 🥾 🥿 👠 👡 🩰 👢 🪮 👑 👒 🎩 🎓 🧢 🪖 ⛑️ 📿 💄 💍 💎 🔇 🔈 🔉 🔊 📢 📣 📯 🔔 🔕 🎼 🎵 🎶 🎙️ 🎚️ 🎛️ 🎤 🎧 📻 🎷 🪗 🎸 🎹 🎺 🎻 🪕 🥁 🪘 🪇 🪈 📱 📲 ☎️ 📞 📟 📠 🔋 🪫 🔌 💻 🖥️ 🖨️ ⌨️ 🖱️ 🖲️ 💽 💾 💿 📀 🧮 🎥 🎞️ 📽️ 🎬 📺 📷 📸 📹 📼 🔍 🔎 🕯️ 💡 🔦 🏮 🪔 📔 📕 📖 📗 📘 📙 📚 📓 📒 📃 📜 📄 📰 🗞️ 📑 🔖 🏷️ 💰 🪙 💴 💵 💶 💷 💸 💳 🧾 💹 ✉️ 📧 📨 📩 📤 📥 📦 📫 📪 📬 📭 📮 🗳️ ✏️ ✒️ 🖋️ 🖊️ 🖌️ 🖍️ 📝 💼 📁 📂 🗂️ 📅 📆 🗒️ 🗓️ 📇 📈 📉 📊 📋 📌 📍 📎 🖇️ 📏 📐 ✂️ 🗃️ 🗄️ 🗑️ 🔒 🔓 🔏 🔐 🔑 🗝️ 🔨 🪓 ⛏️ ⚒️ 🛠️ 🗡️ ⚔️ 💣 🪃 🏹 🛡️ 🪚 🔧 🪛 🔩 ⚙️ 🗜️ ⚖️ 🦯 🔗 ⛓️ 🪝 🧰 🧲 🪜 ⚗️ 🧪 🧫 🧬 🔬 🔭 📡 💉 🩸 💊 🩹 🩼 🩺 🩻 🚪 🛗 🪞 🪟 🛏️ 🛋️ 🪑 🚽 🪠 🚿 🛁 🪤 🪒 🧴 🧷 🧹 🧺 🧻 🪣 🧼 🫧 🪥 🧽 🧯 🛒 🚬 ⚰️ 🪦 ⚱️ 🧿 🪬 🗿 🪧 🪪'.split(' ') },
+  { id: 'symbols', label: 'Symbols', icon: '❤️', emojis: '🏧 🚮 🚰 ♿ 🚹 🚺 🚻 🚼 🚾 🛂 🛃 🛄 🛅 ⚠️ 🚸 ⛔ 🚫 🚳 🚭 🚯 🚱 🚷 📵 🔞 ☢️ ☣️ ⬆️ ↗️ ➡️ ↘️ ⬇️ ↙️ ⬅️ ↖️ ↕️ ↔️ ↩️ ↪️ ⤴️ ⤵️ 🔃 🔄 🔙 🔚 🔛 🔜 🔝 🛐 ⚛️ 🕉️ ✡️ ☸️ ☯️ ✝️ ☦️ ☪️ ☮️ 🕎 🔯 🪯 ♈ ♉ ♊ ♋ ♌ ♍ ♎ ♏ ♐ ♑ ♒ ♓ ⛎ 🔀 🔁 🔂 ▶️ ⏩ ⏭️ ⏯️ ◀️ ⏪ ⏮️ 🔼 ⏫ 🔽 ⏬ ⏸️ ⏹️ ⏺️ ⏏️ 🎦 🔅 🔆 📶 🛜 📳 📴 ♀️ ♂️ ⚧️ ✖️ ➕ ➖ ➗ 🟰 ♾️ ‼️ ⁉️ ❓ ❔ ❕ ❗ 〰️ 💱 💲 ⚕️ ♻️ ⚜️ 🔱 📛 🔰 ⭕ ✅ ☑️ ✔️ ❌ ❎ ➰ ➿ 〽️ ✳️ ✴️ ❇️ ©️ ®️ ™️ #️⃣ *️⃣ 0️⃣ 1️⃣ 2️⃣ 3️⃣ 4️⃣ 5️⃣ 6️⃣ 7️⃣ 8️⃣ 9️⃣ 🔟 🔠 🔡 🔢 🔣 🔤 🅰️ 🆎 🅱️ 🆑 🆒 🆓 ℹ️ 🆔 Ⓜ️ 🆕 🆖 🅾️ 🆗 🅿️ 🆘 🆙 🆚 🈁 🈂️ 🈷️ 🈶 🈯 🉐 🈹 🈚 🈲 🉑 🈸 🈴 🈳 ㊗️ ㊙️ 🈺 🈵 🔴 🟠 🟡 🟢 🔵 🟣 🟤 ⚫ ⚪ 🟥 🟧 🟨 🟩 🟦 🟪 🟫 ⬛ ⬜ ◼️ ◻️ ◾ ◽ ▪️ ▫️ 🔶 🔷 🔸 🔹 🔺 🔻 💠 🔘 🔳 🔲'.split(' ') },
+  { id: 'flags', label: 'Flags', icon: '🏳️', emojis: '🏁 🚩 🎌 🏴 🏳️ 🇦🇨 🇦🇩 🇦🇪 🇦🇫 🇦🇬 🇦🇮 🇦🇱 🇦🇲 🇦🇴 🇦🇶 🇦🇷 🇦🇸 🇦🇹 🇦🇺 🇦🇼 🇦🇽 🇦🇿 🇧🇦 🇧🇧 🇧🇩 🇧🇪 🇧🇫 🇧🇬 🇧🇭 🇧🇮 🇧🇯 🇧🇱 🇧🇲 🇧🇳 🇧🇴 🇧🇶 🇧🇷 🇧🇸 🇧🇹 🇧🇻 🇧🇼 🇧🇾 🇧🇿 🇨🇦 🇨🇨 🇨🇩 🇨🇫 🇨🇬 🇨🇭 🇨🇮 🇨🇰 🇨🇱 🇨🇲 🇨🇳 🇨🇴 🇨🇵 🇨🇷 🇨🇺 🇨🇻 🇨🇼 🇨🇽 🇨🇾 🇨🇿 🇩🇪 🇩🇬 🇩🇯 🇩🇰 🇩🇲 🇩🇴 🇩🇿 🇪🇦 🇪🇨 🇪🇪 🇪🇬 🇪🇭 🇪🇷 🇪🇸 🇪🇹 🇪🇺 🇫🇮 🇫🇯 🇫🇰 🇫🇲 🇫🇴 🇫🇷 🇬🇦 🇬🇧 🇬🇩 🇬🇪 🇬🇫 🇬🇬 🇬🇭 🇬🇮 🇬🇱 🇬🇲 🇬🇳 🇬🇵 🇬🇶 🇬🇷 🇬🇸 🇬🇹 🇬🇺 🇬🇼 🇬🇾 🇭🇰 🇭🇲 🇭🇳 🇭🇷 🇭🇹 🇭🇺 🇮🇨 🇮🇩 🇮🇪 🇮🇱 🇮🇲 🇮🇳 🇮🇴 🇮🇶 🇮🇷 🇮🇸 🇮🇹 🇯🇪 🇯🇲 🇯🇴 🇯🇵 🇰🇪 🇰🇬 🇰🇭 🇰🇮 🇰🇲 🇰🇳 🇰🇵 🇰🇷 🇰🇼 🇰🇾 🇰🇿 🇱🇦 🇱🇧 🇱🇨 🇱🇮 🇱🇰 🇱🇷 🇱🇸 🇱🇹 🇱🇺 🇱🇻 🇱🇾 🇲🇦 🇲🇨 🇲🇩 🇲🇪 🇲🇫 🇲🇬 🇲🇭 🇲🇰 🇲🇱 🇲🇲 🇲🇳 🇲🇴 🇲🇵 🇲🇶 🇲🇷 🇲🇸 🇲🇹 🇲🇺 🇲🇻 🇲🇼 🇲🇽 🇲🇾 🇲🇿 🇳🇦 🇳🇨 🇳🇪 🇳🇫 🇳🇬 🇳🇮 🇳🇱 🇳🇴 🇳🇵 🇳🇷 🇳🇺 🇳🇿 🇴🇲 🇵🇦 🇵🇪 🇵🇫 🇵🇬 🇵🇭 🇵🇰 🇵🇱 🇵🇲 🇵🇳 🇵🇷 🇵🇸 🇵🇹 🇵🇼 🇵🇾 🇶🇦 🇷🇪 🇷🇴 🇷🇸 🇷🇺 🇷🇼 🇸🇦 🇸🇧 🇸🇨 🇸🇩 🇸🇪 🇸🇬 🇸🇭 🇸🇮 🇸🇯 🇸🇰 🇸🇱 🇸🇲 🇸🇳 🇸🇴 🇸🇷 🇸🇸 🇸🇹 🇸🇻 🇸🇽 🇸🇾 🇸🇿 🇹🇦 🇹🇨 🇹🇩 🇹🇫 🇹🇬 🇹🇭 🇹🇯 🇹🇰 🇹🇱 🇹🇲 🇹🇳 🇹🇴 🇹🇷 🇹🇹 🇹🇻 🇹🇼 🇹🇿 🇺🇦 🇺🇬 🇺🇲 🇺🇳 🇺🇸 🇺🇾 🇺🇿 🇻🇦 🇻🇨 🇻🇪 🇻🇬 🇻🇮 🇻🇳 🇻🇺 🇼🇫 🇼🇸 🇽🇰 🇾🇪 🇾🇹 🇿🇦 🇿🇲 🇿🇼'.split(' ') },
 ];
 const EMOJIS = EMOJI_CATEGORIES.flatMap(c => c.emojis);
 
@@ -756,8 +713,16 @@ function avatarHTML(user, size = 40, status = null) {
   /* When an image is present, use a neutral dark placeholder (never the blurple
      default) so no coloured flash appears before the picture paints. */
   const bg = user.avatar_url ? '#2b2d31' : (user.accent_color || '#5865f2');
+  const url = user.avatar_url || '';
+  /* Animated GIF avatars stay frozen on their first frame until the user hovers
+     the message / avatar (or opens the profile). We render two stacked layers:
+     a canvas-generated still poster and the live GIF, revealed by CSS. */
+  const isGif = /\.gif(\?|#|$)/i.test(url) || /^data:image\/gif/i.test(url);
+  const BLANK = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
   const inner = user.avatar_url
-    ? `<img src="${escapeHtml(user.avatar_url)}" alt="" loading="eager" decoding="async" fetchpriority="high">`
+    ? (isGif
+        ? `<img class="ava-poster" src="${BLANK}" data-poster-src="${escapeHtml(url)}" alt="" decoding="async"><img class="ava-anim" src="${escapeHtml(url)}" alt="" loading="lazy" decoding="async">`
+        : `<img src="${escapeHtml(url)}" alt="" loading="eager" decoding="async" fetchpriority="high">`)
     : (user.avatar ? escapeHtml(user.avatar) : escapeHtml((user.username || '?')[0].toUpperCase()));
   const dot = status ? `<span class="status-dot ${status}"></span>` : '';
   /* Use background-color (not the `background` shorthand) so the stylesheet's
@@ -765,6 +730,99 @@ function avatarHTML(user, size = 40, status = null) {
      avatar's colour from bleeding under a transparent border and forming a
      coloured ring around the profile picture. */
   return `<div class="avatar" style="width:${size}px;height:${size}px;font-size:${Math.round(size * 0.42)}px;background-color:${bg};background-clip:padding-box">${inner}${dot}</div>`;
+}
+
+/* ---- Frozen first frame for GIF avatars ----------------------------------
+   Drawing the first frame to a canvas gives us a static poster with no extra
+   network request (the GIF is already in cache). Cached per URL so each GIF is
+   only decoded once, no matter how many times the avatar appears. */
+const gifPosterCache = new Map();
+const gifPosterPending = new Set();
+/* Every <img class="ava-poster"> waiting on a given GIF, so we can update just
+   those nodes instead of scanning the whole document each time. */
+const gifPosterWaiters = new Map();
+function gifPosterApply(url, src) {
+  const set = gifPosterWaiters.get(url);
+  if (!set) return;
+  set.forEach(el => { if (el.isConnected) el.src = src; });
+  gifPosterWaiters.delete(url);
+}
+function hydrateGifPoster(img) {
+  const url = img && img.dataset && img.dataset.posterSrc;
+  if (!url) return;
+  if (gifPosterCache.has(url)) {
+    const v = gifPosterCache.get(url);
+    img.src = v || url;
+    return;
+  }
+  let waiters = gifPosterWaiters.get(url);
+  if (!waiters) { waiters = new Set(); gifPosterWaiters.set(url, waiters); }
+  waiters.add(img);
+  if (gifPosterPending.has(url)) return;
+  gifPosterPending.add(url);
+  const im = new Image();
+  im.decoding = 'async';
+  im.onload = () => {
+    let data = null;
+    try {
+      const w = im.naturalWidth || 128, h = im.naturalHeight || 128;
+      const c = document.createElement('canvas');
+      c.width = w; c.height = h;
+      c.getContext('2d').drawImage(im, 0, 0, w, h);
+      data = c.toDataURL('image/png');
+    } catch (e) { data = null; }
+    gifPosterCache.set(url, data);
+    gifPosterPending.delete(url);
+    gifPosterApply(url, data || url);
+  };
+  im.onerror = () => {
+    gifPosterCache.set(url, null);
+    gifPosterPending.delete(url);
+    gifPosterApply(url, url);
+  };
+  im.src = url;
+}
+function hydrateGifPostersIn(root) {
+  if (!root || root.nodeType !== 1) return;
+  if (root.matches && root.matches('img.ava-poster')) hydrateGifPoster(root);
+  if (root.querySelectorAll) {
+    const list = root.querySelectorAll('img.ava-poster');
+    for (let i = 0; i < list.length; i++) hydrateGifPoster(list[i]);
+  }
+}
+/* Batched observer: collect newly added nodes and hydrate once per frame.
+   Watching the whole document with an unbatched callback made long message
+   lists feel sluggish. */
+let gifAvaQueue = [];
+let gifAvaScheduled = false;
+const gifAvaObserver = new MutationObserver((muts) => {
+  for (let i = 0; i < muts.length; i++) {
+    const added = muts[i].addedNodes;
+    for (let j = 0; j < added.length; j++) {
+      const n = added[j];
+      if (n.nodeType === 1) gifAvaQueue.push(n);
+    }
+  }
+  if (!gifAvaQueue.length || gifAvaScheduled) return;
+  gifAvaScheduled = true;
+  requestAnimationFrame(() => {
+    const batch = gifAvaQueue; gifAvaQueue = []; gifAvaScheduled = false;
+    for (let i = 0; i < batch.length; i++) hydrateGifPostersIn(batch[i]);
+  });
+});
+gifAvaObserver.observe(document.documentElement, { childList: true, subtree: true });
+
+/* Clicking a profile picture (including animated GIFs) opens it full-size. */
+function bindAvatarZoom(root, user) {
+  if (!root || !user || !user.avatar_url) return;
+  root.querySelectorAll('.avatar').forEach(el => {
+    el.classList.add('zoomable');
+    el.setAttribute('title', 'Click to view');
+    el.addEventListener('click', (e) => {
+      e.stopPropagation();
+      lightbox(user.avatar_url, 'image', user.display_name || user.username, '');
+    });
+  });
 }
 
 /* Role icons can be a custom uploaded image (URL) or a legacy short glyph. */
@@ -1850,6 +1908,12 @@ function renderMe(u = me) {
   if (slot) slot.outerHTML = avatarHTML(u, 32, u.status || 'online').replace('class="avatar"', 'class="avatar" id="my-avatar"');
   $('my-username').textContent = u.display_name || u.username;
   $('my-tag').textContent = '#' + u.discriminator;
+  const st = $('my-status');
+  if (st) {
+    const cs = (u.custom_status || '').trim();
+    st.textContent = cs;
+    st.classList.toggle('hidden', !cs);
+  }
 }
 
 /* Live preview of the signed-in user's profile across the whole UI. */
@@ -1944,7 +2008,6 @@ function renderMaintenanceBanner(message) {
     <div class="gb-main">
       <div class="gb-head">
         <span class="gb-title">Maintenance in progress</span>
-        <span class="gb-pill">Live</span>
       </div>
       <div class="gb-text">${escapeHtml(message || 'Some features may be temporarily unavailable.')}</div>
       <div class="gb-foot"><span class="gb-dot" aria-hidden="true"></span>We're working on it — messaging keeps working while we do.</div>
@@ -2052,6 +2115,13 @@ function connectSocket() {
   });
   /* A user changed their avatar / banner / name / custom status: refresh every
      surface that shows them, everywhere, in real time. */
+  /* Live system notice pushed by an administrator from the Manage tab.
+     Ephemeral by design: nothing is persisted. */
+  socket.on('system_notice', (n) => {
+    if (!n || !n.text) return;
+    const kind = n.kind === 'danger' ? 'error' : (n.kind === 'warning' ? 'error' : 'success');
+    toast(n.text, kind);
+  });
   socket.on('profile_update', (u) => {
     if (!u || !u.id) return;
     state.usersCache[u.id] = Object.assign({}, state.usersCache[u.id] || {}, u);
@@ -2070,6 +2140,17 @@ function connectSocket() {
       });
     }
     refreshMessageAuthor(u);
+    /* Keep notification avatars current: they used to be frozen snapshots taken
+       when the notification was created, so old profile pictures lingered. */
+    let notifChanged = false;
+    (state.notifications || []).forEach(n => {
+      const d = n.data || {};
+      if (d.user && d.user.id === u.id) { d.user = Object.assign({}, d.user, u); notifChanged = true; }
+      if (d.message && d.message.author && d.message.author.id === u.id) {
+        d.message.author = Object.assign({}, d.message.author, u); notifChanged = true;
+      }
+    });
+    if (notifChanged && $('notif-panel')) renderNotifList();
     rerenderLists();
     refreshOpenProfile(u);
     refreshMiniProfileUser(u);
@@ -2272,6 +2353,8 @@ function renderRail() {
   wrap.innerHTML = '';
   const list = orderedServers();
   const canReorder = list.length > 1;
+  const rail = $('server-rail');
+  if (rail) rail.classList.toggle('many', list.length > 1);
   for (const s of list) {
     const d = document.createElement('div');
     d.className = 'rail-item tip' + (state.server && state.server.id === s.id ? ' active' : '');
@@ -2499,7 +2582,8 @@ function renderDMList() {
     item.dataset.dmid = d.id;
     if (d.user) item.dataset.uid = d.user.id;
     item.dataset.name = (d.user ? (d.user.display_name || d.user.username) : 'unknown').toLowerCase();
-    item.innerHTML = `${avatarHTML(d.user, 32, d.user.status || 'offline')}<span class="dm-name">${escapeHtml(d.user ? (d.user.display_name || d.user.username) : 'Unknown')}</span>${badgeHTML(dmUnreadCount(d.id))}`;
+    const dcs = (d.user && d.user.custom_status || '').trim();
+    item.innerHTML = `${avatarHTML(d.user, 32, d.user.status || 'offline')}<div class="dm-body"><span class="dm-name">${escapeHtml(d.user ? (d.user.display_name || d.user.username) : 'Unknown')}</span>${dcs ? `<span class="dm-status" title="${escapeHtml(dcs)}">${escapeHtml(dcs)}</span>` : ''}</div>${badgeHTML(dmUnreadCount(d.id))}`;
     item.addEventListener('click', () => openDM(d));
     list.appendChild(item);
   }
@@ -3867,7 +3951,8 @@ function renderMembers() {
     const roleTag = role === 'admin' ? '<span class="member-role-tag admin">ADMIN</span>' : '';
     const crole = (m.custom_role_id && roleById[m.custom_role_id]) || null;
     const croleTag = crole ? `<span class="member-role-tag" style="color:${crole.color};border-color:${crole.color}">${roleIconHTML(crole.icon, 'role-tag-ico')}${escapeHtml(crole.name)}</span>` : '';
-    row.innerHTML = `${avatarHTML(m, 36, m.status || 'offline')}<div class="member-body"><span class="mname">${escapeHtml(m.display_name || m.username)}${crown}${roleTag}${croleTag}${badgeChips(m, { compact: true })}</span></div>`;
+    const cs = (m.custom_status || '').trim();
+    row.innerHTML = `${avatarHTML(m, 36, m.status || 'offline')}<div class="member-body"><span class="mname">${escapeHtml(m.display_name || m.username)}${crown}${roleTag}${croleTag}${badgeChips(m, { compact: true })}</span>${cs ? `<span class="mstatus" title="${escapeHtml(cs)}">${escapeHtml(cs)}</span>` : ''}</div>`;
     row.addEventListener('click', () => openProfile(m));
     return row;
   };
@@ -4613,6 +4698,21 @@ function attachmentNode(m) {
     const meta = [sizeText, 'Click to download'].filter(Boolean).join(' \u2022 ');
     wrap.innerHTML = `<div class="file-card"><div class="fi">${icon('file')}</div><div class="fc-meta"><a href="${escapeHtml(url)}" target="_blank" rel="noopener">${escapeHtml(m.attachment_name || 'file')}</a><div class="fsize">${escapeHtml(meta)}</div></div></div>`;
   }
+  if (m.attachment_description) {
+    wrap.insertAdjacentHTML('beforeend', `<div class="att-desc">${escapeHtml(m.attachment_description)}</div>`);
+  }
+  if (m.attachment_spoiler) {
+    wrap.classList.add('has-spoiler');
+    const ov = document.createElement('div');
+    ov.className = 'att-spoiler';
+    ov.innerHTML = `<span class="att-spoiler-label">${icon('eye')}<span>Spoiler</span><em>Click to reveal</em></span>`;
+    ov.addEventListener('click', (e) => {
+      e.stopPropagation();
+      wrap.classList.add('revealed');
+      ov.remove();
+    });
+    wrap.appendChild(ov);
+  }
   return wrap;
 }
 
@@ -4978,6 +5078,8 @@ async function sendMessage() {
     attachment_url: state.replyTo.attachment_url || null,
     attachment_name: state.replyTo.attachment_name || null,
     attachment_type: state.replyTo.attachment_type || null,
+    attachment_spoiler: !!state.replyTo.attachment_spoiler,
+    attachment_description: state.replyTo.attachment_description || null,
     author: state.replyTo.author
   } : null;
 
@@ -5163,8 +5265,33 @@ function renderAttachmentPreview() {
   }
   const sizeText = fmtBytes(a.size);
   const sub = [sizeText, isGif ? 'GIF' : (isImage ? 'Image' : (isVideo ? 'Video' : 'File'))].filter(Boolean).join(' \u2022 ');
-  p.innerHTML = `${thumb}<div class="ap-meta"><span class="ap-name">${escapeHtml(a.name || 'file')}</span>${sub ? `<span class="ap-sub">${escapeHtml(sub)}</span>` : ''}</div><button id="ap-remove" title="Remove">${icon('xmark')}</button>`;
+  const spoilerOn = !!a.spoiler;
+  p.innerHTML = `
+    <div class="ap-main">
+      ${thumb}
+      <div class="ap-meta"><span class="ap-name">${escapeHtml(a.name || 'file')}</span>${sub ? `<span class="ap-sub">${escapeHtml(sub)}</span>` : ''}</div>
+      <button id="ap-remove" title="Remove">${icon('xmark')}</button>
+    </div>
+    <div class="ap-tools">
+      <button type="button" class="ap-tool${spoilerOn ? ' on' : ''}" id="ap-spoiler" title="Hide this attachment behind a spoiler until it is clicked">
+        ${icon('eye')}<span>Spoiler</span>
+      </button>
+      <label class="ap-desc">
+        ${icon('pencil')}
+        <input id="ap-desc" type="text" maxlength="200" placeholder="Add a description (optional)" value="${escapeHtml(a.description || '')}" autocomplete="off" spellcheck="false">
+      </label>
+    </div>`;
   $('ap-remove').addEventListener('click', clearAttachment);
+  const spoilerBtn = $('ap-spoiler');
+  if (spoilerBtn) spoilerBtn.addEventListener('click', () => {
+    if (!state.pendingAttachment) return;
+    state.pendingAttachment.spoiler = !state.pendingAttachment.spoiler;
+    spoilerBtn.classList.toggle('on', state.pendingAttachment.spoiler);
+  });
+  const descInput = $('ap-desc');
+  if (descInput) descInput.addEventListener('input', () => {
+    if (state.pendingAttachment) state.pendingAttachment.description = descInput.value;
+  });
 }
 function clearAttachment() {
   state.pendingAttachment = null;
@@ -5512,6 +5639,27 @@ async function markAllRead() {
   renderNotifList();
 }
 
+async function refreshNotifUsers() {
+  const ids = new Set();
+  (state.notifications || []).forEach(n => {
+    const d = n.data || {};
+    const u = d.user || (d.message && d.message.author);
+    if (u && u.id) ids.add(u.id);
+  });
+  await Promise.all([...ids].slice(0, 40).map(async (id) => {
+    try {
+      const { user } = await api('/api/users/' + encodeURIComponent(id));
+      if (!user) return;
+      state.usersCache[id] = Object.assign({}, state.usersCache[id] || {}, user);
+      (state.notifications || []).forEach(n => {
+        const d = n.data || {};
+        if (d.user && d.user.id === id) d.user = Object.assign({}, d.user, user);
+        if (d.message && d.message.author && d.message.author.id === id) d.message.author = Object.assign({}, d.message.author, user);
+      });
+    } catch (e) { /* keep the snapshot */ }
+  }));
+}
+
 function openNotifPanel() {
   const existing = $('notif-panel');
   if (existing) { existing.remove(); return; }
@@ -5526,6 +5674,7 @@ function openNotifPanel() {
   panel.style.left = Math.max(8, Math.min(r.right - 380, window.innerWidth - 388)) + 'px';
   renderNotifList();
   $('np-read').addEventListener('click', markAllRead);
+  refreshNotifUsers().then(() => { if ($('notif-list')) renderNotifList(); });
   if (state.unread > 0) {
     api('/api/notifications/read', { method: 'POST' }).catch(() => {});
     state.unread = 0;
@@ -7376,52 +7525,72 @@ function settingsPanelHTML(section) {
             <input type="file" id="cb-file" accept="image/*" class="hidden">
           </div>
           <div class="cb-controls" id="cb-controls">
-            <div class="cb-ctl cb-ctl-wide">
-              <div class="cb-ctl-head"><label for="cb-scale">Scale</label><span class="cb-val" id="cb-scale-val">100%</span></div>
-              <div class="cb-zoom">
-                <button class="cb-zoom-btn" id="cb-zoom-out" type="button" title="Zoom out" aria-label="Zoom out">${icon('minus')}</button>
-                <input type="range" id="cb-scale" min="100" max="300" step="5" value="100" aria-label="Background scale">
-                <button class="cb-zoom-btn" id="cb-zoom-in" type="button" title="Zoom in" aria-label="Zoom in">${icon('plus')}</button>
-                <button class="cb-zoom-btn cb-fit-btn" id="cb-fit-toggle" type="button" title="Toggle fill / fit">Fill</button>
+            <div class="cb-group">
+              <div class="cb-group-head"><span class="cb-group-title">Zoom &amp; Position</span><span class="cb-group-badge" id="cb-zoom-badge">100%</span></div>
+              <div class="cb-ctl cb-ctl-wide">
+                <div class="cb-ctl-head"><label for="cb-scale">Scale</label><span class="cb-val" id="cb-scale-val">100%</span></div>
+                <div class="cb-zoom">
+                  <button class="cb-zoom-btn" id="cb-zoom-out" type="button" title="Zoom out" aria-label="Zoom out">${icon('minus')}</button>
+                  <input type="range" id="cb-scale" min="100" max="300" step="5" value="100" aria-label="Background scale">
+                  <button class="cb-zoom-btn" id="cb-zoom-in" type="button" title="Zoom in" aria-label="Zoom in">${icon('plus')}</button>
+                  <button class="cb-zoom-btn cb-fit-btn" id="cb-fit-toggle" type="button" title="Toggle fill / fit">Fill</button>
+                </div>
+              </div>
+              <div class="cb-ctl cb-ctl-wide">
+                <div class="cb-ctl-head"><label>Alignment</label><span class="cb-val cb-align-note">Anchor point</span></div>
+                <div class="cb-align-pad" id="cb-align-pad">
+                  <button class="cb-align-cell" data-cb-align="0,0" type="button" title="Top left"></button>
+                  <button class="cb-align-cell" data-cb-align="50,0" type="button" title="Top center"></button>
+                  <button class="cb-align-cell" data-cb-align="100,0" type="button" title="Top right"></button>
+                  <button class="cb-align-cell" data-cb-align="0,50" type="button" title="Middle left"></button>
+                  <button class="cb-align-cell" data-cb-align="50,50" type="button" title="Center"></button>
+                  <button class="cb-align-cell" data-cb-align="100,50" type="button" title="Middle right"></button>
+                  <button class="cb-align-cell" data-cb-align="0,100" type="button" title="Bottom left"></button>
+                  <button class="cb-align-cell" data-cb-align="50,100" type="button" title="Bottom center"></button>
+                  <button class="cb-align-cell" data-cb-align="100,100" type="button" title="Bottom right"></button>
+                </div>
               </div>
             </div>
-            <div class="cb-ctl">
-              <div class="cb-ctl-head"><label for="cb-fit">Sizing</label></div>
-              <select id="cb-fit" aria-label="Background sizing">
-                <option value="cover">Fill (crop to fit)</option>
-                <option value="contain">Fit (show all)</option>
-                <option value="stretch">Stretch</option>
-                <option value="tile">Tile</option>
-              </select>
+
+            <div class="cb-group">
+              <div class="cb-group-head"><span class="cb-group-title">Look &amp; Feel</span></div>
+              <div class="cb-grid">
+                <div class="cb-ctl">
+                  <div class="cb-ctl-head"><label for="cb-fit">Sizing</label></div>
+                  <select id="cb-fit" aria-label="Background sizing">
+                    <option value="cover">Fill (crop to fit)</option>
+                    <option value="contain">Fit (show all)</option>
+                    <option value="stretch">Stretch</option>
+                    <option value="tile">Tile</option>
+                  </select>
+                </div>
+                <div class="cb-ctl">
+                  <div class="cb-ctl-head"><label for="cb-opacity">Transparency</label><span class="cb-val" id="cb-opacity-val">0%</span></div>
+                  <input type="range" id="cb-opacity" min="0" max="90" step="5" value="0" aria-label="Background transparency">
+                </div>
+                <div class="cb-ctl">
+                  <div class="cb-ctl-head"><label for="cb-blur">Blur</label><span class="cb-val" id="cb-blur-val">0px</span></div>
+                  <input type="range" id="cb-blur" min="0" max="30" step="1" value="0" aria-label="Background blur">
+                </div>
+                <div class="cb-ctl">
+                  <div class="cb-ctl-head"><label for="cb-brightness">Brightness</label><span class="cb-val" id="cb-brightness-val">100%</span></div>
+                  <input type="range" id="cb-brightness" min="40" max="160" step="5" value="100" aria-label="Background brightness">
+                </div>
+                <div class="cb-ctl">
+                  <div class="cb-ctl-head"><label for="cb-x">Horizontal offset</label><span class="cb-val" id="cb-x-val">50%</span></div>
+                  <input type="range" id="cb-x" min="0" max="100" step="1" value="50" aria-label="Background horizontal offset">
+                </div>
+                <div class="cb-ctl">
+                  <div class="cb-ctl-head"><label for="cb-y">Vertical offset</label><span class="cb-val" id="cb-y-val">50%</span></div>
+                  <input type="range" id="cb-y" min="0" max="100" step="1" value="50" aria-label="Background vertical offset">
+                </div>
+              </div>
             </div>
-            <div class="cb-ctl">
-              <div class="cb-ctl-head"><label for="cb-opacity">Transparency</label><span class="cb-val" id="cb-opacity-val">0%</span></div>
-              <input type="range" id="cb-opacity" min="0" max="90" step="5" value="0" aria-label="Background transparency">
+
+            <div class="cb-footer">
+              <span class="cb-footer-note">${icon('image')} Changes apply instantly and stay on this device.</span>
+              <button class="btn ghost cb-reset" id="cb-reset">${icon('refresh')} Reset adjustments</button>
             </div>
-            <div class="cb-ctl">
-              <div class="cb-ctl-head"><label for="cb-blur">Blur</label><span class="cb-val" id="cb-blur-val">0px</span></div>
-              <input type="range" id="cb-blur" min="0" max="30" step="1" value="0" aria-label="Background blur">
-            </div>
-            <div class="cb-ctl">
-              <div class="cb-ctl-head"><label for="cb-brightness">Brightness</label><span class="cb-val" id="cb-brightness-val">100%</span></div>
-              <input type="range" id="cb-brightness" min="40" max="160" step="5" value="100" aria-label="Background brightness">
-            </div>
-            <div class="cb-ctl">
-              <div class="cb-ctl-head"><label for="cb-x">Horizontal offset</label><span class="cb-val" id="cb-x-val">50%</span></div>
-              <input type="range" id="cb-x" min="0" max="100" step="1" value="50" aria-label="Background horizontal offset">
-            </div>
-            <div class="cb-ctl">
-              <div class="cb-ctl-head"><label for="cb-y">Vertical offset</label><span class="cb-val" id="cb-y-val">50%</span></div>
-              <input type="range" id="cb-y" min="0" max="100" step="1" value="50" aria-label="Background vertical offset">
-            </div>
-            <div class="cb-quick">
-              <button class="cb-quick-btn" data-cb-align="50,50" type="button">Center</button>
-              <button class="cb-quick-btn" data-cb-align="50,0" type="button">Top</button>
-              <button class="cb-quick-btn" data-cb-align="50,100" type="button">Bottom</button>
-              <button class="cb-quick-btn" data-cb-align="0,50" type="button">Left</button>
-              <button class="cb-quick-btn" data-cb-align="100,50" type="button">Right</button>
-            </div>
-            <button class="btn ghost cb-reset" id="cb-reset">${icon('refresh')} Reset adjustments</button>
           </div>
           <div class="cb-hint" id="cb-hint"></div>
         </div>
@@ -7977,6 +8146,24 @@ function wireAppearance() {
     brightness: $('cb-brightness-val'), x: $('cb-x-val'), y: $('cb-y-val')
   };
   const cbControls = $('cb-controls');
+  const cbZoomBadge = $('cb-zoom-badge');
+
+  /* Paint the coloured fill on a range track to match its current value. */
+  const cbFill = (el) => {
+    if (!el || el.type !== 'range') return;
+    const min = Number(el.min) || 0, max = Number(el.max) || 100;
+    const v = Number(el.value) || 0;
+    const pct = max > min ? ((v - min) / (max - min)) * 100 : 0;
+    el.style.setProperty('--p', pct + '%');
+  };
+  /* Highlight the alignment cell that matches the current anchor point. */
+  const cbSyncAlign = (o) => {
+    const pad = $('cb-align-pad'); if (!pad) return;
+    pad.querySelectorAll('.cb-align-cell').forEach(cell => {
+      const [x, y] = cell.dataset.cbAlign.split(',').map(Number);
+      cell.classList.toggle('active', Math.abs(x - o.x) < 1 && Math.abs(y - o.y) < 1);
+    });
+  };
 
   /* Paint the little preview with the exact same scale / transparency / blur /
      position as the real background, so what you see is what you get. */
@@ -8020,6 +8207,9 @@ function wireAppearance() {
     if (cbVals.brightness) cbVals.brightness.textContent = Math.round(o.brightness * 100) + '%';
     if (cbVals.x) cbVals.x.textContent = Math.round(o.x) + '%';
     if (cbVals.y) cbVals.y.textContent = Math.round(o.y) + '%';
+    [cbInputs.scale, cbInputs.opacity, cbInputs.blur, cbInputs.brightness, cbInputs.x, cbInputs.y].forEach(cbFill);
+    if (cbZoomBadge) cbZoomBadge.textContent = Math.round(o.scale * 100) + '%';
+    cbSyncAlign(o);
     const fitBtn = $('cb-fit-toggle');
     if (fitBtn) fitBtn.textContent = o.fit === 'contain' ? 'Fit' : (o.fit === 'tile' ? 'Tile' : (o.fit === 'stretch' ? 'Stretch' : 'Fill'));
     if (cbControls) cbControls.classList.toggle('disabled', !has);
@@ -8196,12 +8386,13 @@ function wireLanguage() {
 let adminTab = 'dashboard';
 const ADMIN_TABS = [
   { id: 'dashboard', label: 'Dashboard', icon: 'grid' },
+  { id: 'manage', label: 'Manage', icon: 'sliders' },
   { id: 'users', label: 'Users', icon: 'users' },
   { id: 'servers', label: 'Servers', icon: 'server' },
   { id: 'badges', label: 'Profile Badges', icon: 'id-badge' },
   { id: 'announcements', label: 'Announcements', icon: 'megaphone' },
   { id: 'staff', label: 'Staff Access', icon: 'key', ownerOnly: true },
-  { id: 'system', label: 'System', icon: 'sliders' },
+  { id: 'system', label: 'System', icon: 'settings' },
   { id: 'audit', label: 'Audit Log', icon: 'note' }
 ];
 
@@ -8263,6 +8454,7 @@ async function renderAdminTab(tab) {
   title.textContent = meta.label;
   sub.textContent = {
     dashboard: 'Platform overview, activity and quick actions',
+    manage: 'High-impact platform controls, live broadcast and storage health',
     users: 'Search, inspect and moderate every account',
     servers: 'Manage every server on the platform',
     badges: 'Create custom image badges and assign them to users',
@@ -8274,6 +8466,7 @@ async function renderAdminTab(tab) {
   body.innerHTML = admLoading();
   try {
     if (tab === 'dashboard') return await admRenderDashboard(body);
+    if (tab === 'manage') return await admRenderManage(body);
     if (tab === 'users') return await admRenderUsers(body);
     if (tab === 'servers') return await admRenderServers(body);
     if (tab === 'badges') return await admRenderBadges(body);
@@ -8996,6 +9189,151 @@ async function admRenderStaff(body) {
   }));
 }
 
+async function admRenderManage(body) {
+  const [s, st] = await Promise.all([
+    api('/api/admin/settings'),
+    api('/api/admin/storage').catch(() => ({}))
+  ]);
+  const bytes = (n) => {
+    n = Number(n) || 0;
+    if (n < 1024) return n + ' B';
+    const u = ['KB', 'MB', 'GB', 'TB']; let i = -1;
+    do { n /= 1024; i++; } while (n >= 1024 && i < u.length - 1);
+    return (n < 10 ? n.toFixed(1) : Math.round(n)) + ' ' + u[i];
+  };
+  const uptime = (sec) => {
+    sec = Number(sec) || 0;
+    const d = Math.floor(sec / 86400), h = Math.floor((sec % 86400) / 3600), m = Math.floor((sec % 3600) / 60);
+    if (d) return `${d}d ${h}h`;
+    if (h) return `${h}h ${m}m`;
+    return `${m}m`;
+  };
+  const sw = (key, on, title, desc) => `
+    <div class="adm-toggle-row">
+      <div><b>${escapeHtml(title)}</b><span>${escapeHtml(desc)}</span></div>
+      <div class="toggle${on ? ' on' : ''}" data-mng-toggle="${key}" role="switch" aria-checked="${on ? 'true' : 'false'}"></div>
+    </div>`;
+
+  body.innerHTML = `
+    <div class="adm-manage-grid">
+      <div class="adm-card">
+        <div class="adm-card-title">${icon('sliders')} Platform controls</div>
+        <p class="adm-muted">These switches take effect immediately for everyone online.</p>
+        ${sw('registration_open', s.registration_open, 'Open registration', 'Allow new accounts to be created.')}
+        ${sw('maintenance_mode', s.maintenance_mode, 'Maintenance mode', 'Show the maintenance banner across the app.')}
+        ${sw('read_only_mode', s.read_only_mode, 'Read-only mode', 'Let people read but not post new messages.')}
+        ${sw('require_verify', s.require_verify, 'Require verification', 'New accounts must be verified before posting.')}
+        ${sw('allow_gifs', s.allow_gifs, 'Allow GIF uploads', 'Permit animated GIF and WebP uploads.')}
+        ${sw('invites_enabled', s.invites_enabled, 'Invites enabled', 'Allow invite links to be created and used.')}
+        <div class="field"><label>Maintenance message</label><input id="mng-maint" value="${escapeHtml(s.maintenance_message || '')}" placeholder="We'll be right back…"></div>
+        <div class="field"><label>Message of the day</label><input id="mng-motd" value="${escapeHtml(s.motd || '')}" placeholder="Optional banner text for everyone"></div>
+        <div class="adm-form-row">
+          <div class="field"><label>Max upload size (MB)</label><input id="mng-upload" type="number" min="1" max="500" value="${Number(s.max_upload_mb) || 50}"></div>
+          <div class="field"><label>Global slow mode (seconds)</label><input id="mng-slow" type="number" min="0" max="600" value="${Number(s.slow_mode_global) || 0}"></div>
+        </div>
+        <div class="adm-form-actions"><button class="btn" id="mng-save">${icon('check')} Save platform controls</button></div>
+      </div>
+
+      <div class="adm-card">
+        <div class="adm-card-title">${icon('megaphone')} Live broadcast</div>
+        <p class="adm-muted">Send an instant notice to every connected client. Nothing is stored, so it never touches existing data.</p>
+        <div class="field"><label>Notice text</label><input id="mng-bc-text" maxlength="500" placeholder="e.g. Scheduled maintenance at 22:00 UTC"></div>
+        <div class="field"><label>Style</label>
+          <select id="mng-bc-kind">
+            <option value="info">Info</option>
+            <option value="success">Success</option>
+            <option value="warning">Warning</option>
+            <option value="danger">Alert</option>
+          </select>
+        </div>
+        <div class="adm-form-actions"><button class="btn" id="mng-bc-send">${icon('send')} Send to everyone online</button></div>
+      </div>
+
+      <div class="adm-card">
+        <div class="adm-card-title">${icon('server')} Storage &amp; health</div>
+        <div class="adm-kv-grid">
+          <div class="adm-kv"><span>Database</span><b>${bytes(st.db_bytes)}</b></div>
+          <div class="adm-kv"><span>Uploads</span><b>${bytes(st.upload_bytes)}</b></div>
+          <div class="adm-kv"><span>Upload files</span><b>${Number(st.upload_files) || 0}</b></div>
+          <div class="adm-kv"><span>Messages</span><b>${Number(st.messages) || 0}</b></div>
+          <div class="adm-kv"><span>Users</span><b>${Number(st.users) || 0}</b></div>
+          <div class="adm-kv"><span>Servers</span><b>${Number(st.servers) || 0}</b></div>
+          <div class="adm-kv"><span>Channels</span><b>${Number(st.channels) || 0}</b></div>
+          <div class="adm-kv"><span>Online now</span><b>${Number(st.online) || 0}</b></div>
+          <div class="adm-kv"><span>Memory</span><b>${Number(st.memory_mb) || 0} MB</b></div>
+          <div class="adm-kv"><span>Uptime</span><b>${uptime(st.uptime_sec)}</b></div>
+        </div>
+      </div>
+
+      ${isPlatformOwner() ? `
+      <div class="adm-card">
+        <div class="adm-card-title">${icon('shield')} Bulk maintenance</div>
+        <p class="adm-muted">Owner-only, platform-wide and fully reversible. Every action is written to the audit log.</p>
+        <div class="adm-action-grid">
+          <button class="adm-action" data-bulk="unmute_all">${icon('mic')} Unmute everyone</button>
+          <button class="adm-action" data-bulk="verify_all">${icon('user-check')} Verify all users</button>
+          <button class="adm-action" data-bulk="unlock_all_servers">${icon('unlock')} Unlock all servers</button>
+          <button class="adm-action" data-bulk="deactivate_announcements">${icon('megaphone')} Deactivate announcements</button>
+          <button class="adm-action" data-bulk="force_logout_all">${icon('log-out')} Sign out everyone</button>
+          <button class="adm-action danger" data-bulk="clear_bans">${icon('ban')} Clear all global bans</button>
+        </div>
+      </div>` : ''}
+    </div>`;
+
+  const pending = {
+    registration_open: !!s.registration_open,
+    maintenance_mode: !!s.maintenance_mode,
+    read_only_mode: !!s.read_only_mode,
+    require_verify: !!s.require_verify,
+    allow_gifs: s.allow_gifs !== false,
+    invites_enabled: s.invites_enabled !== false
+  };
+  body.querySelectorAll('[data-mng-toggle]').forEach(t => t.addEventListener('click', () => {
+    const k = t.dataset.mngToggle;
+    pending[k] = !pending[k];
+    t.classList.toggle('on', pending[k]);
+    t.setAttribute('aria-checked', pending[k] ? 'true' : 'false');
+  }));
+
+  $('mng-save').addEventListener('click', async () => {
+    const btn = $('mng-save');
+    btn.disabled = true;
+    try {
+      await api('/api/admin/settings', { method: 'PATCH', body: JSON.stringify(Object.assign({}, pending, {
+        maintenance_message: $('mng-maint').value,
+        motd: $('mng-motd').value,
+        max_upload_mb: Number($('mng-upload').value) || 50,
+        slow_mode_global: Number($('mng-slow').value) || 0
+      })) });
+      toast('Platform controls saved', 'success');
+    } catch (e) { toast(e.message, 'error'); }
+    btn.disabled = false;
+  });
+
+  const bcBtn = $('mng-bc-send');
+  if (bcBtn) bcBtn.addEventListener('click', async () => {
+    const text = ($('mng-bc-text').value || '').trim();
+    if (!text) { toast('Type a notice first', 'error'); return; }
+    bcBtn.disabled = true;
+    try {
+      const r = await api('/api/admin/broadcast', { method: 'POST', body: JSON.stringify({ text, kind: $('mng-bc-kind').value }) });
+      toast(`Broadcast sent to ${r.delivered || 0} client${r.delivered === 1 ? '' : 's'}`, 'success');
+      $('mng-bc-text').value = '';
+    } catch (e) { toast(e.message, 'error'); }
+    bcBtn.disabled = false;
+  });
+
+  body.querySelectorAll('[data-bulk]').forEach(b => b.addEventListener('click', async () => {
+    const action = b.dataset.bulk;
+    const ok = await confirmDialog({ title: 'Confirm bulk action', body: escapeHtml(`Run "${action.replace(/_/g, ' ')}" across the whole platform?`), confirmText: 'Run', danger: true });
+    if (!ok) return;
+    try {
+      const r = await api('/api/admin/bulk', { method: 'POST', body: JSON.stringify({ action }) });
+      toast(r.detail || 'Done', 'success');
+    } catch (e) { toast(e.message, 'error'); }
+  }));
+}
+
 async function admRenderSystem(body) {
   const s = await api('/api/admin/settings');
   body.innerHTML = `
@@ -9516,9 +9854,9 @@ function renderServerTab(tab, s, isOwner) {
           <button class="ss-banner-btn" id="ss-banner-upload">${icon('image')} ${s.banner_url ? 'Change Banner' : 'Upload Banner'}</button>
           ${s.banner_url ? `<button class="ss-banner-btn ghost" id="ss-banner-remove">${icon('trash')} Remove</button>` : ''}
         </div>
-        <input type="file" id="ss-banner-file" accept="image/*,image/gif" class="hidden">
+        <input type="file" id="ss-banner-file" accept="image/*,image/gif,image/webp" class="hidden">
       </div>
-      <div class="ss-banner-hint">${icon('image')} Recommended 960&times;240. Animated GIFs are supported and will play in the sidebar.</div>
+      <div class="ss-banner-hint">${icon('image')} Recommended 960&times;240. Animated GIFs &amp; WebP are supported (up to 50 MB) and will play in the sidebar.</div>
       ${s.banner_url ? `<div class="ss-banner-tools" id="ss-banner-tools">
         <div class="ss-tool"><label>Zoom <span id="ss-scale-val">${Math.round(bannerScale * 100)}%</span></label>
           <input type="range" id="ss-banner-scale" min="1" max="3" step="0.05" value="${bannerScale}" ${isOwner ? '' : 'disabled'}></div>
@@ -10518,6 +10856,7 @@ function openMiniProfile() {
   document.body.appendChild(wrap);
   hydrateIcons(wrap);
   positionMiniProfile(wrap);
+  bindAvatarZoom(wrap, u);
 
   const save = () => saveMiniStatus(($('mini-status-input').value || '').trim());
   $('mini-status-save').addEventListener('click', save);
