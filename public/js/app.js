@@ -2012,18 +2012,17 @@ function renderMaintenanceBanner(message) {
   el.setAttribute('role', 'status');
   el.setAttribute('aria-live', 'polite');
   el.innerHTML = `
-    <div class="gb-ico" aria-hidden="true"><span class="gb-ring"></span>${icon('settings')}</div>
+    <div class="gb-ico" aria-hidden="true"><span class="gb-bang">!</span></div>
     <div class="gb-main">
       <div class="gb-head">
         <span class="gb-title">Maintenance in progress</span>
+        <span class="gb-pill">Scheduled</span>
       </div>
       <div class="gb-text">${escapeHtml(message || 'Some features may be temporarily unavailable.')}</div>
       <div class="gb-foot"><span class="gb-dot" aria-hidden="true"></span>We're working on it — messaging keeps working while we do.</div>
     </div>
-    <button class="gb-close" title="Dismiss" aria-label="Dismiss maintenance notice">${icon('xmark')}</button>
-    <div class="gb-progress" aria-hidden="true"></div>`;
+    <button class="gb-close" title="Dismiss" aria-label="Dismiss maintenance notice"><span aria-hidden="true">×</span></button>`;
   document.body.appendChild(el);
-  hydrateIcons(el);
   el.querySelector('.gb-close').addEventListener('click', () => {
     el.classList.add('leaving');
     setTimeout(() => el.remove(), 220);
@@ -2557,6 +2556,12 @@ async function restoreLastLocation() {
 }
 
 function showHome() {
+  /* Invalidate any in-flight navigation (e.g. a server that was still loading
+     when the user clicked the Direct Messages button). Without this bump the
+     late server response would win the race and yank the user back into the
+     server they just left - the classic "DM button does nothing until I
+     refresh" bug. */
+  ++viewToken;
   state.server = null; state.channel = null; state.dm = null; state.view = 'home';
   setReplyTo(null);
   renderRail();
@@ -2574,6 +2579,10 @@ function showHome() {
   updateTitle();
   animateView();
   saveLastLocation();
+  /* Refresh the conversation list in the background so the sidebar is never
+     stale or empty when arriving from a server. It renders in place, so this
+     never blocks or flashes the empty state. */
+  loadDMs().catch(() => {});
 }
 
 async function loadDMs() {
@@ -2813,6 +2822,7 @@ async function loadFriends() {
 }
 
 async function openFriends() {
+  ++viewToken;
   state.server = null; state.channel = null; state.view = 'friends';
   setReplyTo(null);
   if (state.dm) { socket.emit('leave_dm', state.dm.id); state.dm = null; }
@@ -6774,17 +6784,12 @@ function openImageEditor(file, opts = {}) {
   const outH = isBanner ? 240 : 512;
   const isGif = isAnimatedImage(file);
 
-  /* Animated GIF/WebP must NOT go through the canvas cropper: drawing a frame
-     to a canvas flattens it into a static PNG. Upload the original file so the
-     animation survives, and tell the user why there is no crop step. */
-  if (isGif) {
-    if (file.size > MAX_IMAGE_BYTES) {
-      toast('That GIF is too large (maximum 50 MB)', 'error');
-      return;
-    }
-    toast('Animated ' + (isBanner ? 'banner' : 'avatar') + ' \u2014 animation preserved', 'success');
-    Promise.resolve(opts.onSave(file, file.name || (isBanner ? 'banner.gif' : 'avatar.gif')))
-      .catch((err) => toast(err.message || 'Upload failed', 'error'));
+  /* Animated GIF/WebP still gets the same crop/zoom editor as a static image.
+     The preview animates in place, and if the user leaves the framing
+     untouched we hand the original file back so the animation survives.
+     Only an actual crop/zoom flattens it to a still frame. */
+  if (file.size > MAX_IMAGE_BYTES) {
+    toast('That image is too large (maximum 50 MB)', 'error');
     return;
   }
 
@@ -8154,8 +8159,10 @@ function settingsPanelHTML(section) {
             <div class="settings-avatar-row">
               <div id="sa-avatar">${avatarHTML(u, 80, u.status || 'online')}</div>
               <div class="sa-actions">
-                <button id="sa-upload">Change Avatar</button>
-                <button class="ghost" id="sa-remove">Remove Avatar</button>
+                <div class="sa-btn-row">
+                  <button id="sa-upload">Change Avatar</button>
+                  <button class="sa-remove-sm" id="sa-remove" title="Remove avatar" aria-label="Remove avatar"><span aria-hidden="true">×</span></button>
+                </div>
                 <input type="file" id="sa-file" accept="image/*" class="hidden">
               </div>
             </div>
@@ -8564,6 +8571,10 @@ function wireAccountPanel() {
 
   const markDirty = () => setSettingsDirty(true);
 
+  const removeBtn = $('sa-remove');
+  /* The small remove button only appears while an avatar is actually set. */
+  const syncRemoveBtn = () => { if (removeBtn) removeBtn.classList.toggle('hidden', !settingsUploads.avatar_url); };
+  syncRemoveBtn();
   $('sa-upload').addEventListener('click', () => $('sa-file').click());
   $('sa-file').addEventListener('change', (e) => {
     const f = e.target.files[0]; e.target.value = ''; if (!f) return;
@@ -8572,13 +8583,15 @@ function wireAccountPanel() {
         const d = await uploadImage(blob, filename);
         settingsUploads.avatar_url = d.url;
         previewSelf({ avatar_url: d.url });
+        syncRemoveBtn();
         markDirty();
       } catch (err) { toast(err.message, 'error'); }
     } });
   });
-  $('sa-remove').addEventListener('click', () => {
+  if (removeBtn) removeBtn.addEventListener('click', () => {
     settingsUploads.avatar_url = null;
     previewSelf({ avatar_url: null });
+    syncRemoveBtn();
     markDirty();
   });
 

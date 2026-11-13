@@ -284,7 +284,7 @@ button:active, .rail-item:active, .channel:active, .dm-item:active, .member:acti
 .sa-avatar .avatar .ava-anim,
 .ss-member:hover .avatar .ava-anim,
 .adm-user-cell:hover .avatar .ava-anim { opacity: 1; }
-.avatar .status-dot { position: absolute; right: -2px; bottom: -2px; width: 0.8em; height: 0.8em; min-width: 10px; min-height: 10px; border-radius: 50%; border: 0.2em solid var(--sidebar-bg); background-repeat: no-repeat; background-position: center; background-size: contain; }
+.avatar .status-dot { position: absolute; right: -2px; bottom: -2px; width: 0.9em; height: 0.9em; min-width: 12px; min-height: 12px; border-radius: 50%; border: 0.2em solid var(--sidebar-bg); background-repeat: no-repeat; background-position: center; background-size: contain; }
 .avatar .status-dot.online { background-color: transparent; background-image: url('/img/status-online.png'); }
 .avatar .status-dot.offline { background-color: transparent; background-image: url('/img/status-offline.png'); }
 .avatar .status-dot.idle { background-color: transparent; background-image: url('/img/status-idle.png'); }
@@ -630,7 +630,7 @@ button:active, .rail-item:active, .channel:active, .dm-item:active, .member:acti
 .member:hover { background: var(--hover); }
 .member.offline { opacity: .55; }
 /* Bigger, clearer presence dot in the member list so statuses read at a glance. */
-.member .avatar .status-dot { width: 14px; height: 14px; min-width: 14px; min-height: 14px; border-width: 3px; border-color: var(--members-bg); }
+.member .avatar .status-dot { width: 16px; height: 16px; min-width: 16px; min-height: 16px; border-width: 3px; border-color: var(--members-bg); }
 .member .mname { font-size: 15px; font-weight: 500; color: var(--text-normal); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: flex; align-items: center; gap: 4px; }
 .member .mname .mtag { color: var(--text-muted); font-weight: 400; font-size: 13px; }
 .member .owner-crown { color: var(--yellow); font-size: 12px; }
@@ -709,7 +709,7 @@ button:active, .rail-item:active, .channel:active, .dm-item:active, .member:acti
 .profile-idcard .pic-name { font-size: 22px; font-weight: 800; color: var(--text-header); margin-top: 8px; letter-spacing: -.3px; display: flex; align-items: center; gap: 8px; }
 .profile-idcard .pic-tag { font-size: 14px; color: var(--text-muted); margin-top: 2px; }
 .profile-idcard .pic-status { margin-top: 14px; font-size: 14px; color: var(--text-normal); display: flex; align-items: center; gap: 8px; }
-.profile-idcard .pic-status .dot { width: 11px; height: 11px; border-radius: 50%; flex: 0 0 auto; background-repeat: no-repeat; background-position: center; background-size: contain; }
+.profile-idcard .pic-status .dot { width: 13px; height: 13px; border-radius: 50%; flex: 0 0 auto; background-repeat: no-repeat; background-position: center; background-size: contain; }
 .profile-idcard .pic-status .dot.online { background-color: transparent; background-image: url('/img/status-online.png'); }
 .profile-idcard .pic-status .dot.idle { background-color: transparent; background-image: url('/img/status-idle.png'); }
 .profile-idcard .pic-status .dot.dnd { background-color: transparent; background-image: url('/img/status-dnd.png'); }
@@ -1085,10 +1085,25 @@ button:active, .rail-item:active, .channel:active, .dm-item:active, .member:acti
 .settings-panel .field { margin-bottom: 18px; }
 .settings-panel .field .hint { font-size: 12px; color: var(--text-muted); margin-top: 6px; }
 .settings-avatar-row { display: flex; align-items: center; gap: 16px; margin-bottom: 20px; }
-.settings-avatar-row .sa-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.settings-avatar-row .sa-actions { display: flex; flex-direction: column; gap: 8px; }
+.settings-avatar-row .sa-btn-row { display: flex; align-items: center; gap: 8px; }
 .settings-avatar-row .sa-actions button { padding: 8px 14px; border-radius: var(--radius-sm); background: var(--brand); color: #fff; font-size: 13px; font-weight: 600; }
 .settings-avatar-row .sa-actions button.ghost { background: color-mix(in srgb, var(--chat-bg) 70%, #fff); }
 .settings-avatar-row .sa-actions button:hover { filter: brightness(1.1); }
+/* Small, quiet "remove" control that sits directly beside Change Avatar. */
+.settings-avatar-row .sa-remove-sm {
+  width: 34px; height: 34px; padding: 0; flex: 0 0 auto;
+  display: grid; place-items: center;
+  background: color-mix(in srgb, var(--red) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--red) 34%, transparent);
+  color: var(--red); border-radius: var(--radius-sm);
+  font-size: 18px; line-height: 1; font-weight: 500; cursor: pointer;
+  transition: background .12s ease, border-color .12s ease, color .12s ease;
+}
+.settings-avatar-row .sa-remove-sm span { display: block; margin-top: -2px; }
+.settings-avatar-row .sa-remove-sm:hover {
+  background: var(--red); border-color: var(--red); color: #fff; filter: none;
+}
 .color-row { display: flex; gap: 8px; flex-wrap: wrap; }
 .color-row .swatch { width: 34px; height: 34px; border-radius: 50%; border: 3px solid transparent; cursor: pointer; }
 .color-row .swatch.sel { border-color: var(--text-header); }
@@ -1687,7 +1702,7 @@ input:focus::placeholder, textarea:focus::placeholder { color: color-mix(in srgb
 .mini-status-opt { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: var(--radius-sm); cursor: pointer; font-size: 14px; color: var(--text-normal); }
 .mini-status-opt:hover { background: var(--hover); }
 .mini-status-opt.sel { background: var(--active); }
-.mini-status-opt .ms-dot { width: 12px; height: 12px; border-radius: 50%; background-repeat: no-repeat; background-position: center; background-size: contain; flex: 0 0 auto; }
+.mini-status-opt .ms-dot { width: 14px; height: 14px; border-radius: 50%; background-repeat: no-repeat; background-position: center; background-size: contain; flex: 0 0 auto; }
 .mini-status-opt .ms-dot.online { background-color: transparent; background-image: url('/img/status-online.png'); }
 .mini-status-opt .ms-dot.idle { background-color: transparent; background-image: url('/img/status-idle.png'); }
 .mini-status-opt .ms-dot.dnd { background-color: transparent; background-image: url('/img/status-dnd.png'); }
@@ -2141,7 +2156,7 @@ body[data-theme="light"] .oprofile-modal .bio-link { color: #0066cc; }
 @keyframes msgShimmer { 0% { background-position: 100% 0; } 100% { background-position: 0 0; } }
 @media (prefers-reduced-motion: reduce) {
   .msg-skeleton { animation: none; }
-  .global-banner, .global-banner.maintenance .gb-ring, .global-banner.maintenance .gb-dot, .global-banner.maintenance .gb-progress { animation: none; }
+  .global-banner { animation: none; }
 }
 
 /* ---------- Channel switch loading skeleton / error state ---------- */
@@ -3130,59 +3145,52 @@ body[data-theme="light"] .toast { box-shadow: 0 8px 24px rgba(0, 0, 0, .12); }
 .global-banner .gb-close:hover { background: color-mix(in srgb, var(--text-normal) 12%, transparent); color: var(--text-header); }
 .global-banner .gb-close .ic { width: 15px; height: 15px; }
 
-/* ---------- Maintenance notice (revamped) ---------- */
+/* ---------- Maintenance notice (flat, icon-free) ----------
+   Deliberately restrained: a solid card, a thin amber accent, a plain text
+   "!" marker and a text close glyph. No SVG icons, no pulsing rings, no
+   sweeping gradients - just a calm status bar that matches the rest of the
+   UI. */
 .global-banner.maintenance {
-  align-items: center; gap: 14px; padding: 15px 16px 16px;
-  background:
-    radial-gradient(120% 160% at 0% 0%, color-mix(in srgb, #f0b232 14%, transparent) 0%, transparent 62%),
-    var(--menu-bg);
-  border: 1px solid color-mix(in srgb, #f0b232 34%, var(--divider));
-  border-left: 3px solid #f0b232;
-  box-shadow: 0 18px 46px rgba(0,0,0,.42), 0 0 0 1px rgba(240,178,50,.08);
+  align-items: center; gap: 13px; padding: 14px 15px;
+  max-width: min(600px, 94vw);
+  background: var(--menu-bg);
+  border: 1px solid var(--divider);
+  border-left: 3px solid #e0a82e;
+  border-radius: 10px;
+  box-shadow: 0 12px 32px rgba(0,0,0,.34);
   overflow: hidden;
 }
 .global-banner.maintenance .gb-ico {
-  position: relative; width: 42px; height: 42px; border-radius: 13px;
-  background: color-mix(in srgb, #f0b232 16%, transparent); color: #f0b232;
+  position: relative; flex: 0 0 auto; width: 34px; height: 34px; border-radius: 8px;
+  display: grid; place-items: center;
+  background: color-mix(in srgb, #e0a82e 14%, transparent);
+  border: 1px solid color-mix(in srgb, #e0a82e 30%, transparent);
+  color: #e0a82e;
 }
-.global-banner.maintenance .gb-ico .ic { width: 21px; height: 21px; }
-.global-banner.maintenance .gb-ring {
-  position: absolute; inset: -5px; border-radius: 17px;
-  border: 1.5px solid color-mix(in srgb, #f0b232 40%, transparent);
-  animation: gbRing 2.6s ease-out infinite;
+.global-banner.maintenance .gb-bang {
+  font-size: 18px; font-weight: 800; line-height: 1; font-family: inherit;
 }
-@keyframes gbRing {
-  0% { transform: scale(.94); opacity: .85; }
-  70% { transform: scale(1.14); opacity: 0; }
-  100% { opacity: 0; }
-}
-.global-banner.maintenance .gb-title { font-size: 14px; }
+.global-banner.maintenance .gb-title { font-size: 13.5px; font-weight: 700; }
 .global-banner.maintenance .gb-pill {
-  font-size: 9.5px; font-weight: 800; letter-spacing: .09em; text-transform: uppercase;
-  padding: 2px 7px; border-radius: 999px;
-  color: #f0b232; background: color-mix(in srgb, #f0b232 16%, transparent);
-  border: 1px solid color-mix(in srgb, #f0b232 30%, transparent);
+  font-size: 9.5px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase;
+  padding: 2px 7px; border-radius: 5px;
+  color: #e0a82e; background: color-mix(in srgb, #e0a82e 12%, transparent);
+  border: 1px solid color-mix(in srgb, #e0a82e 26%, transparent);
 }
 .global-banner.maintenance .gb-text { font-size: 13px; color: var(--text-normal); margin-top: 3px; }
 .global-banner.maintenance .gb-foot {
-  display: flex; align-items: center; gap: 7px; margin-top: 8px;
+  display: flex; align-items: center; gap: 7px; margin-top: 7px;
   font-size: 11.5px; color: var(--text-muted);
 }
 .global-banner.maintenance .gb-dot {
-  width: 6px; height: 6px; border-radius: 50%; background: #f0b232; flex: 0 0 auto;
-  box-shadow: 0 0 0 0 rgba(240,178,50,.6); animation: gbDot 1.9s infinite;
+  width: 6px; height: 6px; border-radius: 50%; background: #e0a82e; flex: 0 0 auto;
 }
-@keyframes gbDot { 0% { box-shadow: 0 0 0 0 rgba(240,178,50,.55); } 70% { box-shadow: 0 0 0 6px rgba(240,178,50,0); } 100% { box-shadow: 0 0 0 0 rgba(240,178,50,0); } }
-.global-banner.maintenance .gb-progress {
-  position: absolute; left: 0; right: 0; bottom: 0; height: 2px;
-  background: linear-gradient(90deg, transparent, #f0b232, transparent);
-  background-size: 45% 100%; background-repeat: no-repeat;
-  animation: gbSweep 2.8s ease-in-out infinite;
+.global-banner.maintenance .gb-close span {
+  display: block; font-size: 18px; line-height: 1; margin-top: -1px;
 }
-@keyframes gbSweep { 0% { background-position: -50% 0; } 100% { background-position: 150% 0; } }
 @media (max-width: 560px) {
-  .global-banner.maintenance { top: 8px; padding: 13px 12px 14px; gap: 10px; }
-  .global-banner.maintenance .gb-ico { width: 36px; height: 36px; border-radius: 11px; }
+  .global-banner.maintenance { top: 8px; padding: 12px 12px; gap: 10px; }
+  .global-banner.maintenance .gb-ico { width: 30px; height: 30px; border-radius: 7px; }
   .global-banner.maintenance .gb-foot { display: none; }
 }
 
