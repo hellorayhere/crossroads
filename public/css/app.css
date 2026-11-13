@@ -361,8 +361,17 @@ button:active, .rail-item:active, .channel:active, .dm-item:active, .member:acti
 .attachment { margin-top: 6px; }
 .attachment.has-spoiler { position: relative; }
 .attachment.has-spoiler:not(.revealed) img,
-.attachment.has-spoiler:not(.revealed) video { filter: blur(26px) saturate(.7); transform: scale(1.02); }
-.attachment.has-spoiler .att-spoiler { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; border-radius: 8px; background: rgba(20,22,28,.35); cursor: pointer; z-index: 3; }
+.attachment.has-spoiler:not(.revealed) video,
+.attachment.has-spoiler:not(.revealed) .vp,
+.attachment.has-spoiler:not(.revealed) audio { filter: blur(26px) saturate(.7); transform: scale(1.02); pointer-events: none; user-select: none; }
+.attachment.has-spoiler:not(.revealed) .att-desc,
+.attachment.has-spoiler:not(.revealed) .att-size,
+.attachment.has-spoiler:not(.revealed) .file-card { filter: blur(9px); opacity: .55; pointer-events: none; user-select: none; }
+.attachment.has-spoiler .att-spoiler { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; border-radius: 8px; background: rgba(20,22,28,.35); cursor: pointer; z-index: 5; outline: none; }
+.attachment.has-spoiler .att-spoiler:hover .att-spoiler-label { background: rgba(0,0,0,.78); transform: translateY(-1px); }
+.attachment.has-spoiler .att-spoiler:focus-visible .att-spoiler-label { box-shadow: 0 0 0 3px color-mix(in srgb, var(--brand) 65%, transparent), 0 4px 14px rgba(0,0,0,.4); }
+.attachment.has-spoiler.revealed .att-spoiler { display: none; }
+.attachment.has-spoiler .att-spoiler-label { transition: background .15s, transform .15s; }
 .attachment.has-spoiler .att-spoiler-label { display: inline-flex; align-items: center; gap: 7px; background: rgba(0,0,0,.62); color: #fff; font-size: 12.5px; font-weight: 700; letter-spacing: .02em; padding: 7px 13px; border-radius: 999px; box-shadow: 0 4px 14px rgba(0,0,0,.4); }
 .attachment.has-spoiler .att-spoiler-label .ic { width: 15px; height: 15px; }
 .attachment.has-spoiler .att-spoiler-label em { font-style: normal; font-weight: 500; opacity: .72; font-size: 11.5px; }
@@ -1255,6 +1264,12 @@ button:active, .rail-item:active, .channel:active, .dm-item:active, .member:acti
 .banner-editor { position: relative; height: 130px; border-radius: var(--radius); background: color-mix(in srgb, var(--chat-bg) 80%, #000); background-size: cover; background-position: center; display: grid; place-items: center; overflow: hidden; border: 1px solid var(--divider); }
 .banner-edit-btn { background: rgba(0,0,0,.55); color: #fff; font-size: 13px; font-weight: 600; padding: 8px 14px; border-radius: var(--radius-sm); display: flex; align-items: center; gap: 8px; }
 .banner-edit-btn:hover { background: rgba(0,0,0,.78); }
+.banner-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: center; }
+.hero-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: center; }
+.hero-edit.hero-remove { background: rgba(242,63,67,.82); }
+.hero-edit.hero-remove:hover { background: var(--red); }
+.banner-edit-btn.banner-remove-btn { background: rgba(242,63,67,.82); }
+.banner-edit-btn.banner-remove-btn:hover { background: var(--red); }
 .hint.ok { color: var(--green); }
 .hint.bad { color: var(--red); }
 

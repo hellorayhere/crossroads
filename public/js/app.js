@@ -4703,15 +4703,32 @@ function attachmentNode(m) {
   }
   if (m.attachment_spoiler) {
     wrap.classList.add('has-spoiler');
+    /* The overlay sits above the media and swallows clicks, so a spoiled
+       image can never be opened in the lightbox before it is revealed. */
     const ov = document.createElement('div');
     ov.className = 'att-spoiler';
+    ov.setAttribute('role', 'button');
+    ov.setAttribute('tabindex', '0');
+    ov.setAttribute('aria-label', 'Reveal spoiler attachment');
     ov.innerHTML = `<span class="att-spoiler-label">${icon('eye')}<span>Spoiler</span><em>Click to reveal</em></span>`;
-    ov.addEventListener('click', (e) => {
-      e.stopPropagation();
+    const reveal = () => {
       wrap.classList.add('revealed');
+      wrap.removeAttribute('aria-hidden');
       ov.remove();
+    };
+    ov.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); reveal(); });
+    ov.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); reveal(); }
     });
     wrap.appendChild(ov);
+    /* Belt and braces: a capture-phase guard stops any media click handler
+       underneath from firing while the spoiler is still hidden. */
+    wrap.addEventListener('click', (e) => {
+      if (wrap.classList.contains('revealed')) return;
+      e.stopPropagation();
+      e.preventDefault();
+      reveal();
+    }, true);
   }
   return wrap;
 }
@@ -5067,6 +5084,10 @@ async function sendMessage() {
     payload.attachment_name = state.pendingAttachment.name;
     payload.attachment_type = state.pendingAttachment.type;
     payload.attachment_size = state.pendingAttachment.size;
+    /* Optional per-attachment tools chosen in the composer. These must travel
+       with the message or the spoiler / description would be lost on send. */
+    payload.attachment_spoiler = !!state.pendingAttachment.spoiler;
+    payload.attachment_description = (state.pendingAttachment.description || '').trim() || null;
   }
   if (state.replyTo) payload.reply_to_id = state.replyTo.id;
   /* Keep the quoted message so the optimistic bubble can show a real preview
@@ -6668,7 +6689,10 @@ function renderOwnProfile(user) {
       <div class="profile-content">
         <div class="profile-tabs"><div class="profile-tab active">Board</div></div>
         <div class="profile-hero" style="${bannerStyle}">
-          <button class="hero-edit" id="pf-banner">${icon('image')} Change Banner</button>
+          <div class="hero-actions">
+            <button class="hero-edit" id="pf-banner">${icon('image')} Change Banner</button>
+            ${user.banner_url ? `<button class="hero-edit hero-remove" id="pf-banner-remove" title="Remove banner image">${icon('trash')} Remove</button>` : ''}
+          </div>
         </div>
         <div class="profile-idcard">
           <div class="pic-avatar">${avatarHTML(user, 96, user.status || 'offline')}</div>
@@ -6694,6 +6718,19 @@ function renderOwnProfile(user) {
   $('pf-x').addEventListener('click', closeModal);
   $('pf-edit').addEventListener('click', () => openSettings('account'));
   $('pf-banner').addEventListener('click', () => openSettings('account'));
+  const pfBannerRemove = $('pf-banner-remove');
+  if (pfBannerRemove) pfBannerRemove.addEventListener('click', async () => {
+    try {
+      const { user: updated } = await api('/api/me', { method: 'PATCH', body: JSON.stringify({ banner_url: null }) });
+      me = updated; localStorage.setItem('cr_user', JSON.stringify(me));
+      user.banner_url = null;
+      const hero = document.querySelector('.profile-hero');
+      if (hero) { hero.style.backgroundImage = 'none'; hero.style.background = user.banner_color || '#5865F2'; }
+      pfBannerRemove.remove();
+      renderMe(); renderRail(); renderMembers();
+      toast('Banner removed', 'success');
+    } catch (e) { toast(e.message, 'error'); }
+  });
   $('pf-avatar').addEventListener('click', () => openSettings('account'));
   makeCopyable(document.querySelector('.profile-content .pic-name'), displayName, 'Display name');
   makeCopyable(document.querySelector('.profile-content .pic-tag'), fullTag(user), 'Username');
@@ -7367,7 +7404,10 @@ function settingsPanelHTML(section) {
               <div><h5>Profile Banner</h5><p class="acct-card-sub">Pick a colour or upload an image (GIF supported, up to 25 MB).</p></div>
             </div>
             <div class="banner-editor" id="banner-editor" style="${u.banner_url ? `background-image:url('${escapeHtml(u.banner_url)}')` : `background:${escapeHtml(bannerColor)}`}">
-              <button class="banner-edit-btn" id="set-banner-file-btn">${icon('image')} Upload Banner</button>
+              <div class="banner-actions">
+                <button class="banner-edit-btn" id="set-banner-file-btn">${icon('image')} Upload Banner</button>
+                <button class="banner-edit-btn banner-remove-btn${u.banner_url ? '' : ' hidden'}" id="set-banner-remove-btn" title="Remove banner image">${icon('trash')} Remove</button>
+              </div>
             </div>
             <input type="file" id="set-banner-file" accept="image/*" class="hidden">
             <div class="color-row" id="banner-color-row" style="margin-top:12px">${PALETTE.map(c => `<span class="swatch${bannerColor.toLowerCase() === c.toLowerCase() ? ' sel' : ''}" data-color="${c}" style="background:${c}"></span>`).join('')}</div>
@@ -7737,6 +7777,7 @@ function wireAccountPanel() {
 
   let bannerColor = u.banner_color || '#5865F2';
   const editor = $('banner-editor');
+  const bannerRemoveBtn = $('set-banner-remove-btn');
   const paintBanner = () => {
     if (settingsUploads.banner_url) {
       editor.style.backgroundImage = `url('${settingsUploads.banner_url}')`;
@@ -7745,9 +7786,17 @@ function wireAccountPanel() {
       editor.style.backgroundImage = 'none';
       editor.style.background = bannerColor;
     }
+    /* The Remove button only makes sense while an image/GIF is actually set. */
+    if (bannerRemoveBtn) bannerRemoveBtn.classList.toggle('hidden', !settingsUploads.banner_url);
     previewSelf({ banner_url: settingsUploads.banner_url, banner_color: bannerColor });
   };
   $('set-banner-file-btn').addEventListener('click', () => $('set-banner-file').click());
+  if (bannerRemoveBtn) bannerRemoveBtn.addEventListener('click', () => {
+    settingsUploads.banner_url = null;
+    paintBanner();
+    markDirty();
+    toast('Banner removed \u2014 save to apply', 'success');
+  });
   $('set-banner-file').addEventListener('change', (e) => {
     const f = e.target.files[0]; e.target.value = ''; if (!f) return;
     openImageEditor(f, { kind: 'banner', title: 'Adjust Banner', onSave: async (blob, filename) => {

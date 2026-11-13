@@ -1,22 +1,17 @@
 # Crossroads — current round
 
-## A. Fix "Request failed" on send (root cause)
-- [x] Diagnose: both message routes used `attachment_spoiler`/`attachment_description` in the INSERT without destructuring them from `req.body` -> ReferenceError -> 500 HTML -> generic "Request failed"
-- [x] Add the two fields to the channel + DM destructures
-- [x] Add startup schema self-heal in server.js (additive only)
-- [x] Add JSON error handler so API failures return a real message
-- [x] Wrap admin broadcast `io.emit` in try/catch
-- [x] Local E2E test: plain message, attachment message, DM attachment message all 200
+## A. Spoiler actually works
+- [x] Root cause: `sendMessage()` never put `attachment_spoiler` / `attachment_description` into the payload, so the server always stored `0`
+- [x] Add both fields to the outgoing payload
+- [x] Harden render: blur description/size/file-card too, block lightbox clicks before reveal, keyboard (Enter/Space) reveal, focus ring, `revealed` hides overlay
+- [x] Verified live in browser: hidden state blurs image + description, click reveals, no lightbox opens
 
-## B. Attachment options UI polish
-- [x] Rebuild `renderAttachmentPreview` markup: file header + quick actions + options panel
-- [x] Spoiler as a real site toggle switch with icon tile + description
-- [x] Description as a styled inline field with icon + helper text
-- [x] Preview + remove icon buttons with hover/danger states
-- [x] Responsive grid (stacks under 720px), light/dark theme tokens
-- [x] Visual verification in browser (2-col grid, 40px toggle, no overflow)
+## B. Remove profile banner image/GIF
+- [x] Account tab banner editor: added red "Remove" button, auto-hides when no banner is set, marks settings dirty
+- [x] Own profile hero: added "Remove" button that clears `banner_url` immediately and repaints
+- [x] Verified in browser: both buttons appear only with a banner and clear it correctly
 
 ## C. Ship
-- [x] Commit + push to main
-- [x] Trigger Render deploy, poll until live (dep-dbrajmk9v7es73c1cek0)
-- [x] Verify live site loads and CSS/JS contain new rules
+- [ ] Commit + push
+- [ ] Deploy + poll until live
+- [ ] Verify live assets
