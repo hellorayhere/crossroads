@@ -7809,7 +7809,23 @@ async function startDM(userId) {
 /* ============================================================
    PROFILE MODALS
    ============================================================ */
+/* Minimal card shown when a webhook's name or avatar is clicked. A webhook has
+   no account behind it, so there is nothing to show beyond "Webhook". */
+function renderWebhookProfile(user) {
+  const name = user.display_name || user.username || 'Webhook';
+  openModal(`
+    <div class="wh-profile">
+      <div class="wh-profile-av">${avatarHTML(Object.assign({}, user, { status: 'offline' }), 84, 'offline')}</div>
+      <div class="wh-profile-name">${escapeHtml(name)}</div>
+      <div class="wh-profile-tag"><span class="bot-tag" title="Verified bot">${icon('check-badge')}<span>BOT</span></span><span>Webhook</span></div>
+      <p class="wh-profile-note">This is a webhook. Messages sent here are posted by an automated integration, not a person.</p>
+    </div>`, { modalClass: 'modal wh-profile-modal' });
+}
+
 async function openProfile(user, opts = {}) {
+  /* Webhook senders are not accounts. Clicking one shows a small "Webhook" card
+     with no friends, DMs, notes or mutuals. */
+  if (user && (user.bot || user.webhook)) return renderWebhookProfile(user);
   const isMe = user.id === me.id;
   state.openProfileId = user.id;
   let relationship = isMe ? 'self' : 'none';

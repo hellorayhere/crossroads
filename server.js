@@ -463,6 +463,7 @@ function publicUser(u, opts = {}) {
     platform_owner: isOwner(u),
     badges: badgesForUser(u.id),
     bot: !!u.is_webhook,
+    webhook: !!u.is_webhook,
     created_at: u.created_at
   };
   if (opts.self) out.twofa_enabled = !!u.twofa_enabled;
@@ -1778,6 +1779,30 @@ app.post('/api/me/delete', auth, (req, res) => {
 app.get('/api/users/:id', auth, (req, res) => {
   const u = db.prepare('SELECT * FROM users WHERE id = ?').get(req.params.id);
   if (!u) return res.status(404).json({ error: 'User not found' });
+  /* Webhook senders are not people: they have no profile, friends, notes or
+     mutuals. Return the bare identity so the client can show a "Webhook" card
+     instead of a full user profile. */
+  if (u.is_webhook) {
+    return res.json({
+      user: {
+        id: u.id,
+        username: u.username,
+        discriminator: u.discriminator,
+        display_name: u.display_name || u.username,
+        avatar_url: u.avatar_url || null,
+        status: 'offline',
+        bot: true,
+        webhook: true,
+        badges: [],
+        server_roles: []
+      },
+      relationship: 'none',
+      blocked: false,
+      mutual_servers: [],
+      mutual_friends: [],
+      note: ''
+    });
+  }
   const isMe = u.id === req.user.id;
   const blocked = !isMe && isBlockedBetween(req.user.id, u.id);
   const noteRow = db.prepare('SELECT content FROM notes WHERE owner_id = ? AND target_id = ?').get(req.user.id, u.id);
@@ -1846,6 +1871,7 @@ app.post('/api/friends/request', auth, (req, res) => {
   }
   if (!target) return res.status(404).json({ error: 'User not found. Check the spelling and try again.' });
   if (target.id === uid) return res.status(400).json({ error: 'You cannot add yourself' });
+  if (target.is_webhook) return res.status(400).json({ error: 'Webhooks cannot be added as friends' });
   if (relationshipBetween(uid, target.id) === 'blocked') return res.status(403).json({ error: 'Unable to send a friend request to this user' });
   const targetSettings = safeParse(target.settings, {});
   if (targetSettings.friendRequests === false) return res.status(403).json({ error: 'This user is not accepting friend requests right now.' });
@@ -3182,6 +3208,7 @@ app.post('/api/dms', auth, (req, res) => {
   if (userId === req.user.id) return res.status(400).json({ error: 'Cannot DM yourself' });
   const other = db.prepare('SELECT * FROM users WHERE id = ?').get(userId);
   if (!other) return res.status(404).json({ error: 'User not found' });
+  if (other.is_webhook) return res.status(400).json({ error: 'Webhooks cannot be messaged directly' });
   const [a, b] = [req.user.id, userId].sort();
   let dm = db.prepare('SELECT * FROM dm_channels WHERE user1_id = ? AND user2_id = ?').get(a, b);
   if (!dm) {

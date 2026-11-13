@@ -510,6 +510,16 @@ button:active, .rail-item:active, .channel:active, .dm-item:active, .member:acti
 .bot-tag .ic { width: 11px; height: 11px; }
 .bot-tag span { transform: translateY(.5px); }
 
+/* ---- Webhook profile card (webhooks are not accounts) ---- */
+.wh-profile-modal { max-width: 340px; text-align: center; }
+.wh-profile { display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 26px 20px 24px; }
+.wh-profile-av { width: 84px; height: 84px; border-radius: 50%; overflow: hidden; display: grid; place-items: center; background: color-mix(in srgb, var(--chat-bg) 60%, #000); border: 1px solid var(--divider); }
+.wh-profile-av .avatar { width: 84px; height: 84px; }
+.wh-profile-name { font-size: 19px; font-weight: 700; color: var(--text-header); word-break: break-word; }
+.wh-profile-tag { display: inline-flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--text-muted); }
+.wh-profile-tag .bot-tag { margin-left: 0; }
+.wh-profile-note { margin: 4px 0 0; font-size: 13px; line-height: 1.5; color: var(--text-muted); }
+
 /* ---- Reply highlight (when someone replies to you) ---- */
 .msg-group.reply-to-me {
   background: color-mix(in srgb, var(--brand) 9%, transparent);
