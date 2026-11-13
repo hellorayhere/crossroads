@@ -4615,3 +4615,65 @@ body[data-theme="light"] .update-card { box-shadow: 0 24px 70px rgba(0, 0, 0, .2
 /* Compact button used inside dense admin lists (e.g. join requests). */
 .btn.btn-sm { padding: 4px 10px; font-size: 12px; line-height: 1.4; gap: 5px; border-radius: 6px; }
 .btn.btn-sm svg { width: 14px; height: 14px; }
+
+/* ---------- Default role picker (Server Identity) ---------- */
+.ss-defrole-field { display: flex; flex-direction: column; gap: 10px; }
+.ss-defrole-current { min-height: 26px; display: flex; align-items: center; }
+.ss-defrole-chip {
+  display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px;
+  border: 1px solid transparent; border-radius: 999px; font-size: 13px; font-weight: 600;
+}
+.ss-defrole-none { font-size: 13px; color: var(--text-muted); }
+.ss-defrole-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.ss-defrole-row select { flex: 1 1 220px; min-width: 0; }
+.ss-defrole-new { white-space: nowrap; }
+
+.ss-role-builder {
+  margin-top: 4px; padding: 16px; border-radius: 10px;
+  background: color-mix(in srgb, var(--chat-bg) 65%, transparent);
+  border: 1px solid var(--divider);
+}
+.ss-role-builder.hidden { display: none; }
+.ss-rb-head { font-size: 13px; font-weight: 700; color: var(--text-header); margin-bottom: 14px; }
+.ss-rb-grid { display: flex; gap: 18px; align-items: flex-start; }
+.ss-rb-icon-col { display: flex; flex-direction: column; align-items: center; gap: 8px; flex: 0 0 auto; }
+.ss-rb-preview {
+  width: 64px; height: 64px; border-radius: 50%; overflow: hidden;
+  display: grid; place-items: center; background: var(--sidebar-bg);
+  border: 1px dashed color-mix(in srgb, var(--text-muted) 45%, transparent); color: var(--text-muted);
+}
+.ss-rb-preview img { width: 100%; height: 100%; object-fit: cover; }
+.ss-rb-preview svg { width: 22px; height: 22px; }
+.ss-rb-icon-actions { display: flex; gap: 6px; align-items: center; }
+.ss-rb-fields { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+.ss-rb-fields label { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .02em; color: var(--text-muted); }
+.ss-rb-fields input {
+  width: 100%; padding: 9px 11px; border-radius: 6px; font-size: 14px;
+  background: var(--input-bg, var(--chat-bg)); color: var(--text-normal);
+  border: 1px solid var(--divider); outline: none;
+}
+.ss-rb-fields input:focus { border-color: var(--brand); }
+.ss-rb-colors { display: flex; gap: 8px; flex-wrap: wrap; padding: 4px 0 2px; }
+.ss-rb-swatch {
+  width: 26px; height: 26px; border-radius: 50%; border: 2px solid transparent;
+  cursor: pointer; padding: 0; transition: transform .12s ease, box-shadow .12s ease;
+}
+.ss-rb-swatch:hover { transform: scale(1.1); }
+.ss-rb-swatch.active { border-color: #fff; box-shadow: 0 0 0 2px color-mix(in srgb, var(--text-normal) 55%, transparent); }
+.ss-rb-chip-wrap { margin: 14px 0 4px; }
+.ss-rb-chip {
+  display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px;
+  border: 1px solid transparent; border-radius: 999px; font-size: 13px; font-weight: 600;
+}
+.ss-rb-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
+
+/* ---------- Join requests (optional) status block ---------- */
+.ss-jr-note { padding: 4px 2px 14px; }
+.ss-jr-state {
+  display: inline-flex; align-items: center; gap: 7px; font-size: 13px; font-weight: 700;
+  padding: 4px 10px; border-radius: 999px; margin-bottom: 8px;
+}
+.ss-jr-state::before { content: ''; width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
+.ss-jr-state.on { color: #f0b232; background: color-mix(in srgb, #f0b232 14%, transparent); }
+.ss-jr-state.off { color: #3ba55d; background: color-mix(in srgb, #3ba55d 14%, transparent); }
+.ss-jr-desc { font-size: 13px; color: var(--text-muted); line-height: 1.45; }

@@ -12245,6 +12245,93 @@ function wireSsToggles(body) {
   }));
 }
 
+/* Inline builder for a brand-new default role: name, colour and an uploaded
+   icon, all without leaving the Community tab. Creating it also sets it as the
+   server's default role in one step. */
+function wireDefaultRoleBuilder(s, body) {
+  const sel = $('ss-default-role');
+  const current = $('ss-defrole-current');
+  const chipFor = (r) => r
+    ? `<span class="ss-defrole-chip" style="color:${escapeHtml(r.color)};border-color:${escapeHtml(r.color)}66;background:${escapeHtml(r.color)}1f">${roleIconHTML(r.icon, 'role-tag-ico')}${escapeHtml(r.name)}</span>`
+    : '<span class="ss-defrole-none">No default role \u2014 new members get the plain Member role.</span>';
+  if (sel && current) {
+    sel.addEventListener('change', () => {
+      current.innerHTML = chipFor((state.roles || []).find(x => x.id === sel.value));
+    });
+  }
+
+  const builder = $('ss-role-builder');
+  const openBtn = $('ss-new-role');
+  if (!builder || !openBtn) return;
+  const nameEl = $('ss-rb-name');
+  const chip = $('ss-rb-chip');
+  const preview = $('ss-rb-preview');
+  const fileEl = $('ss-rb-file');
+  let iconUrl = '';
+  let color = '#5865F2';
+
+  const refresh = () => {
+    if (chip) {
+      chip.style.color = color;
+      chip.style.borderColor = color + '66';
+      chip.style.background = color + '1f';
+      chip.innerHTML = (iconUrl ? `<img class="role-tag-ico" src="${escapeHtml(iconUrl)}" alt="">` : '') +
+        escapeHtml(nameEl.value.trim() || 'Newcomer');
+    }
+  };
+  const setPreview = () => {
+    preview.innerHTML = iconUrl ? `<img src="${escapeHtml(iconUrl)}" alt="">` : icon('image');
+    if (!iconUrl) hydrateIcons(preview);
+    refresh();
+  };
+
+  openBtn.addEventListener('click', () => {
+    builder.classList.toggle('hidden');
+    if (!builder.classList.contains('hidden')) { refresh(); nameEl.focus(); }
+  });
+  $('ss-rb-cancel').addEventListener('click', () => builder.classList.add('hidden'));
+  nameEl.addEventListener('input', refresh);
+  $('ss-rb-upload').addEventListener('click', () => fileEl.click());
+  fileEl.addEventListener('change', async (e) => {
+    const f = e.target.files[0];
+    e.target.value = '';
+    if (!f) return;
+    try { const d = await uploadImage(f); iconUrl = d.url; setPreview(); }
+    catch (err) { toast(err.message, 'error'); }
+  });
+  $('ss-rb-clear').addEventListener('click', () => { iconUrl = ''; setPreview(); });
+  builder.querySelectorAll('.ss-rb-swatch').forEach(sw => sw.addEventListener('click', () => {
+    builder.querySelectorAll('.ss-rb-swatch').forEach(x => x.classList.remove('active'));
+    sw.classList.add('active');
+    color = sw.dataset.color;
+    refresh();
+  }));
+
+  $('ss-rb-create').addEventListener('click', async () => {
+    const name = nameEl.value.trim();
+    if (!name) { toast('Give the role a name first', 'error'); nameEl.focus(); return; }
+    const btn = $('ss-rb-create');
+    btn.disabled = true;
+    try {
+      const { role } = await api('/api/servers/' + s.id + '/roles', {
+        method: 'POST',
+        body: JSON.stringify({ name, color, icon: iconUrl || null })
+      });
+      state.roles = (state.roles || []).concat([role]);
+      const { settings } = await api('/api/servers/' + s.id + '/settings', {
+        method: 'PATCH',
+        body: JSON.stringify({ default_role_id: role.id })
+      });
+      state.serverSettings = settings;
+      toast('Default role "' + role.name + '" created', 'success');
+      renderCommunityTab($('ss-body'), s);
+    } catch (e) {
+      btn.disabled = false;
+      toast(e.message, 'error');
+    }
+  });
+}
+
 function renderCommunityTab(body, s) {
   const admin = amIAdmin();
   const st = state.serverSettings || {};
@@ -12253,10 +12340,48 @@ function renderCommunityTab(body, s) {
   const timeoutOpts = [60, 300, 900, 1800, 3600];
   const expiryOpts = [[0, 'Never'], [3600, '1 hour'], [86400, '1 day'], [604800, '7 days'], [2592000, '30 days']];
 
+  const defRole = (state.roles || []).find(r => r.id === st.default_role_id) || null;
+  const defRoleChip = defRole
+    ? `<span class="ss-defrole-chip" style="color:${escapeHtml(defRole.color)};border-color:${escapeHtml(defRole.color)}66;background:${escapeHtml(defRole.color)}1f">${roleIconHTML(defRole.icon, 'role-tag-ico')}${escapeHtml(defRole.name)}</span>`
+    : '<span class="ss-defrole-none">No default role \u2014 new members get the plain Member role.</span>';
   const identity = ssGroup('Server Identity', 'How this community presents itself to members and visitors.', `
     <div class="ss-field-grid">
       ${ssField('Community Name', `<input id="ss-community-name" maxlength="80" value="${escapeHtml(st.community_name || '')}" ${dis} placeholder="e.g. The Pixel Lounge">`, 'A friendly display name shown on the invite splash and welcome screen.')}
-      ${ssField('Default Role', `<select id="ss-default-role" ${dis}><option value="">Member (no role)</option>${(state.roles || []).map(r => `<option value="${r.id}"${st.default_role_id === r.id ? ' selected' : ''}>${escapeHtml(r.name)}</option>`).join('')}</select>`, 'Automatically given to everyone who joins.')}
+    </div>
+    <div class="ss-field ss-defrole-field">
+      <label>Default Role</label>
+      <div class="ss-defrole-current" id="ss-defrole-current">${defRoleChip}</div>
+      <div class="ss-defrole-row">
+        <select id="ss-default-role" ${dis}><option value="">Member (no role)</option>${(state.roles || []).map(r => `<option value="${r.id}"${st.default_role_id === r.id ? ' selected' : ''}>${escapeHtml(r.name)}</option>`).join('')}</select>
+        ${admin ? `<button type="button" class="btn btn-sm ss-defrole-new" id="ss-new-role">${icon('plus')} Custom role</button>` : ''}
+      </div>
+      ${admin ? `<div class="ss-role-builder hidden" id="ss-role-builder">
+        <div class="ss-rb-head">Create a custom default role</div>
+        <div class="ss-rb-grid">
+          <div class="ss-rb-icon-col">
+            <div class="ss-rb-preview" id="ss-rb-preview">${icon('image')}</div>
+            <div class="ss-rb-icon-actions">
+              <button type="button" class="btn btn-sm" id="ss-rb-upload">${icon('upload')} Icon</button>
+              <button type="button" class="ss-icon-btn" id="ss-rb-clear" title="Remove icon">${icon('xmark')}</button>
+            </div>
+            <input type="file" id="ss-rb-file" accept="image/*" hidden>
+          </div>
+          <div class="ss-rb-fields">
+            <label>Role name</label>
+            <input id="ss-rb-name" maxlength="32" placeholder="e.g. Newcomer">
+            <label>Role colour</label>
+            <div class="ss-rb-colors" id="ss-rb-colors">
+              ${['#5865F2','#3BA55D','#FAA61A','#ED4245','#EB459E','#9B59B6','#1ABC9C','#99AAB5'].map((c, i) => `<button type="button" class="ss-rb-swatch${i === 0 ? ' active' : ''}" data-color="${c}" style="background:${c}" title="${c}"></button>`).join('')}
+            </div>
+          </div>
+        </div>
+        <div class="ss-rb-chip-wrap"><span class="ss-rb-chip" id="ss-rb-chip">Newcomer</span></div>
+        <div class="ss-rb-actions">
+          <button type="button" class="btn ghost btn-sm" id="ss-rb-cancel">Cancel</button>
+          <button type="button" class="btn btn-sm" id="ss-rb-create">${icon('check')} Create & set as default</button>
+        </div>
+      </div>` : ''}
+      <div class="hint">Automatically given to everyone who joins. You can also create a brand-new role with its own icon and colour right here.</div>
     </div>`, 'server');
 
   const welcome = ssGroup('Welcome & Rules', 'Greet new members and set expectations from day one.', `
@@ -12271,8 +12396,18 @@ function renderCommunityTab(body, s) {
       ${ssField('Default Max Uses', `<input type="number" id="ss-invite-max" min="0" max="1000" value="${Number(st.invite_max_uses) || 0}" ${dis}>`, '0 = unlimited. New invites stop working after this many joins.')}
     </div>
     ${ssToggleRow('allow_member_invites', 'Allow Member Invites', 'Let regular members create their own invite links. When off, only owners and admins can invite.', st.allow_member_invites)}
-    ${ssToggleRow('join_requests', 'Require Approval to Join', 'New members must be approved by an owner or admin before they can enter. Requests appear in the Members tab.', st.join_requests)}
   `, 'link');
+
+  /* Join requests are a completely optional layer on top of invites: when the
+     toggle is off (the default) every invite joins instantly, exactly like
+     before the feature existed. */
+  const joinReqs = ssGroup('Join Requests (Optional)', 'Off by default. Turn this on only if you want to personally approve each new member before they can enter.', `
+    ${ssToggleRow('join_requests', 'Require Approval to Join', 'When on, invite links and server IDs create a pending request instead of joining straight away. When off, people join instantly.', st.join_requests)}
+    <div class="ss-jr-note">
+      <div class="ss-jr-state ${st.join_requests ? 'on' : 'off'}">${st.join_requests ? 'Approval required' : 'Instant join \u2014 anyone with an invite gets in immediately'}</div>
+      <div class="ss-jr-desc">${st.join_requests ? 'Pending requests appear in the Members tab, where owners and admins can approve or deny them.' : 'You can switch this on at any time; existing members are never affected.'}</div>
+    </div>
+  `, 'user-check');
 
   const afk = ssGroup('Voice & AFK', 'Move idle members out of voice channels automatically.', `
     <div class="ss-field-grid">
@@ -12286,12 +12421,31 @@ function renderCommunityTab(body, s) {
     ${ssToggleRow('invite_splash', 'Show Invite Splash', 'Display the server banner and description on the invite preview page.', st.invite_splash)}
   `, 'compass');
 
-  body.innerHTML = `<div class="ss-panel ss-panel-pad">${identity}${welcome}${invites}${afk}${discovery}
+  body.innerHTML = `<div class="ss-panel ss-panel-pad">${identity}${welcome}${invites}${joinReqs}${afk}${discovery}
     ${admin ? `<div class="ss-actions"><button class="btn" id="ss-save-community">${icon('check')} Save Community Settings</button></div>` : '<div class="ss-note">Only the owner and admins can edit these settings.</div>'}
   </div>`;
   hydrateIcons(body);
   if (!admin) return;
   wireSsToggles(body);
+  wireDefaultRoleBuilder(s, body);
+  /* Keep the join-request status pill in sync the moment the toggle is flipped,
+     before anything is saved. */
+  const jrToggle = body.querySelector('[data-ss-toggle="join_requests"]');
+  if (jrToggle) jrToggle.addEventListener('click', () => {
+    const on = jrToggle.classList.contains('on');
+    const pill = body.querySelector('.ss-jr-state');
+    const desc = body.querySelector('.ss-jr-desc');
+    if (pill) {
+      pill.classList.toggle('on', on);
+      pill.classList.toggle('off', !on);
+      pill.textContent = on ? 'Approval required' : 'Instant join \u2014 anyone with an invite gets in immediately';
+    }
+    if (desc) {
+      desc.textContent = on
+        ? 'Pending requests appear in the Members tab, where owners and admins can approve or deny them.'
+        : 'You can switch this on at any time; existing members are never affected.';
+    }
+  });
   $('ss-save-community').addEventListener('click', () => saveCommunitySettings(s));
 }
 

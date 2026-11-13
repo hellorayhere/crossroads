@@ -700,6 +700,19 @@ function joinLimitError(userId) {
   return null;
 }
 
+/* Give a freshly joined member the server's configured default role, if any.
+   Runs after the membership row exists so the role is visible everywhere. */
+function applyDefaultRole(serverId, userId) {
+  try {
+    const st = getServerSettings(serverId);
+    if (!st.default_role_id) return;
+    const role = db.prepare('SELECT id FROM server_roles WHERE id = ? AND server_id = ?').get(st.default_role_id, serverId);
+    if (!role) return;
+    db.prepare('UPDATE server_members SET custom_role_id = ? WHERE server_id = ? AND user_id = ?')
+      .run(role.id, serverId, userId);
+  } catch (e) { /* never block a join over a role */ }
+}
+
 /* Fetch a server's settings row, creating it (with defaults) on first use.
    Purely additive — never touches existing data. */
 function getServerSettings(serverId) {
@@ -2106,6 +2119,7 @@ app.post('/api/servers/join', auth, (req, res) => {
   }
 
   db.prepare('INSERT INTO server_members (server_id, user_id, joined_at, role) VALUES (?,?,?,?)').run(srv.id, req.user.id, Date.now(), 'member');
+  applyDefaultRole(srv.id, req.user.id);
   if (found) db.prepare('UPDATE invites SET uses = uses + 1 WHERE code = ?').run(found.invite.code);
   res.json({ server: publicServer(srv), invite: inviteCode ? { code: inviteCode, server_id: srv.id } : undefined });
 });
@@ -2159,6 +2173,7 @@ app.post('/api/servers/:id/join-requests/:rid', auth, (req, res) => {
   const already = db.prepare('SELECT 1 FROM server_members WHERE server_id = ? AND user_id = ?').get(srv.id, jr.user_id);
   if (!already) {
     db.prepare('INSERT INTO server_members (server_id, user_id, joined_at, role) VALUES (?,?,?,?)').run(srv.id, jr.user_id, Date.now(), 'member');
+    applyDefaultRole(srv.id, jr.user_id);
     if (jr.invite_code) db.prepare('UPDATE invites SET uses = uses + 1 WHERE code = ?').run(jr.invite_code);
   }
   db.prepare("UPDATE join_requests SET status = 'approved', resolved_at = ?, resolved_by = ? WHERE id = ?").run(Date.now(), req.user.id, jr.id);
