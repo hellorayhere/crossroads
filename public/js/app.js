@@ -41,6 +41,13 @@ const state = {
   mention: { active: false, query: '', items: [], sel: 0, start: 0 }
 };
 
+/* Monotonic token guarding every "navigate to a conversation" async load.
+   Channel/server/DM switches each bump this; a response that finishes after
+   the user has already moved on is discarded instead of painting stale
+   messages over the new view. This is the fix for "switching channels keeps
+   showing the old channel until a full refresh". */
+let viewToken = 0;
+
 /* Restore the locally-mirrored settings immediately so the theme, background and
    other preferences are correct from the very first frame (before /api/settings
    responds). The server value loaded in init() stays the source of truth. */
@@ -2690,6 +2697,7 @@ function updateTitle() {
 }
 
 async function openDM(d) {
+  const myToken = ++viewToken;
   state.server = null; state.channel = null; state.view = 'home';
   setReplyTo(null);
   if (state.dm && state.dm.id !== d.id) socket.emit('leave_dm', state.dm.id);
@@ -2709,10 +2717,25 @@ async function openDM(d) {
   updateCallButton();
   closeMembersPanel();
   socket.emit('join_dm', d.id);
-  const dmData = await api('/api/dms/' + d.id + '/messages');
+  state.messages = [];
+  renderChannelLoading(d.user.display_name || d.user.username);
+  let dmData;
+  try {
+    dmData = await api('/api/dms/' + d.id + '/messages');
+  } catch (e) {
+    if (myToken !== viewToken) return;
+    try { dmData = await api('/api/dms/' + d.id + '/messages'); }
+    catch (e2) {
+      if (myToken !== viewToken) return;
+      renderChatLoadError(d.user.display_name || d.user.username, () => openDM(d));
+      return;
+    }
+  }
+  if (myToken !== viewToken || !state.dm || state.dm.id !== d.id) return;
   const messages = dmData.messages || [];
   const blocked = !!dmData.blocked || isUserBlocked(d.user.id);
-  await e2eDecryptAll(messages);
+  try { await e2eDecryptAll(messages); } catch (e) {}
+  if (myToken !== viewToken || !state.dm || state.dm.id !== d.id) return;
   state.messages = messages;
   renderMessages();
   if (blocked) renderDmBlockedNotice(d.user);
@@ -3126,7 +3149,11 @@ async function friendAction(act, uid) {
    SERVERS
    ============================================================ */
 async function openServer(id, preferredChannelId) {
+  /* Guard against out-of-order server loads: if the user clicks another
+     server while this request is in flight, drop the stale response. */
+  const myToken = ++viewToken;
   const data = await api('/api/servers/' + id);
+  if (myToken !== viewToken) return;
   state.view = 'home';
   state.server = data.server;
   state.channels = data.channels;
@@ -3454,9 +3481,46 @@ async function moveChannelBy(c, dir) {
   await applyChannelMove(c.id, c.category_id || null, sameCat[j].id, dir > 0);
 }
 
+/* Lightweight skeleton shown the instant a channel is selected, so the old
+   channel's messages never linger while the new ones are in flight. */
+function renderChannelLoading(name) {
+  const box = $('messages');
+  if (!box) return;
+  box.style.padding = ''; box.style.overflow = '';
+  box.innerHTML = `<div class="messages-inner"><div class="channel-intro">
+      <div class="big-avatar">${icon('hash')}</div>
+      <h2>Welcome to #${escapeHtml(name || '')}</h2>
+      <p>This is the start of the #${escapeHtml(name || '')} channel.</p>
+    </div>
+    <div class="chat-loading" aria-label="Loading messages">
+      <div class="msg-skeleton-row"><span class="msg-skeleton-ava"></span><div><span class="msg-skeleton"></span><span class="msg-skeleton short"></span></div></div>
+      <div class="msg-skeleton-row"><span class="msg-skeleton-ava"></span><div><span class="msg-skeleton"></span><span class="msg-skeleton short"></span></div></div>
+      <div class="msg-skeleton-row"><span class="msg-skeleton-ava"></span><div><span class="msg-skeleton"></span><span class="msg-skeleton short"></span></div></div>
+    </div></div>`;
+}
+
+/* Shown only after a real fetch failure (and one retry). Offers an explicit
+   retry so a transient network blip never forces a full page refresh. */
+function renderChatLoadError(name, retry) {
+  const box = $('messages');
+  if (!box) return;
+  box.style.padding = ''; box.style.overflow = '';
+  box.innerHTML = `<div class="chat-load-error"><div class="cle-inner">
+      <div class="cle-ico">${icon('triangle-exclamation')}</div>
+      <h3>Couldn\u2019t load #${escapeHtml(name || 'this channel')}</h3>
+      <p>The connection hiccuped while fetching messages. Your messages are safe.</p>
+      <button class="btn" id="cle-retry">${icon('refresh')} Try again</button>
+    </div></div>`;
+  const b = $('cle-retry');
+  if (b) b.addEventListener('click', () => { if (retry) retry(); });
+}
+
 async function openChannel(cid) {
   const c = state.channels.find(x => x.id === cid);
   if (!c) return;
+  /* Claim this navigation. Any in-flight load that resolves later sees a
+     different token and bails out. */
+  const myToken = ++viewToken;
   if (state.channel && state.channel.id !== cid) socket.emit('leave_channel', state.channel.id);
   state.channel = c;
   state.dm = null;
@@ -3470,16 +3534,40 @@ async function openChannel(cid) {
   $('chat-title').style.cursor = '';
   $('chat-title').onclick = null;
   $('chat-topic').textContent = c.topic || '';
-  const { messages } = await api('/api/channels/' + cid + '/messages');
-  await e2eDecryptAll(messages);
-  state.messages = messages;
-  renderMessages();
-  e2eRetryFailed();
+  /* Paint the new channel shell immediately. */
+  state.messages = [];
+  renderChannelLoading(c.name);
   $('composer').classList.remove('hidden');
   const locked = !!c.read_only && !can('manage_channels') && !can('manage_messages');
   $('message-input').disabled = locked;
   $('message-input').placeholder = locked ? 'This channel is locked \u2014 only staff can send messages' : ('Message #' + c.name + '\u2026');
   $('composer-hint').textContent = locked ? 'You can read this channel but cannot post.' : '';
+
+  const stillHere = () => myToken === viewToken && state.channel && state.channel.id === cid;
+  const fetchMessages = async () => {
+    const { messages } = await api('/api/channels/' + cid + '/messages');
+    return messages;
+  };
+
+  let messages = null;
+  try {
+    messages = await fetchMessages();
+  } catch (e) {
+    if (!stillHere()) return;
+    /* One quiet retry covers the common cold-start / dropped-request blip. */
+    try { messages = await fetchMessages(); }
+    catch (e2) {
+      if (!stillHere()) return;
+      renderChatLoadError(c.name, () => openChannel(cid));
+      return;
+    }
+  }
+  if (!stillHere()) return;
+  try { await e2eDecryptAll(messages); } catch (e) { /* render what we can */ }
+  if (!stillHere()) return;
+  state.messages = messages;
+  renderMessages();
+  e2eRetryFailed();
   if (!locked) $('message-input').focus();
   saveLastLocation({ serverId: state.server ? state.server.id : null, channelId: cid, dmId: null });
 }
@@ -4625,7 +4713,8 @@ function messageNode(m, grouped, animate) {
       else if (act === 'reply') setReplyTo(m);
       else if (act === 'more') {
         /* Shift + click the ⋯ button on your own message = instant delete. */
-        if (e.shiftKey && me && m.author && m.author.id === me.id) { deleteMessage(m.id, true); return; }
+        const mod = !!(state.channel && state.server && (state.server.owner_id === me.id || amIAdmin() || can('manage_messages') || can('manage_channels')));
+        if (e.shiftKey && me && m.author && (m.author.id === me.id || mod)) { deleteMessage(m.id, true); return; }
         const r = btn.getBoundingClientRect(); openMessageContextMenu(r.right - 200, r.bottom + 4, m);
       }
     });
@@ -5113,6 +5202,56 @@ function bindVideoAvailability(player, wrap, url, name, sizeText) {
   }, 12000);
 }
 
+/* Human-readable file metadata for the rich attachment card. */
+function fileTypeInfo(name, mime) {
+  const ext = String(name || '').split('.').pop().toLowerCase();
+  const byExt = {
+    pdf: ['PDF Document', 'file', 'pdf'],
+    doc: ['Word Document', 'file', 'doc'], docx: ['Word Document', 'file', 'doc'],
+    xls: ['Spreadsheet', 'grid', 'xls'], xlsx: ['Spreadsheet', 'grid', 'xls'], csv: ['CSV Spreadsheet', 'grid', 'xls'],
+    ppt: ['Presentation', 'monitor', 'ppt'], pptx: ['Presentation', 'monitor', 'ppt'],
+    txt: ['Text File', 'note', 'txt'], md: ['Markdown', 'note', 'txt'], rtf: ['Rich Text', 'note', 'txt'],
+    zip: ['ZIP Archive', 'folder', 'zip'], rar: ['RAR Archive', 'folder', 'zip'], '7z': ['7-Zip Archive', 'folder', 'zip'], tar: ['TAR Archive', 'folder', 'zip'], gz: ['GZip Archive', 'folder', 'zip'],
+    js: ['JavaScript', 'file', 'code'], ts: ['TypeScript', 'file', 'code'], json: ['JSON File', 'file', 'code'],
+    html: ['HTML Document', 'globe', 'code'], css: ['Stylesheet', 'palette', 'code'], py: ['Python File', 'file', 'code'],
+    exe: ['Windows App', 'monitor', 'exe'], apk: ['Android App', 'mobile', 'exe'], dmg: ['macOS App', 'monitor', 'exe'],
+    psd: ['Photoshop File', 'image', 'img'], ai: ['Illustrator File', 'image', 'img'], svg: ['SVG Image', 'image', 'img'],
+    mp3: ['Audio', 'music', 'audio'], wav: ['Audio', 'music', 'audio'], flac: ['Audio', 'music', 'audio'], m4a: ['Audio', 'music', 'audio'],
+    mp4: ['Video', 'film', 'video'], mov: ['Video', 'film', 'video'], webm: ['Video', 'film', 'video'], mkv: ['Video', 'film', 'video']
+  };
+  if (byExt[ext]) return { label: byExt[ext][0], icon: byExt[ext][1], cls: byExt[ext][2], ext: ext.toUpperCase() };
+  const t = String(mime || '').toLowerCase();
+  if (t.startsWith('image/')) return { label: 'Image', icon: 'image', cls: 'img', ext: (ext || 'IMG').toUpperCase() };
+  if (t.startsWith('video/')) return { label: 'Video', icon: 'film', cls: 'video', ext: (ext || 'VID').toUpperCase() };
+  if (t.startsWith('audio/')) return { label: 'Audio', icon: 'music', cls: 'audio', ext: (ext || 'AUD').toUpperCase() };
+  if (t.includes('zip') || t.includes('compressed')) return { label: 'Archive', icon: 'folder', cls: 'zip', ext: (ext || 'ZIP').toUpperCase() };
+  if (t.startsWith('text/')) return { label: 'Text File', icon: 'note', cls: 'txt', ext: (ext || 'TXT').toUpperCase() };
+  return { label: ext ? ext.toUpperCase() + ' File' : 'File', icon: 'file', cls: 'generic', ext: (ext || 'FILE').toUpperCase() };
+}
+
+/* Rich, Discord-grade file card: coloured type tile, filename, type + size,
+   and explicit open/download actions. */
+function richFileCardHTML(m, url, sizeText, opts = {}) {
+  const info = fileTypeInfo(m.attachment_name, m.attachment_type);
+  const name = m.attachment_name || 'file';
+  const missing = !!opts.missing;
+  const sub = missing
+    ? escapeHtml(opts.missingText || 'File unavailable')
+    : [info.label, sizeText].filter(Boolean).map(escapeHtml).join(' \u2022 ');
+  const actions = missing
+    ? `<a class="fc-act" href="${escapeHtml(url)}" target="_blank" rel="noopener" title="Open">${icon('external-link')}</a>`
+    : `<a class="fc-act" href="${escapeHtml(url)}" target="_blank" rel="noopener" title="Open in new tab">${icon('external-link')}</a>
+       <a class="fc-act" href="${escapeHtml(url)}" download="${escapeHtml(name)}" title="Download">${icon('download')}</a>`;
+  return `<div class="file-card rich${missing ? ' missing' : ''}">
+    <div class="fc-icon ${info.cls}"><span class="fc-ext">${escapeHtml(info.ext)}</span>${icon(info.icon)}</div>
+    <div class="fc-main">
+      <div class="fc-name" title="${escapeHtml(name)}">${escapeHtml(name)}</div>
+      <div class="fc-sub">${sub}</div>
+    </div>
+    <div class="fc-actions">${actions}</div>
+  </div>`;
+}
+
 function attachmentNode(m) {
   const wrap = document.createElement('div');
   wrap.className = 'attachment';
@@ -5188,8 +5327,8 @@ function attachmentNode(m) {
     });
     if (sizeText) wrap.insertAdjacentHTML('beforeend', `<span class="att-size">${sizeText}</span>`);
   } else {
-    const meta = [sizeText, 'Click to download'].filter(Boolean).join(' \u2022 ');
-    wrap.innerHTML = `<div class="file-card"><div class="fi">${icon('file')}</div><div class="fc-meta"><a href="${escapeHtml(url)}" target="_blank" rel="noopener">${escapeHtml(m.attachment_name || 'file')}</a><div class="fsize">${escapeHtml(meta)}</div></div></div>`;
+    wrap.classList.add('file-attachment');
+    wrap.innerHTML = richFileCardHTML(m, url, sizeText);
   }
   if (m.attachment_description) {
     wrap.insertAdjacentHTML('beforeend', `<div class="att-desc">${escapeHtml(m.attachment_description)}</div>`);
@@ -5450,7 +5589,14 @@ function lightbox(url, type, name, sizeText) {
     <div class="lb-stage">${media}</div>
     ${isImage ? '<div class="lb-hint">Click the image to zoom \u00b7 Scroll to zoom \u00b7 Drag to pan</div>' : ''}`;
   hydrateIcons(lb);
-  const close = () => { document.removeEventListener('keydown', onKey); lb.remove(); };
+  const close = () => {
+    if (lb.dataset.closing) return;
+    lb.dataset.closing = '1';
+    document.removeEventListener('keydown', onKey);
+    lb.classList.remove('lb-open');
+    lb.classList.add('lb-closing');
+    setTimeout(() => lb.remove(), 230);
+  };
   const onKey = (e) => {
     if (e.key === 'Escape') close();
     if (isImage && (e.key === '+' || e.key === '=')) zoomBy(1.35);
@@ -5463,6 +5609,8 @@ function lightbox(url, type, name, sizeText) {
   });
   lb.querySelector('.lb-close').addEventListener('click', close);
   document.body.appendChild(lb);
+  /* Smooth zoom-in on open (two frames so the initial styles commit first). */
+  requestAnimationFrame(() => requestAnimationFrame(() => lb.classList.add('lb-open')));
 
   if (!isImage) return;
   const img = lb.querySelector('.lb-stage img');
@@ -6000,10 +6148,15 @@ function openMessageContextMenu(x, y, m) {
     { label: 'Copy Text', icon: 'copy', onClick: () => { navigator.clipboard.writeText(m.content || '').then(() => toast('Copied to clipboard', 'success')).catch(() => {}); } },
     { label: 'Copy Message Link', icon: 'link', onClick: () => { navigator.clipboard.writeText(location.origin + '/app.html?msg=' + m.id).then(() => toast('Message link copied', 'success')).catch(() => {}); } }
   ];
-  if (m.author.id === me.id) {
+  const mine = m.author.id === me.id;
+  /* Server owner / admins / Manage Messages can remove anyone's message,
+     media or file in their server. DMs remain author-only. */
+  const canModerate = !!(state.channel && state.server &&
+    (state.server.owner_id === me.id || amIAdmin() || can('manage_messages') || can('manage_channels')));
+  if (mine || canModerate) {
     items.push({ sep: true });
-    items.push({ label: 'Edit Message', icon: 'pencil', onClick: () => editMessage(m) });
-    items.push({ label: 'Delete Message', icon: 'trash', danger: true, onClick: () => deleteMessage(m.id) });
+    if (mine) items.push({ label: 'Edit Message', icon: 'pencil', onClick: () => editMessage(m) });
+    items.push({ label: mine ? 'Delete Message' : 'Delete Message (Moderator)', icon: 'trash', danger: true, onClick: () => deleteMessage(m.id) });
   }
   showContextMenu(x, y, items);
 }
@@ -6639,23 +6792,32 @@ function openImageEditor(file, opts = {}) {
   const wrap = document.createElement('div');
   wrap.className = 'img-editor-overlay';
   wrap.innerHTML = `
-    <div class="img-editor">
-      <h3>${escapeHtml(opts.title || 'Adjust Image')}</h3>
-      <p class="ie-sub">Drag the image to reposition it, then use the slider to zoom. ${isBanner ? 'This is how your banner will appear.' : 'This is how your avatar will appear.'}</p>
-      <div class="img-editor-stage" id="ie-stage" style="width:${cw}px;height:${ch}px;border-radius:${isBanner ? '12px' : '50%'}">
-        <img id="ie-img" alt="" draggable="false">
+    <div class="img-editor" role="dialog" aria-modal="true" aria-label="Edit Image">
+      <div class="ie-head">
+        <h3>Edit Image</h3>
+        <button class="ie-x" id="ie-cancel-x" title="Close" aria-label="Close">${icon('xmark')}</button>
       </div>
-      <div class="img-editor-zoom">
-        <span>Zoom</span>
-        <input type="range" id="ie-zoom" min="1" max="3" step="0.01" value="1">
+      <p class="ie-sub">Drag to reposition${isBanner ? ' your banner' : ' your avatar'}, then zoom with the slider or scroll.</p>
+      <div class="ie-stage-wrap">
+        <div class="img-editor-stage${isBanner ? ' is-banner' : ' is-avatar'}" id="ie-stage" style="width:${cw}px;height:${ch}px;border-radius:${isBanner ? '14px' : '50%'}">
+          <img id="ie-img" alt="" draggable="false">
+          ${isBanner ? '' : '<span class="ie-ring"></span>'}
+        </div>
+      </div>
+      <div class="ie-zoom-row">
+        <span class="ie-zoom-cap">Zoom</span>
+        <div class="ie-slider">
+          <input type="range" id="ie-zoom" min="1" max="3" step="0.01" value="1" aria-label="Zoom">
+        </div>
         <span id="ie-zoom-val">100%</span>
       </div>
       <div class="modal-actions">
         <button class="btn secondary" id="ie-cancel">Cancel</button>
-        <button class="btn" id="ie-save">Save</button>
+        <button class="btn" id="ie-save">Apply</button>
       </div>
     </div>`;
   document.body.appendChild(wrap);
+  hydrateIcons(wrap);
 
   const stage = wrap.querySelector('#ie-stage');
   const el = wrap.querySelector('#ie-img');
@@ -6663,6 +6825,11 @@ function openImageEditor(file, opts = {}) {
   const zoomVal = wrap.querySelector('#ie-zoom-val');
   let baseScale = 1, scale = 1, ox = 0, oy = 0, ready = false;
   let dragging = false, startX = 0, startY = 0, startOx = 0, startOy = 0;
+
+  function syncZoomFill() {
+    const pct = ((scale - 1) / 2) * 100;
+    zoom.style.setProperty('--ie-fill', Math.max(0, Math.min(100, pct)) + '%');
+  }
 
   function render() {
     if (!ready) return;
@@ -6706,17 +6873,24 @@ function openImageEditor(file, opts = {}) {
     scale = Math.min(3, Math.max(1, scale - e.deltaY * 0.0015));
     zoom.value = scale;
     zoomVal.textContent = Math.round(scale * 100) + '%';
+    syncZoomFill();
     render();
   }, { passive: false });
   zoom.addEventListener('input', () => {
     scale = parseFloat(zoom.value);
     zoomVal.textContent = Math.round(scale * 100) + '%';
+    syncZoomFill();
     render();
   });
+  syncZoomFill();
 
-  const cleanup = () => { try { URL.revokeObjectURL(url); } catch (e) {} wrap.remove(); };
+  const cleanup = () => { try { URL.revokeObjectURL(url); } catch (e) {} document.removeEventListener('keydown', onKey); wrap.remove(); };
   const done = (blob, filename) => { cleanup(); if (opts.onSave) opts.onSave(blob, filename); };
+  const onKey = (e) => { if (e.key === 'Escape') cleanup(); };
+  document.addEventListener('keydown', onKey);
   wrap.querySelector('#ie-cancel').addEventListener('click', cleanup);
+  const cancelX = wrap.querySelector('#ie-cancel-x');
+  if (cancelX) cancelX.addEventListener('click', cleanup);
   wrap.addEventListener('click', (e) => { if (e.target === wrap) cleanup(); });
 
   wrap.querySelector('#ie-save').addEventListener('click', () => {
@@ -6755,23 +6929,24 @@ function openCreateServer() {
   ];
   openModal(`
     <div class="cs-head">
-      <div>
+      <div class="cs-head-ico">${icon('plus')}</div>
+      <div class="cs-head-txt">
         <h3>Create a Server</h3>
-        <p class="msub">Your server is a private space for you and your people. Set it up now — you can change everything later.</p>
+        <p class="msub">A private space for you and your people. Set it up now — you can change everything later.</p>
       </div>
     </div>
     <div class="cs-grid">
       <div class="cs-preview">
         <div class="cs-preview-label">Live Preview</div>
         <div class="cs-preview-card">
-          <div class="cs-preview-ico" id="cs-preview-ico"></div>
+          <div class="cs-preview-ico" id="cs-preview-ico">${icon('users')}</div>
           <div class="cs-preview-meta">
             <div class="cs-preview-name" id="cs-preview-name">Your Server</div>
-            <div class="cs-preview-sub" id="cs-preview-sub">Private · Invite only</div>
+            <div class="cs-preview-sub" id="cs-preview-sub">Friends · Private</div>
           </div>
         </div>
         <div class="cs-preview-desc empty" id="cs-preview-desc">Add a short description so people know what this space is for.</div>
-        <div class="cs-preview-note">New servers are private. Share an invite link to let people in.</div>
+        <div class="cs-preview-note">${icon('lock')}<span>New servers are private. Share an invite link to let people in.</span></div>
       </div>
       <div class="cs-fields">
         <div class="cs-section-title">Basics</div>
@@ -6782,7 +6957,7 @@ function openCreateServer() {
           <textarea id="cs-desc" rows="3" maxlength="500" placeholder="What is this server about? Who is it for?"></textarea></div>
         <div class="cs-section-title">Style</div>
         <div class="field"><label>Server Type</label>
-          <div class="cs-types" id="cs-types">${templates.map((t, i) => `<button type="button" class="cs-type${i === 0 ? ' sel' : ''}" data-id="${t.id}">${t.label}</button>`).join('')}</div>
+          <div class="cs-types" id="cs-types">${templates.map((t, i) => `<button type="button" class="cs-type${i === 0 ? ' sel' : ''}" data-id="${t.id}"><span class="cs-type-ico">${icon(t.icon)}</span>${t.label}</button>`).join('')}</div>
           <div class="hint" id="cs-type-hint">${escapeHtml(templates[0].desc)}</div></div>
         <div class="field"><label>Server Icon <span class="opt">(optional)</span></label>
           ${dropzoneHTML('cs-icon-dz', 'Upload Image', 'PNG, JPG or GIF — up to 25 MB')}
@@ -6790,7 +6965,7 @@ function openCreateServer() {
       </div>
     </div>
     <div class="modal-actions cs-actions">
-      <span class="cs-foot-hint">Only people you invite can join.</span>
+      <span class="cs-foot-hint">${icon('lock')} Only people you invite can join.</span>
       <div style="flex:1"></div>
       <button class="btn secondary" id="cs-cancel">Cancel</button>
       <button class="btn" id="cs-create">Create Server</button>
@@ -6806,7 +6981,7 @@ function openCreateServer() {
   let selectedType = templates[0].label;
   const syncPreview = () => {
     previewName.textContent = nameInput.value.trim() || 'Your Server';
-    previewIco.innerHTML = iconUrl ? `<img src="${escapeHtml(iconUrl)}" alt="">` : '';
+    previewIco.innerHTML = iconUrl ? `<img src="${escapeHtml(iconUrl)}" alt="">` : icon('users');
     if (previewSub) previewSub.textContent = selectedType + ' · Private';
     const d = descInput.value.trim();
     if (previewDesc) {
@@ -7996,7 +8171,7 @@ function settingsPanelHTML(section) {
             </div>
             <div class="field"><label>Display Name</label><input id="set-display" maxlength="32" value="${escapeHtml(u.display_name || u.username)}"></div>
             <div class="field"><label>Pronouns</label><input id="set-pronouns" maxlength="24" value="${escapeHtml(u.pronouns || '')}" placeholder="e.g. she/her, he/him, they/them"></div>
-            <div class="field"><label>Custom Status</label><input id="set-custom" maxlength="128" value="${escapeHtml(u.custom_status || '')}" placeholder="What are you up to right now?"></div>
+            <div class="field"><label>Custom Status</label>${statusEditorHTML('set-custom', u.custom_status || '')}</div>
           </section>
 
           <section class="acct-card">
@@ -8095,7 +8270,7 @@ function settingsPanelHTML(section) {
               <div class="acct-card-head"><div><h5>Identity</h5><p class="acct-card-sub">Your public name and details.</p></div></div>
               <div class="field"><label>Display Name</label><input id="prof-display" maxlength="32" value="${escapeHtml(u.display_name || '')}" placeholder="${escapeHtml(u.username)}"></div>
               <div class="field"><label>Pronouns</label><input id="prof-pronouns" maxlength="40" value="${escapeHtml(u.pronouns || '')}" placeholder="e.g. they/them"></div>
-              <div class="field"><label>Custom Status</label><input id="prof-custom" maxlength="128" value="${escapeHtml(u.custom_status || '')}" placeholder="What are you up to?"></div>
+              <div class="field"><label>Custom Status</label>${statusEditorHTML('prof-custom', u.custom_status || '')}</div>
               <div class="field"><label>About Me</label><textarea id="prof-bio" maxlength="190" rows="3" placeholder="Tell people a little about yourself\u2026">${escapeHtml(u.bio || '')}</textarea><div class="hint"><span id="prof-bio-count">${(u.bio || '').length}</span>/190</div></div>
             </section>
             <section class="acct-card">
@@ -8520,7 +8695,7 @@ function wireAccountPanel() {
 
   $('set-display').addEventListener('input', () => { markDirty(); previewSelf({ display_name: $('set-display').value.trim() || null }); });
   $('set-pronouns').addEventListener('input', markDirty);
-  $('set-custom').addEventListener('input', markDirty);
+  wireStatusEditor(document, 'set-custom', () => markDirty());
   $('set-bio').addEventListener('input', markDirty);
   $('set-status').addEventListener('change', () => { markDirty(); previewSelf({ status: $('set-status').value }); });
 
@@ -8619,7 +8794,7 @@ function wireProfilesPanel() {
 
   const bindPreview = (id, fn) => { const el = $(id); if (el) el.addEventListener('input', () => { fn(el.value); setSettingsDirty(true); }); };
   bindPreview('prof-display', (v) => { const n = $('prof-preview-name'); if (n) n.textContent = v.trim() || me.username; });
-  bindPreview('prof-custom', (v) => { const s = $('prof-preview-status'); if (s) s.textContent = v.trim(); });
+  wireStatusEditor(document, 'prof-custom', (v) => { const s = $('prof-preview-status'); if (s) s.textContent = v.trim(); setSettingsDirty(true); });
   bindPreview('prof-bio', (v) => { const b = $('prof-preview-bio'); if (b) b.textContent = v.trim() || 'No bio yet.'; const c = $('prof-bio-count'); if (c) c.textContent = v.length; });
   const copyId = $('prof-copy-id'); if (copyId) makeCopyable(copyId, me.id, 'User ID');
 
@@ -11627,12 +11802,100 @@ function updateMiniProfileDom(u) {
   if (tg) tg.textContent = fullTag(u);
   const inp = wrap.querySelector('#mini-status-input');
   if (inp && document.activeElement !== inp) inp.value = u.custom_status || '';
+  const pv = wrap.querySelector('[data-cst-preview]');
+  if (pv) { const v = (u.custom_status || '').trim(); pv.textContent = v || 'No custom status set'; pv.classList.toggle('empty', !v); }
+  const ct = wrap.querySelector('[data-cst-count]');
+  if (ct) ct.textContent = (u.custom_status || '').length + '/128';
   wrap.querySelectorAll('.mini-status-opt').forEach(o => o.classList.toggle('sel', o.dataset.status === (u.status || 'online')));
   const banner = wrap.querySelector('.mini-banner');
   if (banner) {
     if (u.banner_url) { banner.style.background = `url('${u.banner_url}') center/cover no-repeat`; }
     else { banner.style.background = u.banner_color || u.accent_color || '#5865F2'; }
   }
+}
+
+/* ---------- Custom status editor (shared by Settings, Profiles, mini-profile) ---------- */
+const STATUS_PRESETS = [
+  '🎮 Gaming', '🎧 Listening to music', '📚 Studying', '💻 Working',
+  '☕ Taking a break', '😴 Resting', '🍕 Eating', '✈️ Traveling',
+  '🎨 Creating', '🌙 AFK'
+];
+const STATUS_QUICK_EMOJI = [
+  '😀', '😎', '🥳', '😴', '🤔', '🔥', '💜', '✨',
+  '🎮', '🎧', '🎵', '📚', '💻', '☕', '🍕', '🍿',
+  '✈️', '🎨', '🚀', '🏆', '🌿', '🌙', '✅', '💤'
+];
+
+function statusEditorHTML(inputId, value, opts) {
+  opts = opts || {};
+  const v = value || '';
+  return `
+  <div class="cst" data-cst>
+    <div class="cst-preview">
+      <span class="cst-preview-ico">${icon('smile')}</span>
+      <span class="cst-preview-val${v ? '' : ' empty'}" data-cst-preview>${v ? escapeHtml(v) : 'No custom status set'}</span>
+    </div>
+    <div class="cst-inputrow">
+      <button type="button" class="cst-emoji-btn" data-cst-emoji-btn title="Add an emoji" aria-label="Add an emoji">${icon('smile')}</button>
+      <input id="${inputId}" class="cst-input" maxlength="128" value="${escapeHtml(v)}" placeholder="What are you up to?" data-cst-input autocomplete="off">
+      <span class="cst-count" data-cst-count>${v.length}/128</span>
+    </div>
+    <div class="cst-emoji-pop" data-cst-pop hidden>
+      ${STATUS_QUICK_EMOJI.map(e => `<button type="button" class="cst-emoji" data-emoji="${e}">${e}</button>`).join('')}
+    </div>
+    <div class="cst-presets" aria-label="Status presets">
+      ${STATUS_PRESETS.map(p => `<button type="button" class="cst-preset" data-preset="${escapeHtml(p)}">${escapeHtml(p)}</button>`).join('')}
+    </div>
+    ${opts.showClear ? `<button type="button" class="cst-clear" data-cst-clear>${icon('xmark')} Clear status</button>` : ''}
+  </div>`;
+}
+
+function wireStatusEditor(root, inputId, onChange) {
+  const box = root.querySelector('[data-cst]');
+  if (!box) return;
+  const input = box.querySelector('[data-cst-input]');
+  if (!input) return;
+  const preview = box.querySelector('[data-cst-preview]');
+  const count = box.querySelector('[data-cst-count]');
+  const pop = box.querySelector('[data-cst-pop]');
+  const btn = box.querySelector('[data-cst-emoji-btn]');
+  const sync = (notify) => {
+    const v = input.value.trim();
+    if (preview) {
+      preview.textContent = v || 'No custom status set';
+      preview.classList.toggle('empty', !v);
+    }
+    if (count) count.textContent = input.value.length + '/128';
+    if (notify !== false && onChange) onChange(input.value);
+  };
+  input.addEventListener('input', () => sync(true));
+  if (btn && pop) {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      pop.hidden = !pop.hidden;
+      btn.classList.toggle('open', !pop.hidden);
+    });
+    pop.querySelectorAll('[data-emoji]').forEach(b => b.addEventListener('click', () => {
+      const emoji = b.dataset.emoji;
+      const start = input.selectionStart == null ? input.value.length : input.selectionStart;
+      const end = input.selectionEnd == null ? input.value.length : input.selectionEnd;
+      input.value = input.value.slice(0, start) + emoji + input.value.slice(end);
+      input.focus();
+      try { input.selectionStart = input.selectionEnd = start + emoji.length; } catch (err) {}
+      sync(true);
+    }));
+    document.addEventListener('click', (e) => {
+      if (!box.contains(e.target)) { pop.hidden = true; btn.classList.remove('open'); }
+    });
+  }
+  box.querySelectorAll('[data-preset]').forEach(b => b.addEventListener('click', () => {
+    input.value = b.dataset.preset;
+    sync(true);
+    input.focus();
+  }));
+  const clear = box.querySelector('[data-cst-clear]');
+  if (clear) clear.addEventListener('click', () => { input.value = ''; sync(true); input.focus(); });
+  sync(false);
 }
 
 function refreshMiniProfileStatus() { updateMiniProfileDom(me); }
@@ -11683,10 +11946,9 @@ function openMiniProfile() {
       <div class="mini-tag">${escapeHtml(fullTag(u))}</div>
       <div class="mini-divider"></div>
       <div class="mini-label">Custom Status</div>
-      <input class="mini-status-input" id="mini-status-input" maxlength="128" placeholder="What are you up to?" value="${escapeHtml(u.custom_status || '')}">
+      ${statusEditorHTML('mini-status-input', u.custom_status || '', { showClear: true })}
       <div class="mini-status-row">
         <button class="mini-status-save" id="mini-status-save">Set Status</button>
-        <button class="mini-status-clear" id="mini-status-clear">Clear</button>
       </div>
       <div class="mini-divider"></div>
       <div class="mini-label">Status</div>
@@ -11703,10 +11965,10 @@ function openMiniProfile() {
   positionMiniProfile(wrap);
   bindAvatarZoom(wrap, u);
 
+  wireStatusEditor(wrap, 'mini-status-input', () => {});
   const save = () => saveMiniStatus(($('mini-status-input').value || '').trim());
   $('mini-status-save').addEventListener('click', save);
   $('mini-status-input').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); save(); } });
-  $('mini-status-clear').addEventListener('click', () => { $('mini-status-input').value = ''; saveMiniStatus(''); });
   wrap.querySelectorAll('.mini-status-opt').forEach(opt => opt.addEventListener('click', () => setMyStatus(opt.dataset.status)));
   $('mini-edit').addEventListener('click', () => { closeMiniProfile(); openSettings('account'); });
   $('mini-settings').addEventListener('click', () => { closeMiniProfile(); openSettings('account'); });

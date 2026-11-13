@@ -2616,7 +2616,21 @@ app.post('/api/channels/:id/messages', auth, (req, res) => {
 app.delete('/api/messages/:id', auth, (req, res) => {
   const m = db.prepare('SELECT * FROM messages WHERE id = ?').get(req.params.id);
   if (!m) return res.status(404).json({ error: 'Message not found' });
-  if (m.user_id !== req.user.id) return res.status(403).json({ error: 'You can only delete your own messages' });
+  /* Authors may always delete their own messages. In a server channel, the
+     owner / admins / anyone with Manage Messages may also delete anyone's
+     message, attachment or media. DMs stay author-only. */
+  let allowed = m.user_id === req.user.id;
+  if (!allowed && m.channel_id) {
+    const ch = db.prepare('SELECT * FROM channels WHERE id = ?').get(m.channel_id);
+    if (ch) {
+      const srv = db.prepare('SELECT * FROM servers WHERE id = ?').get(ch.server_id);
+      if (srv && (srv.owner_id === req.user.id || isServerAdmin(srv, req.user.id) ||
+          hasPerm(srv, req.user.id, 'manage_messages') || hasPerm(srv, req.user.id, 'manage_channels'))) {
+        allowed = true;
+      }
+    }
+  }
+  if (!allowed) return res.status(403).json({ error: 'You do not have permission to delete this message' });
   db.prepare('DELETE FROM reactions WHERE message_id = ?').run(m.id);
   db.prepare('DELETE FROM messages WHERE id = ?').run(m.id);
   if (m.channel_id) io.to(`channel:${m.channel_id}`).emit('message_deleted', { id: m.id, channel_id: m.channel_id });
