@@ -169,7 +169,7 @@ button:active, .rail-item:active, .channel:active, .dm-item:active, .member:acti
 .tip:hover::after { opacity: 1; transform: translateY(-50%) scale(1); }
 
 /* ============ SIDEBAR ============ */
-.sidebar { width: 240px; flex: 0 0 240px; background: var(--sidebar-bg); display: flex; flex-direction: column; height: 100%; }
+.sidebar { width: 268px; flex: 0 0 268px; background: var(--sidebar-bg); display: flex; flex-direction: column; height: 100%; }
 .sidebar-header {
   height: 48px; flex: 0 0 48px; display: flex; align-items: center; justify-content: space-between;
   padding: 0 16px; box-shadow: 0 1px 0 var(--divider); cursor: pointer;
@@ -182,18 +182,19 @@ button:active, .rail-item:active, .channel:active, .dm-item:active, .member:acti
    Discord-style: a slim, inset card rather than a full-width block. */
 .sidebar-banner {
   flex: 0 0 auto;
-  width: calc(100% - 16px);
-  /* Taller server banner: it grows downward under the server name and pushes
-     the channel list down (flex column), exactly like Discord's banner card. */
+  /* Full-bleed: spans the entire sidebar width, edge to edge, so the artwork
+     reads as a real server banner instead of a small inset card. */
+  width: 100%;
   height: 220px;
   min-height: 220px;
-  margin: 6px 8px 8px;
-  border-radius: 8px;
+  margin: 0 0 6px;
+  border-radius: 0;
   background-size: cover;
   background-position: center;
   background-repeat: no-repeat;
   background-color: var(--sidebar-bg);
-  border: 1px solid var(--divider);
+  border: 0;
+  border-bottom: 1px solid var(--divider);
   position: relative;
   overflow: hidden;
 }
@@ -1497,6 +1498,16 @@ input:focus::placeholder, textarea:focus::placeholder { color: color-mix(in srgb
 .pw-sub { font-size: 13px; color: var(--text-muted); margin-top: 3px; line-height: 1.45; }
 .pw-actions { display: flex; justify-content: flex-start; }
 .pw-actions .btn { display: flex; align-items: center; gap: 8px; }
+/* Danger zone (deactivate / delete account) */
+.danger-section .pw-head h5 { color: #ed4245; }
+.dz-row { display: flex; align-items: center; gap: 16px; padding: 14px 0; border-top: 1px solid var(--divider); }
+.dz-row:first-of-type { border-top: 0; }
+.dz-info { flex: 1 1 auto; min-width: 0; }
+.dz-title { font-size: 14px; font-weight: 700; color: var(--text-header); }
+.dz-desc { font-size: 12.5px; color: var(--text-muted); line-height: 1.5; margin-top: 3px; max-width: 520px; }
+.dz-row .btn { flex: 0 0 auto; }
+.btn.danger { background: #da373c; color: #fff; border-color: #da373c; }
+.btn.danger:hover { background: #b32b2f; }
 
 /* ============ RICHER UPLOAD BUTTONS ============ */
 .dropzone { border-width: 2px; background: linear-gradient(180deg, color-mix(in srgb, var(--chat-bg) 92%, #fff) 0%, color-mix(in srgb, var(--chat-bg) 88%, #000) 100%); }
@@ -3859,6 +3870,7 @@ body[data-theme="light"] .update-card { box-shadow: 0 24px 70px rgba(0, 0, 0, .2
 .dci-body { flex: 1 1 auto; min-width: 0; }
 .dci-name { font-weight: 700; color: #f2f3f5; font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .dci-sub { font-size: 12.5px; color: #b5bac1; margin-top: 2px; }
+.dci-meta { font-size: 11px; color: #80848e; margin-top: 3px; letter-spacing: .01em; }
 .dci-actions { display: flex; gap: 8px; }
 .dci-btn { width: 40px; height: 40px; border-radius: 50%; border: none; cursor: pointer; color: #fff; display: flex; align-items: center; justify-content: center; font-size: 17px; transition: transform .12s ease, filter .12s ease; }
 .dci-btn:hover { transform: scale(1.07); filter: brightness(1.1); }
@@ -3876,6 +3888,7 @@ body[data-theme="light"] .update-card { box-shadow: 0 24px 70px rgba(0, 0, 0, .2
 .dcb-body { flex: 1 1 auto; min-width: 0; }
 .dcb-name { font-weight: 700; color: #f2f3f5; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .dcb-sub { font-size: 12px; color: #b5bac1; margin-top: 1px; }
+.dcb-meta { font-size: 10.5px; color: #80848e; margin-top: 2px; letter-spacing: .01em; }
 .dcb-timer { font-variant-numeric: tabular-nums; color: #b5bac1; font-size: 13px; font-weight: 600; }
 .dcb-actions { display: flex; gap: 6px; }
 .dcb-btn { width: 36px; height: 36px; border-radius: 50%; border: none; cursor: pointer; background: #313338; color: #dbdee1; display: flex; align-items: center; justify-content: center; font-size: 15px; transition: background .12s ease, color .12s ease; }
@@ -3911,12 +3924,53 @@ body[data-theme="light"] .update-card { box-shadow: 0 24px 70px rgba(0, 0, 0, .2
 .rail-item .call-badge { position: absolute; right: -2px; bottom: -2px; width: 14px; height: 14px; border-radius: 50%; background: #ed4245; border: 3px solid var(--rail-bg, #1e1f22); animation: call-blink 1s infinite; }
 @keyframes call-blink { 0%,100% { opacity: 1; } 50% { opacity: .35; } }
 
-/* ---------- Blocked profile card ---------- */
-.blocked-profile { padding: 46px 28px; text-align: center; display: flex; flex-direction: column; align-items: center; gap: 12px; }
-.blocked-profile .bp-ico { width: 64px; height: 64px; border-radius: 50%; display: flex; align-items: center; justify-content: center; background: color-mix(in srgb, #ed4245 16%, transparent); color: #ed4245; }
-.blocked-profile .bp-ico svg { width: 30px; height: 30px; }
-.blocked-profile .bp-title { font-size: 20px; font-weight: 800; color: var(--text-header); }
-.blocked-profile .bp-sub { font-size: 14px; color: var(--text-muted); max-width: 380px; line-height: 1.5; }
+/* ---------- Blocked account panel (flat, information-dense) ---------- */
+.blk-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 18px 20px;
+  border: 1px solid var(--divider);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--bg-base) 94%, #000);
+  text-align: left;
+}
+.blk-panel-inline { margin: 8px 0 0; }
+.blk-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.blk-ident { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.blk-name { font-size: 16px; font-weight: 700; color: var(--text-header); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.blk-tag { font-size: 12px; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.blk-pill {
+  flex: 0 0 auto;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  padding: 3px 9px;
+  border-radius: 999px;
+  color: #ed4245;
+  background: color-mix(in srgb, #ed4245 14%, transparent);
+  border: 1px solid color-mix(in srgb, #ed4245 32%, transparent);
+}
+.blk-lead { margin: 0; font-size: 13px; line-height: 1.55; color: var(--text-muted); }
+.blk-grid {
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid var(--divider);
+}
+.blk-row {
+  display: grid;
+  grid-template-columns: 108px 1fr;
+  gap: 12px;
+  padding: 9px 0;
+  border-bottom: 1px solid var(--divider);
+  font-size: 13px;
+}
+.blk-k { color: var(--text-faint); font-weight: 600; }
+.blk-v { color: var(--text-normal); line-height: 1.45; }
+.blk-actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.blk-actions .btn { flex: 0 0 auto; }
+.blk-hint { font-size: 12px; color: var(--text-faint); line-height: 1.4; }
 
 /* ---- Media fallback cards ------------------------------------------------
    When a file is genuinely gone or uses a codec the browser cannot decode we

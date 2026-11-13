@@ -723,7 +723,7 @@ function avatarHTML(user, size = 40, status = null) {
   const inner = user.avatar_url
     ? (isGif
         ? `<img class="ava-poster" src="${BLANK}" data-poster-src="${escapeHtml(url)}" alt="" decoding="async"><img class="ava-anim" src="${escapeHtml(url)}" alt="" loading="lazy" decoding="async">`
-        : `<img src="${escapeHtml(url)}" alt="" loading="eager" decoding="async" fetchpriority="high">`)
+        : `<img src="${escapeHtml(url)}" alt="" loading="lazy" decoding="async">`)
     : (user.avatar ? escapeHtml(user.avatar) : escapeHtml((user.username || '?')[0].toUpperCase()));
   const dot = status ? `<span class="status-dot ${status}"></span>` : '';
   /* Use background-color (not the `background` shorthand) so the stylesheet's
@@ -2385,6 +2385,20 @@ function orderedServers() {
 
 function renderRail() {
   const wrap = $('rail-servers');
+  if (!wrap) return;
+  /* Cheap signature so presence / call churn does not rebuild the whole rail
+     when nothing visible actually changed. This keeps the sidebar snappy. */
+  const _list = orderedServers();
+  let _unread = 0;
+  for (const v of Object.values(state.dmUnread || {})) _unread += (v || 0);
+  const _sig = JSON.stringify({
+    a: state.server ? state.server.id : '',
+    u: _unread,
+    r: dmCall.state === 'ringing' && !!dmCall.incoming,
+    s: _list.map(s => [s.id, s.name, s.icon, s.icon_url, serverMentionCount(s.id)])
+  });
+  if (renderRail._sig === _sig && wrap.childElementCount) return;
+  renderRail._sig = _sig;
   wrap.innerHTML = '';
   /* Home (Direct Messages) shows a red badge for every unread DM and a red
      "call" indicator while a call is ringing - even when the user is looking
@@ -2706,13 +2720,9 @@ function renderDmBlockedNotice(user) {
   wrap.innerHTML = '';
   const card = document.createElement('div');
   card.className = 'dm-blocked-notice';
-  card.innerHTML = `<b>${escapeHtml(user.display_name || user.username || 'This user')} is blocked.</b><br>
-    Their messages and profile are hidden until you unblock them. You can't send messages or start calls in this conversation.`;
-  const btn = document.createElement('button');
-  btn.className = 'btn';
-  btn.textContent = 'Unblock';
-  btn.addEventListener('click', () => friendAction('unblock', user.id));
-  card.appendChild(btn);
+  card.innerHTML = blockedPanelHTML(user, { context: 'dm' });
+  const btn = card.querySelector('#bp-unblock');
+  if (btn) btn.addEventListener('click', () => friendAction('unblock', user.id));
   wrap.appendChild(card);
 }
 
@@ -3527,7 +3537,41 @@ function voiceConstraints() {
    full constraint set (sampleRate/channelCount/echoCancellation) or a pinned
    device id; rather than failing the whole join we retry with simpler
    constraints before giving up. Permission denials are never retried. */
+/* Turn a getUserMedia failure into a single, actionable sentence. Shared by
+   voice channels and DM calls so the wording never drifts between them. */
+function micErrorMessage(e) {
+  const name = e && e.name;
+  if (name === 'NotAllowedError' || name === 'SecurityError') {
+    return 'Microphone access is blocked. Click the padlock in the address bar, allow the microphone, then try again.';
+  }
+  if (name === 'NotFoundError' || name === 'DevicesNotFoundError') {
+    return 'No microphone was found. Plug in or enable a microphone, then try again.';
+  }
+  if (name === 'NotReadableError' || name === 'TrackStartError') {
+    return 'Your microphone is busy in another app or tab. Close it (or stop the other call) and try again.';
+  }
+  if (name === 'OverconstrainedError' || name === 'ConstraintNotSatisfiedError') {
+    return 'Your selected microphone is unavailable. Pick a different input device in Voice settings and try again.';
+  }
+  if (name === 'AbortError') {
+    return 'The microphone could not start. Give it a moment and try again.';
+  }
+  return 'Could not access your microphone. Check your device, browser permissions and that no other app is using it.';
+}
+
+/* Release any tracks left over from a previous, failed acquisition so a
+   half-open device does not make the next attempt throw NotReadableError. */
+function stopStreamQuietly(s) {
+  if (!s) return;
+  try { s.getTracks().forEach(t => t.stop()); } catch (e) {}
+}
+
 async function acquireMic() {
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    const err = new Error('getUserMedia unavailable');
+    err.name = 'NotSupportedError';
+    throw err;
+  }
   const base = voiceConstraints();
   const relaxed = {
     audio: {
@@ -3539,14 +3583,29 @@ async function acquireMic() {
     },
     video: false
   };
-  const attempts = [base, relaxed, { audio: true, video: false }];
+  /* Order matters: the pinned device first, then the same quality without a
+     pinned id (stale deviceId), then the full relaxed set, then bare audio. */
+  const noDevice = {
+    audio: {
+      echoCancellation: base.audio.echoCancellation,
+      noiseSuppression: base.audio.noiseSuppression,
+      autoGainControl: base.audio.autoGainControl
+    },
+    video: false
+  };
+  const attempts = [base, noDevice, relaxed, { audio: true, video: false }];
   let lastErr = null;
-  for (const c of attempts) {
-    try { return await navigator.mediaDevices.getUserMedia(c); }
+  for (let i = 0; i < attempts.length; i++) {
+    try { return await navigator.mediaDevices.getUserMedia(attempts[i]); }
     catch (e) {
       lastErr = e;
-      /* The user said no (or the page is insecure): retrying cannot help. */
-      if (e && (e.name === 'NotAllowedError' || e.name === 'SecurityError')) throw e;
+      const name = e && e.name;
+      /* The user said no, or the context is insecure: retrying cannot help. */
+      if (name === 'NotAllowedError' || name === 'SecurityError' || name === 'NotSupportedError') throw e;
+      /* A busy device is often transient - give the OS a beat before retrying. */
+      if (name === 'NotReadableError' || name === 'AbortError') {
+        await new Promise(r => setTimeout(r, 350));
+      }
     }
   }
   throw lastErr;
@@ -3608,15 +3667,7 @@ async function joinVoiceChannel(cid) {
     renderVoicePanel();
     renderChannelList();
   } catch (e) {
-    const name = e && e.name;
-    const msg = name === 'NotAllowedError'
-      ? 'Microphone permission was blocked - allow it in your browser to join voice'
-      : name === 'NotFoundError'
-        ? 'No microphone was found - plug one in to join voice'
-        : name === 'NotReadableError'
-          ? 'Your microphone is busy in another app - close it and try again'
-          : 'Could not access your microphone - check your device and try again';
-    toast(msg, 'error');
+    toast(micErrorMessage(e), 'error');
   } finally {
     voice.joining = false;
   }
@@ -3989,15 +4040,26 @@ function renderDmCallUI() {
     const u = dmCall.incoming.caller || {};
     $('dci-name').textContent = u.display_name || u.username || 'Someone';
     $('dci-sub').textContent = 'Incoming voice call…';
+    const meta = $('dci-meta');
+    if (meta) meta.textContent = 'Encrypted · Answer to connect';
     const av = $('dci-avatar');
     if (u.avatar_url) { av.style.backgroundImage = `url("${u.avatar_url}")`; av.textContent = ''; }
     else { av.style.backgroundImage = ''; av.textContent = (u.username || '?').slice(0, 1).toUpperCase(); }
   }
   if (showBar) {
     const u = dmCallPeerUser();
-    $('dcb-name').textContent = u.display_name || u.username || 'Call';
+    const nm = u.display_name || u.username || 'Call';
+    $('dcb-name').textContent = nm;
     $('dcb-sub').textContent = dmCall.state === 'ringing' ? 'Ringing…'
       : dmCall.state === 'connecting' ? 'Connecting…' : 'Voice connected';
+    const meta = $('dcb-meta');
+    if (meta) {
+      meta.textContent = dmCall.state === 'ringing'
+        ? `Waiting for ${nm} to answer · encrypted`
+        : dmCall.state === 'connecting'
+          ? 'Establishing secure audio · encrypted'
+          : 'End-to-end encrypted · peer-to-peer';
+    }
     $('dcb-mute').classList.toggle('off', dmCall.muted);
     $('dcb-deafen').classList.toggle('off', dmCall.deafened);
     $('dcb-mute').innerHTML = `<i data-ic="${dmCall.muted ? 'mic-off' : 'mic'}"></i>`;
@@ -4067,10 +4129,7 @@ async function ensureDmCallMic() {
     dmCall.localStream.getAudioTracks().forEach(t => { t.enabled = !dmCall.muted; });
     return true;
   } catch (e) {
-    const msg = e && (e.name === 'NotAllowedError' || e.name === 'SecurityError')
-      ? 'Microphone access was denied. Allow the mic to make calls.'
-      : 'Could not access your microphone.';
-    toast(msg, 'error');
+    toast(micErrorMessage(e), 'error');
     return false;
   }
 }
@@ -6069,7 +6128,7 @@ function renderNotifBadge() {
 
 function notifInfo(n) {
   const d = n.data || {};
-  const u = d.user || (d.message && d.message.author);
+  const u = d.user || d.caller || d.callee || (d.message && d.message.author);
   const name = u ? (u.display_name || u.username) : 'Someone';
   const where = d.kind === 'channel' ? `in #${d.channel_name || 'a channel'}` : (d.kind === 'dm' ? 'in a direct message' : '');
   const preview = d.message ? replyPreviewText(d.message) : '';
@@ -6081,6 +6140,7 @@ function notifInfo(n) {
   else if (n.type === 'everyone') { ico = 'megaphone'; plain = `${name} pinged @everyone ${where}`; html = `<b>${escapeHtml(name)}</b> pinged <b>@everyone</b> ${escapeHtml(where)}`; }
   else if (n.type === 'here') { ico = 'megaphone'; plain = `${name} pinged @here ${where}`; html = `<b>${escapeHtml(name)}</b> pinged <b>@here</b> ${escapeHtml(where)}`; }
   else if (n.type === 'call') { ico = 'phone'; plain = `${name} is calling you`; html = `<b>${escapeHtml(name)}</b> is calling you`; }
+  else if (n.type === 'call_out') { ico = 'phone'; plain = `You called ${name}`; html = `You called <b>${escapeHtml(name)}</b>`; }
   return { ico, plain, html, preview, user: u, where };
 }
 
@@ -7182,6 +7242,41 @@ function renderOwnProfile(user) {
   });
 }
 
+/* Blocked-state panel.
+   Deliberately plain: no illustration, no oversized icon, no friendly mascot
+   copy. It reads like a settings/status surface - a name, a status pill and a
+   factual list of what the block actually changes - so it stays legible and
+   matches the rest of the app at any zoom level. */
+function blockedPanelHTML(user, opts) {
+  const o = opts || {};
+  const name = user.display_name || user.username || 'This user';
+  const tag = user.username ? `@${user.username}${user.discriminator && user.discriminator !== '0' ? '#' + user.discriminator : ''}` : '';
+  const rows = [
+    ['Messages', 'Removed from channel history and direct messages'],
+    ['Profile', 'Bio, roles, mutual servers and notes hidden'],
+    ['Calls', 'Cannot call you, and you cannot call them'],
+    ['Notifications', 'Mentions, replies and pings suppressed']
+  ];
+  return `
+    <div class="blk-panel${o.context === 'dm' ? ' blk-panel-inline' : ''}">
+      <div class="blk-head">
+        <div class="blk-ident">
+          <span class="blk-name">${escapeHtml(name)}</span>
+          ${tag ? `<span class="blk-tag">${escapeHtml(tag)}</span>` : ''}
+        </div>
+        <span class="blk-pill">Blocked</span>
+      </div>
+      <p class="blk-lead">You blocked this account. Nothing they send reaches you while the block is in place.</p>
+      <div class="blk-grid">
+        ${rows.map(([k, v]) => `<div class="blk-row"><span class="blk-k">${escapeHtml(k)}</span><span class="blk-v">${escapeHtml(v)}</span></div>`).join('')}
+      </div>
+      <div class="blk-actions">
+        <button class="btn" id="bp-unblock">Unblock</button>
+        <span class="blk-hint">Unblocking restores their messages and profile immediately. They are not notified.</span>
+      </div>
+    </div>`;
+}
+
 /* ---------- Someone else's profile (banner sits on top of the avatar) ---------- */
 function renderOtherProfile(user, ctx) {
   /* A blocked user's profile is hidden behind a minimal card. Nothing about
@@ -7189,12 +7284,7 @@ function renderOtherProfile(user, ctx) {
   if (ctx && (ctx.relationship === 'blocked' || ctx.blocked)) {
     openModal(`
       <div class="dp-body">
-        <div class="blocked-profile">
-          <div class="bp-ico">${icon('ban')}</div>
-          <div class="bp-title">${escapeHtml(user.display_name || user.username || 'This user')} is blocked</div>
-          <div class="bp-sub">Their profile and messages are hidden. Unblock them to see their profile and message again.</div>
-          <button class="btn" id="bp-unblock">${icon('unlock')} Unblock</button>
-        </div>
+        ${blockedPanelHTML(user, { context: 'profile' })}
       </div>`, { modalClass: 'oprofile-modal' });
     const btn = $('bp-unblock');
     if (btn) btn.addEventListener('click', async () => {
@@ -7796,6 +7886,59 @@ function wirePrivacyPanel() {
     const el = $(id);
     if (el) el.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); doSave(); } });
   });
+
+  /* Deactivate: reversible pause. Requires the password, then signs out. */
+  const deact = $('acct-deactivate');
+  if (deact) deact.addEventListener('click', async () => {
+    const ok = await confirmDialog({
+      title: 'Deactivate your account?',
+      body: 'Your profile will be hidden and you will be signed out of every device. Sign back in with your password to reactivate.',
+      confirmText: 'Deactivate'
+    });
+    if (!ok) return;
+    const pw = await promptDialog({
+      title: 'Confirm your password', body: 'Enter your account password to deactivate.',
+      label: 'Password', input: 'password', confirmText: 'Deactivate'
+    });
+    if (pw === null) return;
+    if (!pw) { toast('Password is required', 'error'); return; }
+    try {
+      await api('/api/me/deactivate', { method: 'POST', body: JSON.stringify({ password: pw }) });
+      toast('Account deactivated. Signing you out…', 'success');
+      setTimeout(() => logout(), 700);
+    } catch (e) { toast(e.message, 'error'); }
+  });
+
+  /* Delete: permanent soft delete. Password + exact username confirmation. */
+  const del = $('acct-delete');
+  if (del) del.addEventListener('click', async () => {
+    const ok = await confirmDialog({
+      title: 'Delete your account?',
+      body: 'This permanently deletes your account and personal data. Your past messages stay attributed to "Deleted User". This cannot be undone.',
+      confirmText: 'Continue', danger: true
+    });
+    if (!ok) return;
+    const pw = await promptDialog({
+      title: 'Confirm your password', body: 'Enter your account password to continue.',
+      label: 'Password', input: 'password', confirmText: 'Next'
+    });
+    if (pw === null) return;
+    if (!pw) { toast('Password is required', 'error'); return; }
+    const typed = await promptDialog({
+      title: 'Type your username to confirm',
+      body: `Type <b>${escapeHtml(me.username)}</b> exactly to permanently delete your account.`,
+      label: 'Username', placeholder: me.username, confirmText: 'Delete forever'
+    });
+    if (typed === null) return;
+    if ((typed || '').trim().toLowerCase() !== (me.username || '').toLowerCase()) {
+      toast('That username did not match', 'error'); return;
+    }
+    try {
+      await api('/api/me/delete', { method: 'POST', body: JSON.stringify({ password: pw, confirm: typed }) });
+      toast('Your account has been deleted.', 'success');
+      setTimeout(() => logout(), 800);
+    } catch (e) { toast(e.message, 'error'); }
+  });
 }
 
 function toggleRow(key, title, desc) {
@@ -8013,6 +8156,28 @@ function settingsPanelHTML(section) {
             <span class="twofa-status" id="twofa-status">Checking\u2026</span>
           </div>
           <div id="twofa-body"><div class="dev-loading">Loading\u2026</div></div>
+        </div>
+        <div class="pw-section danger-section">
+          <div class="pw-head">
+            <div>
+              <h5>Deactivate or Delete Account</h5>
+              <p class="pw-sub">You are in control of your account. Deactivating is reversible; deleting is permanent.</p>
+            </div>
+          </div>
+          <div class="dz-row">
+            <div class="dz-info">
+              <div class="dz-title">Deactivate account</div>
+              <div class="dz-desc">Temporarily hide your profile and sign out everywhere. Sign back in with your password at any time to reactivate.</div>
+            </div>
+            <button class="btn secondary" id="acct-deactivate">Deactivate</button>
+          </div>
+          <div class="dz-row">
+            <div class="dz-info">
+              <div class="dz-title">Delete account</div>
+              <div class="dz-desc">Permanently remove your account and personal data. Your past messages stay attributed to "Deleted User" so other people's conversations are not broken. This cannot be undone.</div>
+            </div>
+            <button class="btn danger" id="acct-delete">Delete Account</button>
+          </div>
         </div>`;
     case 'apps':
       return `

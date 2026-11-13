@@ -259,7 +259,15 @@ function migrate() {
     username_changed_at: 'INTEGER',
     /* Optional fixed 6-digit code for a test/demo account. When set, this code
        is always accepted (and shown) instead of the rotating TOTP value. */
-    twofa_fixed_code: 'TEXT'
+    twofa_fixed_code: 'TEXT',
+    /* Self-service account state. `deactivated` is a reversible pause: the
+       owner can sign back in to reactivate. `deleted` is a soft delete that
+       scrubs personal data but keeps the row so other people's message
+       history and replies are never broken. */
+    deactivated: 'INTEGER DEFAULT 0',
+    deactivated_at: 'INTEGER',
+    deleted: 'INTEGER DEFAULT 0',
+    deleted_at: 'INTEGER'
   };
   for (const [col, def] of Object.entries(additions)) {
     if (!names.includes(col)) {

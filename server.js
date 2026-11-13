@@ -472,6 +472,8 @@ function auth(req, res, next) {
       return res.status(401).json({ error: 'Session expired. Please sign in again.' });
     }
     if (user.disabled) return res.status(403).json({ error: 'This account has been disabled.' });
+    if (user.deleted) return res.status(403).json({ error: 'This account has been deleted.' });
+    if (user.deactivated) return res.status(403).json({ error: 'This account is deactivated. Sign in again to reactivate it.' });
     if (isGloballyBanned(user.id)) return res.status(403).json({ error: 'This account has been banned.' });
     /* If the token carries a session id, that session must still exist — this
        is how revoking a device on the Authorized Devices page logs it out. */
@@ -1159,6 +1161,13 @@ app.post('/api/login', rateLimit({ windowMs: 60000, max: 15 }), (req, res) => {
     return res.status(401).json({ error: 'Invalid username or password' });
   }
   if (user.disabled) return res.status(403).json({ error: 'This account has been disabled.' });
+  if (user.deleted) return res.status(403).json({ error: 'This account has been deleted.' });
+  /* A deactivated account is reactivated simply by signing back in with the
+     correct password. This is the "pause my account" path, not a ban. */
+  if (user.deactivated) {
+    db.prepare('UPDATE users SET deactivated = 0, deactivated_at = NULL, status = ? WHERE id = ?').run('online', user.id);
+    user = db.prepare('SELECT * FROM users WHERE id = ?').get(user.id);
+  }
   if (isGloballyBanned(user.id)) return res.status(403).json({ error: 'This account has been banned.' });
   /* Two-step login: when enabled, a valid rotating code is required unless
      this browser is a previously trusted device (still within 30 days). */
@@ -1464,6 +1473,88 @@ app.post('/api/me/password', auth, (req, res) => {
   }
   const hash = bcrypt.hashSync(String(new_password), 10);
   db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(hash, user.id);
+  res.json({ ok: true });
+});
+
+/* ---------------- Self-service account controls ----------------
+   Two distinct actions live in Privacy & Safety:
+
+   * Deactivate - a reversible pause. Sessions are revoked and the profile
+     goes offline, but signing back in with the correct password reactivates
+     the account automatically (see /api/login).
+   * Delete - a soft delete. Personal data is scrubbed, memberships and
+     relationships are removed, and the account can never sign in again.
+     The user row is kept (anonymised) so other people's messages, replies
+     and mentions never break. Nothing belonging to other users is removed. */
+
+app.post('/api/me/deactivate', auth, (req, res) => {
+  const { password } = req.body || {};
+  const user = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
+  if (!user || !password || !bcrypt.compareSync(String(password), user.password_hash)) {
+    return res.status(401).json({ error: 'Your password is incorrect' });
+  }
+  if (user.deleted) return res.status(400).json({ error: 'This account has been deleted' });
+  db.prepare('UPDATE users SET deactivated = 1, deactivated_at = ?, status = ?, token_version = COALESCE(token_version,0) + 1 WHERE id = ?')
+    .run(Date.now(), 'offline', user.id);
+  try { db.prepare('DELETE FROM sessions WHERE user_id = ?').run(user.id); } catch (e) {}
+  try { db.prepare('DELETE FROM trusted_devices WHERE user_id = ?').run(user.id); } catch (e) {}
+  presenceOverrides.delete(user.id);
+  try { broadcastProfile(db.prepare('SELECT * FROM users WHERE id = ?').get(user.id)); } catch (e) {}
+  io.to(`user:${user.id}`).emit('account_deactivated', {});
+  res.json({ ok: true });
+});
+
+app.post('/api/me/delete', auth, (req, res) => {
+  const { password, confirm } = req.body || {};
+  const user = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
+  if (!user || !password || !bcrypt.compareSync(String(password), user.password_hash)) {
+    return res.status(401).json({ error: 'Your password is incorrect' });
+  }
+  if (user.deleted) return res.status(400).json({ error: 'This account has already been deleted' });
+  if (String(confirm || '').trim().toLowerCase() !== String(user.username || '').toLowerCase()) {
+    return res.status(400).json({ error: 'Type your username exactly to confirm deletion' });
+  }
+  const uid = user.id;
+  const now = Date.now();
+  const anonName = 'deleted_' + uid.replace(/[^a-z0-9]/gi, '').slice(-10).toLowerCase();
+  const anonHash = bcrypt.hashSync(newId() + ':' + newId(), 10);
+  const tx = db.transaction(() => {
+    try { db.prepare('DELETE FROM sessions WHERE user_id = ?').run(uid); } catch (e) {}
+    try { db.prepare('DELETE FROM trusted_devices WHERE user_id = ?').run(uid); } catch (e) {}
+    try { db.prepare('DELETE FROM server_members WHERE user_id = ?').run(uid); } catch (e) {}
+    try { db.prepare('DELETE FROM dm_channels WHERE user1_id = ? OR user2_id = ?').run(uid, uid); } catch (e) {}
+    try { db.prepare('DELETE FROM dm_hidden WHERE user_id = ?').run(uid); } catch (e) {}
+    try { db.prepare('DELETE FROM friendships WHERE requester_id = ? OR addressee_id = ?').run(uid, uid); } catch (e) {}
+    try { db.prepare('DELETE FROM blocks WHERE blocker_id = ? OR blocked_id = ?').run(uid, uid); } catch (e) {}
+    try { db.prepare('DELETE FROM notes WHERE owner_id = ? OR target_id = ?').run(uid, uid); } catch (e) {}
+    try { db.prepare('DELETE FROM notifications WHERE user_id = ?').run(uid); } catch (e) {}
+    try { db.prepare('DELETE FROM invites WHERE creator_id = ?').run(uid); } catch (e) {}
+    try { db.prepare('DELETE FROM user_badges WHERE user_id = ?').run(uid); } catch (e) {}
+    try { db.prepare('DELETE FROM e2e_keys WHERE user_id = ?').run(uid); } catch (e) {}
+    /* Hand any server this person owned to its earliest remaining member so
+       nobody else's community is left without an owner. */
+    try {
+      const owned = db.prepare('SELECT id FROM servers WHERE owner_id = ?').all(uid);
+      for (const srv of owned) {
+        const heir = db.prepare('SELECT user_id FROM server_members WHERE server_id = ? ORDER BY joined_at ASC LIMIT 1').get(srv.id);
+        if (heir && heir.user_id) db.prepare('UPDATE servers SET owner_id = ? WHERE id = ?').run(heir.user_id, srv.id);
+      }
+    } catch (e) {}
+    db.prepare(`UPDATE users SET
+        deleted = 1, deleted_at = ?, deactivated = 0, deactivated_at = NULL,
+        username = ?, discriminator = ?, display_name = 'Deleted User',
+        email = NULL, password_hash = ?, avatar = NULL, avatar_url = NULL,
+        banner = NULL, banner_url = NULL, bio = '', custom_status = '',
+        pronouns = '', status = 'offline', twofa_enabled = 0, twofa_secret = NULL,
+        token_version = COALESCE(token_version,0) + 1
+      WHERE id = ?`).run(now, anonName, '0000', anonHash, uid);
+  });
+  try { tx(); } catch (e) {
+    console.error('[account] delete failed:', e.message);
+    return res.status(500).json({ error: 'Could not delete the account. Please try again.' });
+  }
+  presenceOverrides.delete(uid);
+  try { io.emit('user_deleted', { user_id: uid }); } catch (e) {}
   res.json({ ok: true });
 });
 
@@ -3946,10 +4037,17 @@ io.on('connection', (socket) => {
     dmCalls.set(dm_id, call);
     const caller = db.prepare('SELECT * FROM users WHERE id = ?').get(uid);
     const callerPublic = publicUser(caller);
+    const callee = db.prepare('SELECT * FROM users WHERE id = ?').get(otherId);
+    const calleePublic = callee ? publicUser(callee) : null;
     socket.emit('dm_call_ringing', { dm_id, call: dmCallPublic(call) });
     io.to(`user:${otherId}`).emit('dm_call_incoming', { dm_id, call: dmCallPublic(call), caller: callerPublic });
     /* Red notification + badge even when the callee is browsing a server. */
     createNotification(otherId, 'call', { dm_id, caller: callerPublic, call: dmCallPublic(call) });
+    /* The caller also gets a record of the outgoing call, so both sides see
+       the call in their notification centre and unread badge. */
+    if (calleePublic) {
+      createNotification(uid, 'call_out', { dm_id, callee: calleePublic, call: dmCallPublic(call) });
+    }
   });
 
   socket.on('dm_call_accept', ({ dm_id } = {}) => {
