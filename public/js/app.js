@@ -2052,6 +2052,7 @@ function connectSocket() {
      decryption first made messages appear late (or not at all if key setup
      stalled), which is the "nothing loads in real time" bug. */
   socket.on('message', (m) => {
+    if (m && m.user_id && isUserBlocked(m.user_id)) return;
     if (state.channel && m.channel_id === state.channel.id) {
       /* Render first (skeleton for ciphertext), decrypt in place. */
       if (upsertMessage(m)) appendMessage(m); else updateMessageNode(m);
@@ -2061,6 +2062,7 @@ function connectSocket() {
     }
   });
   socket.on('dm_message', (m) => {
+    if (m && m.user_id && isUserBlocked(m.user_id)) return;
     if (state.dm && m.dm_id === state.dm.id) {
       if (upsertMessage(m)) appendMessage(m); else updateMessageNode(m);
       e2eDecryptMessage(m).then(() => updateMessageNode(m)).catch(() => {});
@@ -2071,6 +2073,7 @@ function connectSocket() {
   });
   socket.on('dm_notify', async (data) => {
     scheduleDMsReload();
+    if (data && data.message && data.message.user_id && isUserBlocked(data.message.user_id)) return;
     if (!state.dm || state.dm.id !== data.dm_id) {
       const who = fullTag(data.message.author);
       bumpDmUnread(data.dm_id);
@@ -2230,6 +2233,8 @@ function connectSocket() {
        server icon, exactly like Discord. */
     const d = n.data || {};
     if ((n.type === 'mention' || n.type === 'reply') && d.channel_id) bumpMentionUnread(d.channel_id);
+    /* A call is a DM-level event: light up the home icon even on a server. */
+    if (n.type === 'call' && d.dm_id && !(state.dm && state.dm.id === d.dm_id)) bumpDmUnread(d.dm_id);
     maybeDesktopNotify('Crossroads', info.plain);
     if (setting('notifSounds') !== false) {
       if (PING_NOTIF_TYPES.includes(n.type)) playPing(); else beep();
@@ -2255,6 +2260,35 @@ function connectSocket() {
     voice.states[data.channel_id] = data.members || [];
     renderVoiceMembersInList();
     renderVoicePanel();
+  });
+
+  /* ---------------- Direct-message call signaling ---------------- */
+  socket.on('dm_call_incoming', (payload) => onDmCallIncoming(payload));
+  socket.on('dm_call_ringing', (payload) => {
+    if (!payload || payload.dm_id !== dmCall.dmId) return;
+    dmCall.call = payload.call;
+    if (dmCall.state === 'idle') dmCall.state = 'ringing';
+    renderDmCallUI();
+  });
+  socket.on('dm_call_accepted', (payload) => onDmCallAccepted(payload));
+  socket.on('dm_call_declined', (payload) => {
+    if (!payload || payload.dm_id !== dmCall.dmId) return;
+    cleanupDmCall(false, 'Call declined');
+  });
+  socket.on('dm_call_ended', (payload) => {
+    if (!payload || payload.dm_id !== dmCall.dmId) return;
+    const reason = payload.reason === 'no_answer' ? 'No answer'
+      : payload.reason === 'disconnected' ? 'Call disconnected'
+      : payload.reason === 'declined' ? 'Call declined' : 'Call ended';
+    cleanupDmCall(false, reason);
+  });
+  socket.on('dm_call_error', (payload) => {
+    if (payload && payload.error) toast(payload.error, 'error');
+    if (payload && payload.dm_id === dmCall.dmId) cleanupDmCall(false, null);
+  });
+  socket.on('dm_call_signal', ({ dm_id, from, data }) => {
+    if (!dm_id || dm_id !== dmCall.dmId) return;
+    handleVoiceSignal(from, data, dmCall);
   });
 }
 
@@ -2351,6 +2385,24 @@ function orderedServers() {
 function renderRail() {
   const wrap = $('rail-servers');
   wrap.innerHTML = '';
+  /* Home (Direct Messages) shows a red badge for every unread DM and a red
+     "call" indicator while a call is ringing - even when the user is looking
+     at a server, so incoming messages/calls are never missed. */
+  const home = $('rail-home');
+  if (home) {
+    let n = 0;
+    for (const v of Object.values(state.dmUnread || {})) n += (v || 0);
+    let b = home.querySelector('.badge');
+    if (n > 0) {
+      if (!b) { b = document.createElement('span'); b.className = 'badge'; home.appendChild(b); }
+      b.textContent = n > 99 ? '99+' : String(n);
+    } else if (b) { b.remove(); }
+    let callDot = home.querySelector('.call-badge');
+    const ringing = dmCall.state === 'ringing' && !!dmCall.incoming;
+    if (ringing) {
+      if (!callDot) { callDot = document.createElement('span'); callDot.className = 'call-badge'; home.appendChild(callDot); }
+    } else if (callDot) { callDot.remove(); }
+  }
   const list = orderedServers();
   const canReorder = list.length > 1;
   const rail = $('server-rail');
@@ -2480,6 +2532,7 @@ function showHome() {
   $('chat-hash').style.display = 'none';
   $('chat-title').textContent = t('Direct Messages');
   $('chat-topic').textContent = '';
+  updateCallButton();
   closeMembersPanel();
   $('composer').classList.add('hidden');
   renderDMList();
@@ -2626,14 +2679,18 @@ async function openDM(d) {
   $('chat-title').style.cursor = 'pointer';
   $('chat-title').onclick = () => openProfile(d.user);
   $('chat-topic').textContent = '';
+  updateCallButton();
   closeMembersPanel();
   socket.emit('join_dm', d.id);
-  const { messages } = await api('/api/dms/' + d.id + '/messages');
+  const dmData = await api('/api/dms/' + d.id + '/messages');
+  const messages = dmData.messages || [];
+  const blocked = !!dmData.blocked || isUserBlocked(d.user.id);
   await e2eDecryptAll(messages);
   state.messages = messages;
   renderMessages();
+  if (blocked) renderDmBlockedNotice(d.user);
   e2eRetryFailed();
-  $('composer').classList.remove('hidden');
+  $('composer').classList.toggle('hidden', blocked);
   $('message-input').placeholder = 'Write a direct message to @' + d.user.username + '\u2026';
   $('composer-hint').textContent = '';
   $('message-input').focus();
@@ -2641,8 +2698,24 @@ async function openDM(d) {
   saveLastLocation({ serverId: null, channelId: null, dmId: d.id });
 }
 
-/* Right-click menu for a direct message in the sidebar. */
-function openDMContextMenu(x, y, dmid) {
+/* Blocked conversations show a single explanatory card instead of history. */
+function renderDmBlockedNotice(user) {
+  const wrap = $('messages');
+  if (!wrap) return;
+  wrap.innerHTML = '';
+  const card = document.createElement('div');
+  card.className = 'dm-blocked-notice';
+  card.innerHTML = `<b>${escapeHtml(user.display_name || user.username || 'This user')} is blocked.</b><br>
+    Their messages and profile are hidden until you unblock them. You can't send messages or start calls in this conversation.`;
+  const btn = document.createElement('button');
+  btn.className = 'btn';
+  btn.textContent = 'Unblock';
+  btn.addEventListener('click', () => friendAction('unblock', user.id));
+  card.appendChild(btn);
+  wrap.appendChild(card);
+}
+
+/* Right-click menu for a direct message in the sidebar. */function openDMContextMenu(x, y, dmid) {
   const d = state.dms.find(x => x.id === dmid);
   if (!d) return;
   const u = d.user || {};
@@ -3014,6 +3087,14 @@ async function friendAction(act, uid) {
     else if (act === 'unblock') await api('/api/blocks/' + uid, { method: 'DELETE' });
     await loadFriends(); renderDMList();
     if (state.view === 'friends') renderFriendsView();
+    /* If we just blocked/unblocked the person we're chatting or calling with,
+       refresh the conversation immediately and drop any active call. */
+    if (state.dm && state.dm.user && state.dm.user.id === uid) {
+      if (act === 'block' && dmCall.state !== 'idle' && dmCall.peerId === uid) cleanupDmCall(true, 'Call ended');
+      const dm = state.dm;
+      await openDM(dm);
+    }
+    updateCallButton();
     if (FRIEND_ACTION_MSG[act]) toast(FRIEND_ACTION_MSG[act], 'success');
   } catch (e) { toast(e.message, 'error'); }
 }
@@ -3036,6 +3117,7 @@ async function openServer(id, preferredChannelId) {
   renderRail();
   $('rail-home').classList.remove('active');
   $('sidebar-name').textContent = data.server.name;
+  updateCallButton();
   syncSidebarBanner(true);
   renderChannelList();
   /* Honour the member-list preference the user last chose. It is persisted in
@@ -3585,8 +3667,13 @@ function tuneAudioSenders(pc) {
   } catch (e) { /* ignore */ }
 }
 
-function createVoicePeer(uid, initiator) {
-  if (voice.peers[uid]) return voice.peers[uid];
+function createVoicePeer(uid, initiator, ctx) {
+  const C = ctx || voice;
+  const peers = C.peers;
+  const signalEvent = C.signalEvent || 'voice_signal';
+  const signalExtra = C.signalExtra || null;
+  const sendSignal = (data) => socket.emit(signalEvent, Object.assign({ to: uid, data }, signalExtra || {}));
+  if (peers[uid]) return peers[uid];
   const pc = new RTCPeerConnection({
     iceServers: ICE_SERVERS,
     bundlePolicy: 'max-bundle',
@@ -3616,23 +3703,23 @@ function createVoicePeer(uid, initiator) {
     polite: String((me && me.id) || '') < String(uid),
     restartTimer: 0
   };
-  voice.peers[uid] = peer;
+  peers[uid] = peer;
 
-  if (voice.localStream) {
-    voice.localStream.getTracks().forEach(t => {
-      try { pc.addTrack(t, voice.localStream); } catch (e) {}
+  if (C.localStream) {
+    C.localStream.getTracks().forEach(t => {
+      try { pc.addTrack(t, C.localStream); } catch (e) {}
     });
   }
 
   pc.onicecandidate = (e) => {
-    if (e.candidate) socket.emit('voice_signal', { to: uid, data: { type: 'ice', candidate: e.candidate } });
+    if (e.candidate) sendSignal({ type: 'ice', candidate: e.candidate });
   };
 
   pc.ontrack = (e) => {
     const stream = (e.streams && e.streams[0]) || new MediaStream([e.track]);
     peer.remoteStream = stream;
     if (audioEl.srcObject !== stream) audioEl.srcObject = stream;
-    audioEl.muted = voice.deafened;
+    audioEl.muted = C.deafened;
     applyOutputDevice(audioEl);
     const tryPlay = () => {
       const p = audioEl.play();
@@ -3654,7 +3741,7 @@ function createVoicePeer(uid, initiator) {
       peer.makingOffer = true;
       await pc.setLocalDescription();
       if (pc.localDescription) {
-        socket.emit('voice_signal', { to: uid, data: { type: pc.localDescription.type, sdp: pc.localDescription } });
+        sendSignal({ type: pc.localDescription.type, sdp: pc.localDescription });
       }
     } catch (e) { /* ignore */ } finally { peer.makingOffer = false; }
   };
@@ -3663,14 +3750,14 @@ function createVoicePeer(uid, initiator) {
     if (peer.restartTimer) return;
     peer.restartTimer = setTimeout(async () => {
       peer.restartTimer = 0;
-      if (!voice.peers[uid]) return;
+      if (!peers[uid]) return;
       if (pc.signalingState !== 'stable') return;
       try {
         peer.makingOffer = true;
         if (typeof pc.restartIce === 'function') pc.restartIce();
         await pc.setLocalDescription();
         if (pc.localDescription) {
-          socket.emit('voice_signal', { to: uid, data: { type: pc.localDescription.type, sdp: pc.localDescription } });
+          sendSignal({ type: pc.localDescription.type, sdp: pc.localDescription });
         }
       } catch (e) { /* ignore */ } finally { peer.makingOffer = false; }
     }, 1500);
@@ -3684,7 +3771,7 @@ function createVoicePeer(uid, initiator) {
   };
   pc.onconnectionstatechange = () => {
     if (pc.connectionState === 'failed') recover();
-    else if (pc.connectionState === 'closed') destroyVoicePeer(uid);
+    else if (pc.connectionState === 'closed') destroyVoicePeer(uid, C);
     else if (pc.connectionState === 'connected') tuneAudioSenders(pc);
   };
 
@@ -3699,10 +3786,11 @@ function flushIce(peer) {
   q.forEach(c => { peer.pc.addIceCandidate(new RTCIceCandidate(c)).catch(() => {}); });
 }
 
-async function handleVoiceSignal(from, data) {
-  if (!from || !data || !voice.channel) return;
-  let peer = voice.peers[from];
-  if (!peer) peer = createVoicePeer(from, false);
+async function handleVoiceSignal(from, data, ctx) {
+  const C = ctx || voice;
+  if (!from || !data || !C.channel) return;
+  let peer = C.peers[from];
+  if (!peer) peer = createVoicePeer(from, false, C);
   const pc = peer.pc;
   try {
     if (data.type === 'offer' || data.type === 'answer') {
@@ -3727,7 +3815,7 @@ async function handleVoiceSignal(from, data) {
       if (desc.type === 'offer') {
         await pc.setLocalDescription();
         if (pc.localDescription) {
-          socket.emit('voice_signal', { to: from, data: { type: 'answer', sdp: pc.localDescription } });
+          socket.emit(C.signalEvent || 'voice_signal', Object.assign({ to: from, data: { type: 'answer', sdp: pc.localDescription } }, C.signalExtra || {}));
         }
       }
       tuneAudioSenders(pc);
@@ -3738,14 +3826,15 @@ async function handleVoiceSignal(from, data) {
   } catch (e) { /* transient signaling errors are expected during glare */ }
 }
 
-function destroyVoicePeer(uid) {
-  const peer = voice.peers[uid];
+function destroyVoicePeer(uid, ctx) {
+  const C = ctx || voice;
+  const peer = C.peers[uid];
   if (!peer) return;
   if (peer.restartTimer) clearTimeout(peer.restartTimer);
   if (peer.playTimer) clearTimeout(peer.playTimer);
   try { peer.pc.close(); } catch (e) {}
   if (peer.audioEl) { try { peer.audioEl.srcObject = null; } catch (e) {} peer.audioEl.remove(); }
-  delete voice.peers[uid];
+  delete C.peers[uid];
 }
 
 function startSpeakingDetection() {
@@ -3832,6 +3921,273 @@ function toggleVoiceDeafen() {
   socket.emit('voice_update', { channel_id: voice.channel.id, muted: voice.muted, deafened: voice.deafened, speaking: voice.speaking });
   renderVoicePanel();
   if (state.server) renderChannelList();
+}
+
+/* ============================================================
+   DIRECT-MESSAGE VOICE CALLS
+   Reuses the exact WebRTC peer machinery that powers server voice
+   channels (createVoicePeer / handleVoiceSignal), but relays its
+   signaling over the dm_call_* events so a DM call and a server
+   voice session never interfere with each other.
+   ============================================================ */
+const dmCall = {
+  dmId: null,
+  peerId: null,
+  peerName: '',
+  state: 'idle',          /* idle | ringing | connecting | active */
+  incoming: null,         /* payload while ringing as the callee */
+  call: null,
+  peers: {},              /* same shape as voice.peers */
+  localStream: null,
+  rawStream: null,
+  muted: false,
+  deafened: false,
+  channel: null,          /* dm id, so handleVoiceSignal's guard passes */
+  signalEvent: 'dm_call_signal',
+  signalExtra: null,
+  startedAt: 0,
+  timerId: 0,
+  ringId: 0
+};
+
+function isUserBlocked(uid) {
+  return !!(state.friends && Array.isArray(state.friends.blocked) && state.friends.blocked.some(u => u.id === uid));
+}
+
+/* Show the call button only while viewing a DM with someone we haven't blocked. */
+function updateCallButton() {
+  const btn = $('hdr-call');
+  if (!btn) return;
+  const show = !!(state.dm && state.dm.user && !isUserBlocked(state.dm.user.id));
+  btn.classList.toggle('hidden', !show);
+  btn.classList.toggle('active', !!(dmCall.state !== 'idle' && dmCall.dmId && state.dm && state.dm.id === dmCall.dmId));
+}
+
+function dmCallPeerUser() {
+  const uid = dmCall.peerId;
+  return (uid && state.usersCache[uid]) || (state.dm && state.dm.user) || { username: 'User' };
+}
+
+function fmtCallTime(ms) {
+  const s = Math.max(0, Math.floor(ms / 1000));
+  const m = Math.floor(s / 60);
+  return String(m).padStart(2, '0') + ':' + String(s % 60).padStart(2, '0');
+}
+
+function renderDmCallUI() {
+  const layer = $('dm-call-layer');
+  const inc = $('dm-call-incoming');
+  const bar = $('dm-call-bar');
+  if (!layer || !inc || !bar) return;
+  const incoming = dmCall.state === 'ringing' && dmCall.incoming;
+  layer.classList.toggle('hidden', !incoming && dmCall.state === 'idle');
+  inc.classList.toggle('hidden', !incoming);
+  const showBar = !incoming && dmCall.state !== 'idle';
+  bar.classList.toggle('hidden', !showBar);
+  if (incoming) {
+    const u = dmCall.incoming.caller || {};
+    $('dci-name').textContent = u.display_name || u.username || 'Someone';
+    $('dci-sub').textContent = 'Incoming voice call…';
+    const av = $('dci-avatar');
+    if (u.avatar_url) { av.style.backgroundImage = `url("${u.avatar_url}")`; av.textContent = ''; }
+    else { av.style.backgroundImage = ''; av.textContent = (u.username || '?').slice(0, 1).toUpperCase(); }
+  }
+  if (showBar) {
+    const u = dmCallPeerUser();
+    $('dcb-name').textContent = u.display_name || u.username || 'Call';
+    $('dcb-sub').textContent = dmCall.state === 'ringing' ? 'Ringing…'
+      : dmCall.state === 'connecting' ? 'Connecting…' : 'Voice connected';
+    $('dcb-mute').classList.toggle('off', dmCall.muted);
+    $('dcb-deafen').classList.toggle('off', dmCall.deafened);
+    $('dcb-mute').innerHTML = `<i data-ic="${dmCall.muted ? 'mic-off' : 'mic'}"></i>`;
+    $('dcb-deafen').innerHTML = `<i data-ic="${dmCall.deafened ? 'headphones-off' : 'headphones'}"></i>`;
+    if (window.refreshIcons) window.refreshIcons();
+    $('dcb-timer').textContent = dmCall.state === 'active' && dmCall.startedAt ? fmtCallTime(Date.now() - dmCall.startedAt) : '00:00';
+  }
+  updateCallButton();
+  renderRail();
+}
+
+function startDmCallTimer() {
+  if (dmCall.timerId) clearInterval(dmCall.timerId);
+  dmCall.timerId = setInterval(() => {
+    if (dmCall.state !== 'active') return;
+    const el = $('dcb-timer');
+    if (el) el.textContent = fmtCallTime(Date.now() - dmCall.startedAt);
+  }, 1000);
+}
+
+function startDmRing() {
+  stopDmRing();
+  dmCall.ringId = setInterval(() => { if (setting('notifSounds') !== false) playPing(); }, 1600);
+}
+function stopDmRing() {
+  if (dmCall.ringId) { clearInterval(dmCall.ringId); dmCall.ringId = 0; }
+}
+
+/* Tear everything down and return to idle. `notify` controls whether we tell
+   the other side (false when we're reacting to their end/decline event). */
+function cleanupDmCall(notify, reason) {
+  const dmId = dmCall.dmId;
+  const peerId = dmCall.peerId;
+  if (notify && dmId) socket.emit('dm_call_end', { dm_id: dmId });
+  stopDmRing();
+  if (dmCall.timerId) { clearInterval(dmCall.timerId); dmCall.timerId = 0; }
+  Object.keys(dmCall.peers).forEach(uid => destroyVoicePeer(uid, dmCall));
+  if (dmCall.rawStream) { try { dmCall.rawStream.getTracks().forEach(t => t.stop()); } catch (e) {} }
+  if (dmCall.localStream && dmCall.localStream !== dmCall.rawStream) {
+    try { dmCall.localStream.getTracks().forEach(t => t.stop()); } catch (e) {}
+  }
+  dmCall.localStream = null;
+  dmCall.rawStream = null;
+  dmCall.dmId = null;
+  dmCall.peerId = null;
+  dmCall.peerName = '';
+  dmCall.state = 'idle';
+  dmCall.incoming = null;
+  dmCall.call = null;
+  dmCall.channel = null;
+  dmCall.signalExtra = null;
+  dmCall.muted = false;
+  dmCall.deafened = false;
+  dmCall.startedAt = 0;
+  renderDmCallUI();
+  if (reason && reason !== 'ended') toast(reason, 'info');
+}
+
+async function ensureDmCallMic() {
+  if (dmCall.localStream) return true;
+  try {
+    const raw = await acquireMic();
+    dmCall.rawStream = raw;
+    /* Reuse the same gain/analyser processing chain as server voice. */
+    const processed = buildProcessedMic(raw);
+    dmCall.localStream = processed || raw;
+    dmCall.localStream.getAudioTracks().forEach(t => { t.enabled = !dmCall.muted; });
+    return true;
+  } catch (e) {
+    const msg = e && (e.name === 'NotAllowedError' || e.name === 'SecurityError')
+      ? 'Microphone access was denied. Allow the mic to make calls.'
+      : 'Could not access your microphone.';
+    toast(msg, 'error');
+    return false;
+  }
+}
+
+async function startDmCall() {
+  if (!state.dm || !state.dm.user) return;
+  if (dmCall.state !== 'idle') { toast('You are already in a call.', 'info'); return; }
+  const u = state.dm.user;
+  if (isUserBlocked(u.id)) { toast('Unblock this user before calling them.', 'error'); return; }
+  const ok = await ensureDmCallMic();
+  if (!ok) return;
+  dmCall.dmId = state.dm.id;
+  dmCall.peerId = u.id;
+  dmCall.peerName = u.display_name || u.username || 'User';
+  dmCall.channel = state.dm.id;
+  dmCall.signalExtra = { dm_id: state.dm.id };
+  dmCall.state = 'ringing';
+  dmCall.incoming = null;
+  dmCall.call = null;
+  socket.emit('dm_call_start', { dm_id: state.dm.id });
+  renderDmCallUI();
+}
+
+async function acceptDmCall() {
+  const inc = dmCall.incoming;
+  if (!inc) return;
+  const ok = await ensureDmCallMic();
+  if (!ok) { declineDmCall(); return; }
+  dmCall.dmId = inc.dm_id;
+  dmCall.peerId = (inc.caller && inc.caller.id) || inc.call.caller_id;
+  dmCall.peerName = (inc.caller && (inc.caller.display_name || inc.caller.username)) || 'User';
+  dmCall.channel = inc.dm_id;
+  dmCall.signalExtra = { dm_id: inc.dm_id };
+  dmCall.incoming = null;
+  dmCall.state = 'connecting';
+  stopDmRing();
+  socket.emit('dm_call_accept', { dm_id: inc.dm_id });
+  renderDmCallUI();
+  /* The caller is the designated offerer; we simply wait for its offer. */
+}
+
+function declineDmCall() {
+  const inc = dmCall.incoming;
+  if (!inc) return;
+  socket.emit('dm_call_decline', { dm_id: inc.dm_id });
+  stopDmRing();
+  dmCall.state = 'idle';
+  dmCall.incoming = null;
+  renderDmCallUI();
+}
+
+function hangupDmCall() {
+  if (dmCall.state === 'idle') return;
+  cleanupDmCall(true, null);
+}
+
+function onDmCallIncoming(payload) {
+  if (!payload || !payload.call) return;
+  if (dmCall.state !== 'idle') {
+    /* Already busy: politely decline so the caller isn't left ringing. */
+    socket.emit('dm_call_decline', { dm_id: payload.dm_id });
+    return;
+  }
+  dmCall.dmId = payload.dm_id;
+  dmCall.peerId = (payload.caller && payload.caller.id) || payload.call.caller_id;
+  dmCall.peerName = (payload.caller && (payload.caller.display_name || payload.caller.username)) || 'User';
+  dmCall.incoming = payload;
+  dmCall.state = 'ringing';
+  dmCall.call = payload.call;
+  startDmRing();
+  renderDmCallUI();
+  const who = dmCall.peerName;
+  maybeDesktopNotify('Incoming call from ' + who, 'Click to answer in Crossroads.');
+}
+
+function onDmCallAccepted(payload) {
+  if (!payload || payload.dm_id !== dmCall.dmId) return;
+  if (dmCall.state === 'active') return;
+  dmCall.state = 'connecting';
+  dmCall.startedAt = (payload.call && payload.call.started_at) || Date.now();
+  renderDmCallUI();
+  /* Caller drives the offer; callee waits for it. */
+  if (me && dmCall.peerId && payload.call && payload.call.caller_id === me.id) {
+    const peer = createVoicePeer(dmCall.peerId, true, dmCall);
+    if (peer) peer.shouldInitiate = true;
+  }
+  dmCall.state = 'active';
+  startDmCallTimer();
+  renderDmCallUI();
+}
+
+function toggleDmCallMute() {
+  if (dmCall.state === 'idle') return;
+  dmCall.muted = !dmCall.muted;
+  if (dmCall.localStream) dmCall.localStream.getAudioTracks().forEach(t => { t.enabled = !dmCall.muted; });
+  renderDmCallUI();
+}
+
+function toggleDmCallDeafen() {
+  if (dmCall.state === 'idle') return;
+  dmCall.deafened = !dmCall.deafened;
+  if (dmCall.deafened) { dmCall.muted = true; }
+  if (dmCall.localStream) dmCall.localStream.getAudioTracks().forEach(t => { t.enabled = !dmCall.muted; });
+  Object.values(dmCall.peers).forEach(p => { if (p.audioEl) p.audioEl.muted = dmCall.deafened; });
+  renderDmCallUI();
+}
+
+function wireDmCallUI() {
+  const on = (id, ev, fn) => { const el = $(id); if (el) el.addEventListener(ev, fn); };
+  on('hdr-call', 'click', () => {
+    if (dmCall.state !== 'idle' && dmCall.dmId && state.dm && state.dm.id === dmCall.dmId) hangupDmCall();
+    else startDmCall();
+  });
+  on('dci-accept', 'click', acceptDmCall);
+  on('dci-decline', 'click', declineDmCall);
+  on('dcb-hangup', 'click', hangupDmCall);
+  on('dcb-mute', 'click', toggleDmCallMute);
+  on('dcb-deafen', 'click', toggleDmCallDeafen);
 }
 
 function renderVoicePanel() {
@@ -5658,6 +6014,7 @@ function notifInfo(n) {
   else if (n.type === 'reply') { ico = 'reply'; plain = `${name} replied to you ${where}`; html = `<b>${escapeHtml(name)}</b> replied to you ${escapeHtml(where)}`; }
   else if (n.type === 'everyone') { ico = 'megaphone'; plain = `${name} pinged @everyone ${where}`; html = `<b>${escapeHtml(name)}</b> pinged <b>@everyone</b> ${escapeHtml(where)}`; }
   else if (n.type === 'here') { ico = 'megaphone'; plain = `${name} pinged @here ${where}`; html = `<b>${escapeHtml(name)}</b> pinged <b>@here</b> ${escapeHtml(where)}`; }
+  else if (n.type === 'call') { ico = 'phone'; plain = `${name} is calling you`; html = `<b>${escapeHtml(name)}</b> is calling you`; }
   return { ico, plain, html, preview, user: u, where };
 }
 
@@ -5748,6 +6105,14 @@ async function goToNotification(n) {
   const u = d.user || (d.message && d.message.author);
   if (n.type === 'friend_request' || n.type === 'friend_accepted') {
     if (u) openProfile(u);
+    return;
+  }
+  if (n.type === 'call' && d.dm_id) {
+    try {
+      await loadDMs();
+      const dm = state.dms.find(x => x.id === d.dm_id);
+      if (dm) await openDM(dm);
+    } catch (e) { /* ignore */ }
     return;
   }
   try {
@@ -6753,6 +7118,26 @@ function renderOwnProfile(user) {
 
 /* ---------- Someone else's profile (banner sits on top of the avatar) ---------- */
 function renderOtherProfile(user, ctx) {
+  /* A blocked user's profile is hidden behind a minimal card. Nothing about
+     them (bio, mutuals, note, roles) is shown until the block is lifted. */
+  if (ctx && (ctx.relationship === 'blocked' || ctx.blocked)) {
+    openModal(`
+      <div class="dp-body">
+        <div class="blocked-profile">
+          <div class="bp-ico">${icon('ban')}</div>
+          <div class="bp-title">${escapeHtml(user.display_name || user.username || 'This user')} is blocked</div>
+          <div class="bp-sub">Their profile and messages are hidden. Unblock them to see their profile and message again.</div>
+          <button class="btn" id="bp-unblock">${icon('unlock')} Unblock</button>
+        </div>
+      </div>`, { modalClass: 'oprofile-modal' });
+    const btn = $('bp-unblock');
+    if (btn) btn.addEventListener('click', async () => {
+      await friendAction('unblock', user.id);
+      closeModal();
+      openProfile(user);
+    });
+    return;
+  }
   const displayName = user.display_name || user.username;
   const accountCreated = new Date(user.created_at).toLocaleDateString([], { year: 'numeric', month: 'short', day: 'numeric' });
   const rel = ctx.relationship;
@@ -9671,6 +10056,15 @@ function invitePanelHTML(s) {
       </div>
       <button class="btn inv-generate" id="inv-generate">${icon('link')} Generate New Link</button>
     </div>
+    ${amIAdmin() ? `
+    <div class="invite-custom">
+      <div class="ic-head">${icon('star')} Custom invite link <span class="ic-owner">Owner & admins</span></div>
+      <div class="ic-row">
+        <span class="ic-prefix">gg/</span>
+        <input id="inv-custom-input" class="ic-input" maxlength="32" placeholder="my-awesome-server" autocomplete="off" spellcheck="false">
+      </div>
+      <div class="ic-status" id="inv-custom-status">Letters, numbers, dashes and underscores. Must be unique.</div>
+    </div>` : ''}
     <div class="invite-result" id="inv-result"></div>
     <div class="invite-list-head"><span>Active Invites</span><span class="inv-count" id="inv-count"></span></div>
     <div class="invite-list" id="inv-list"><div class="inv-empty">Loading invites\u2026</div></div>`;
@@ -9678,12 +10072,50 @@ function invitePanelHTML(s) {
 
 function wireInvitePanel(s) {
   wireCustomSelects(document.querySelector('.invite-panel') || document.querySelector('.invite-modal-body') || document);
+  /* Live availability check for a custom vanity link. */
+  const customInput = $('inv-custom-input');
+  const customStatus = $('inv-custom-status');
+  let customCheckTimer = null;
+  let customAvailable = null;
+  function setCustomStatus(text, kind) {
+    if (!customStatus) return;
+    customStatus.textContent = text;
+    customStatus.className = 'ic-status' + (kind ? ' ' + kind : '');
+  }
+  function checkCustom() {
+    if (!customInput) return;
+    const raw = customInput.value.trim().replace(/^gg\//i, '');
+    customAvailable = null;
+    if (!raw) { setCustomStatus('Letters, numbers, dashes and underscores. Must be unique.'); return; }
+    setCustomStatus('Checking availability\u2026');
+    clearTimeout(customCheckTimer);
+    customCheckTimer = setTimeout(async () => {
+      try {
+        const r = await api('/api/servers/' + s.id + '/invites/check?code=' + encodeURIComponent(raw));
+        customAvailable = !!r.available;
+        if (r.available) setCustomStatus('gg/' + r.code + ' is available', 'ok');
+        else setCustomStatus(r.error || 'That name is not available.', 'bad');
+      } catch (e) { setCustomStatus(e.message || 'Could not check that name.', 'bad'); }
+    }, 320);
+  }
+  if (customInput) {
+    customInput.addEventListener('input', () => {
+      customInput.value = customInput.value.replace(/[^A-Za-z0-9_-]/g, '').replace(/^gg\//i, '');
+      checkCustom();
+    });
+  }
   const gen = $('inv-generate');
   if (gen) gen.addEventListener('click', async () => {
+    const custom = customInput ? customInput.value.trim().replace(/^gg\//i, '') : '';
+    if (custom && customAvailable === false) { toast('That custom invite name is taken. Pick another.', 'error'); return; }
     gen.disabled = true;
     try {
-      const { invite } = await api('/api/servers/' + s.id + '/invites', { method: 'POST', body: JSON.stringify({ expires_in: csValue('inv-expiry'), max_uses: csValue('inv-uses') }) });
+      const body = { expires_in: csValue('inv-expiry'), max_uses: csValue('inv-uses') };
+      if (custom) body.custom_code = custom;
+      const { invite } = await api('/api/servers/' + s.id + '/invites', { method: 'POST', body: JSON.stringify(body) });
       showInviteResult(invite);
+      if (customInput) customInput.value = '';
+      setCustomStatus('Letters, numbers, dashes and underscores. Must be unique.');
       loadInviteList(s);
     } catch (e) { toast(e.message, 'error'); }
     finally { gen.disabled = false; }
@@ -9782,6 +10214,7 @@ function openServerSettings() {
     { id: 'overview', label: 'Overview', icon: 'server', group: 'Server' },
     { id: 'roles', label: 'Roles', icon: 'shield', group: 'Server' },
     { id: 'members', label: 'Members', icon: 'users', group: 'Server' },
+    { id: 'community', label: 'Community', icon: 'globe', group: 'Server' },
     { id: 'moderation', label: 'Moderation', icon: 'ban', group: 'Safety' },
     { id: 'safety', label: 'Safety', icon: 'lock', group: 'Safety' },
     { id: 'invites', label: 'Invites', icon: 'link', group: 'Access' }
@@ -9818,6 +10251,7 @@ function openServerSettings() {
     overview: 'Manage how your server looks and who can join.',
     roles: 'Create roles, set their colour and decide how they appear.',
     members: 'Review everyone in the server and assign roles.',
+    community: 'Welcome messages, rules, invites and AFK behaviour.',
     moderation: 'Bans and recent moderation actions.',
     safety: 'Control who can join and how the server behaves.',
     invites: 'Share invite links and track how people get in.'
@@ -9903,6 +10337,10 @@ function renderServerTab(tab, s, isOwner) {
   }
   if (tab === 'safety') {
     renderSafetyTab(body, s);
+    return;
+  }
+  if (tab === 'community') {
+    renderCommunityTab(body, s);
     return;
   }
   // Overview
@@ -10514,6 +10952,82 @@ async function loadBans(s) {
   } catch (e) { const el = $('ss-bans'); if (el) el.innerHTML = '<div class="inv-empty">' + escapeHtml(e.message) + '</div>'; }
 }
 
+function renderCommunityTab(body, s) {
+  const admin = amIAdmin();
+  const st = state.serverSettings || {};
+  const voiceChannels = (state.channels || []).filter(c => c.type === 'voice');
+  const timeoutOpts = [60, 300, 900, 1800, 3600];
+  body.innerHTML = `
+    <div class="ss-section-title">Community</div>
+    <div class="ss-field-grid">
+      <div class="ss-field"><label>Community Name</label>
+        <input id="ss-community-name" maxlength="80" value="${escapeHtml(st.community_name || '')}" ${admin ? '' : 'disabled'} placeholder="e.g. The Pixel Lounge">
+        <div class="hint">A friendly display name shown on the invite splash and welcome screen.</div>
+      </div>
+      <div class="ss-field"><label>AFK Voice Channel</label>
+        <select id="ss-afk-channel" ${admin ? '' : 'disabled'}>
+          <option value="">None</option>
+          ${voiceChannels.map(c => `<option value="${c.id}"${st.afk_channel_id === c.id ? ' selected' : ''}>${escapeHtml(c.name)}</option>`).join('')}
+        </select>
+        <div class="hint">Members who are idle are moved here automatically.</div>
+      </div>
+      <div class="ss-field"><label>AFK Timeout</label>
+        <select id="ss-afk-timeout" ${admin ? '' : 'disabled'}>
+          ${timeoutOpts.map(v => `<option value="${v}"${Number(st.afk_timeout) === v ? ' selected' : ''}>${v < 3600 ? (v / 60) + ' minutes' : '1 hour'}</option>`).join('')}
+        </select>
+        <div class="hint">How long before an idle member is moved to the AFK channel.</div>
+      </div>
+      <div class="ss-field"><label>Default Role</label>
+        <select id="ss-default-role" ${admin ? '' : 'disabled'}>
+          <option value="">Member (no role)</option>
+          ${(state.roles || []).map(r => `<option value="${r.id}"${st.default_role_id === r.id ? ' selected' : ''}>${escapeHtml(r.name)}</option>`).join('')}
+        </select>
+        <div class="hint">Automatically given to everyone who joins.</div>
+      </div>
+    </div>
+    <div class="ss-field" style="margin-top:16px"><label>Welcome Message</label>
+      <textarea id="ss-welcome" maxlength="2000" ${admin ? '' : 'disabled'} placeholder="Say hello to new members…">${escapeHtml(st.welcome_message || '')}</textarea>
+      <div class="hint">Posted in the system channel when someone joins (if enabled below).</div>
+    </div>
+    <div class="ss-field" style="margin-top:16px"><label>Server Rules</label>
+      <textarea id="ss-rules" maxlength="4000" ${admin ? '' : 'disabled'} placeholder="1. Be kind. 2. No spam. 3. Have fun.">${escapeHtml(st.rules || '')}</textarea>
+      <div class="hint">Shown to new members before they can chat when verification is on.</div>
+    </div>
+    <div class="set-row"><div><div class="sr-title">Allow Member Invites</div><div class="sr-desc">Let regular members create their own invite links. When off, only owners and admins can invite.</div></div><div class="toggle${st.allow_member_invites ? ' on' : ''}" data-ss-toggle="allow_member_invites"></div></div>
+    <div class="set-row"><div><div class="sr-title">Post Welcome Messages</div><div class="sr-desc">Send the welcome message above to the system channel whenever a member joins.</div></div><div class="toggle${st.system_welcome ? ' on' : ''}" data-ss-toggle="system_welcome"></div></div>
+    <div class="set-row"><div><div class="sr-title">Show Invite Splash</div><div class="sr-desc">Display the server banner and description on the invite preview page.</div></div><div class="toggle${st.invite_splash ? ' on' : ''}" data-ss-toggle="invite_splash"></div></div>
+    <div class="set-row"><div><div class="sr-title">Require 2FA for Moderation</div><div class="sr-desc">Members must have two-factor authentication enabled before they can use moderation actions.</div></div><div class="toggle${st.require_2fa ? ' on' : ''}" data-ss-toggle="require_2fa"></div></div>
+    <div class="set-row"><div><div class="sr-title">Raid Protection</div><div class="sr-desc">Temporarily raise verification and slow joins when many accounts arrive at once.</div></div><div class="toggle${st.raid_protection ? ' on' : ''}" data-ss-toggle="raid_protection"></div></div>
+    ${admin ? `<div class="ss-actions"><button class="btn" id="ss-save-community">${icon('check')} Save Community Settings</button></div>` : '<div class="ss-note">Only the owner and admins can edit these settings.</div>'}
+  `;
+  hydrateIcons(body);
+  if (!admin) return;
+  body.querySelectorAll('[data-ss-toggle]').forEach(t => t.addEventListener('click', () => t.classList.toggle('on')));
+  $('ss-save-community').addEventListener('click', () => saveCommunitySettings(s));
+}
+
+async function saveCommunitySettings(s) {
+  const body = $('ss-body');
+  const payload = {
+    community_name: $('ss-community-name').value.trim(),
+    afk_channel_id: $('ss-afk-channel').value || null,
+    afk_timeout: parseInt($('ss-afk-timeout').value, 10) || 300,
+    default_role_id: $('ss-default-role').value || null,
+    welcome_message: $('ss-welcome').value,
+    rules: $('ss-rules').value,
+    allow_member_invites: body.querySelector('[data-ss-toggle="allow_member_invites"]').classList.contains('on'),
+    system_welcome: body.querySelector('[data-ss-toggle="system_welcome"]').classList.contains('on'),
+    invite_splash: body.querySelector('[data-ss-toggle="invite_splash"]').classList.contains('on'),
+    require_2fa: body.querySelector('[data-ss-toggle="require_2fa"]').classList.contains('on'),
+    raid_protection: body.querySelector('[data-ss-toggle="raid_protection"]').classList.contains('on')
+  };
+  try {
+    const { settings } = await api('/api/servers/' + s.id + '/settings', { method: 'PATCH', body: JSON.stringify(payload) });
+    state.serverSettings = settings;
+    toast('Community settings saved', 'success');
+  } catch (e) { toast(e.message, 'error'); }
+}
+
 function renderSafetyTab(body, s) {
   const admin = amIAdmin();
   const st = state.serverSettings || {};
@@ -10969,6 +11483,7 @@ function bindGlobalEvents() {
   $('hdr-members').addEventListener('click', () => { saveSetting('showMembers', !state.showMembers); renderMembers(); });
   $('hdr-pins').addEventListener('click', (e) => { e.stopPropagation(); openPinsPanel(); });
   $('hdr-search').addEventListener('click', (e) => { e.stopPropagation(); openSearch(); });
+  wireDmCallUI();
   const ec = $('empty-create'); if (ec) ec.addEventListener('click', openCreateServer);
 
   const input = $('message-input');

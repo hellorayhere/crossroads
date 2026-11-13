@@ -600,7 +600,18 @@ const SETTINGS_DEFAULTS = {
   allow_everyone: 1,
   default_notifications: 'all',
   slow_mode: 0,
-  system_channel_id: null
+  system_channel_id: null,
+  welcome_message: '',
+  rules: '',
+  allow_member_invites: 1,
+  afk_channel_id: null,
+  afk_timeout: 300,
+  require_2fa: 0,
+  raid_protection: 0,
+  system_welcome: 1,
+  default_role_id: null,
+  invite_splash: 1,
+  community_name: ''
 };
 
 /* Fetch a server's settings row, creating it (with defaults) on first use.
@@ -692,6 +703,43 @@ function removeFromVoice(socket, channelId) {
   broadcastVoiceState(channelId);
 }
 
+/* ---------------- Direct-message calls (in-memory signaling) ----------------
+   A DM call is ephemeral like voice: we keep only the ringing/active state in
+   memory and relay WebRTC offers/answers/ICE between the two participants.
+   Audio is peer-to-peer, so there is no server-side media cost or delay. */
+const dmCalls = new Map(); // dm_id -> call record
+const DM_CALL_RING_MS = 45000;
+
+function dmCallPublic(call) {
+  if (!call) return null;
+  return {
+    dm_id: call.dm_id,
+    caller_id: call.caller_id,
+    callee_id: call.callee_id,
+    state: call.state,
+    started_at: call.started_at || null,
+    created_at: call.created_at
+  };
+}
+
+function endDmCall(dmId, reason, exceptUserId) {
+  const call = dmCalls.get(dmId);
+  if (!call) return;
+  if (call.timer) clearTimeout(call.timer);
+  dmCalls.delete(dmId);
+  const payload = { dm_id: dmId, reason: reason || 'ended', call: dmCallPublic(call) };
+  for (const uid of [call.caller_id, call.callee_id]) {
+    if (uid && uid !== exceptUserId) io.to(`user:${uid}`).emit('dm_call_ended', payload);
+  }
+}
+
+/* End any call a disconnecting user is part of. */
+function endCallsForUser(uid) {
+  for (const [dmId, call] of Array.from(dmCalls.entries())) {
+    if (call.caller_id === uid || call.callee_id === uid) endDmCall(dmId, 'disconnected', uid);
+  }
+}
+
 /* ---------------- Servers: serialisation + invites ---------------- */
 
 function serverStats(serverId) {
@@ -774,6 +822,19 @@ function relationshipBetween(aId, bId) {
   if (!f) return 'none';
   if (f.status === 'accepted') return 'friends';
   return f.requester_id === aId ? 'pending_outgoing' : 'pending_incoming';
+}
+
+/* True when either user has blocked the other. Used to hide messages and to
+   forbid DMs / calls in both directions. */
+function isBlockedBetween(aId, bId) {
+  if (!aId || !bId) return false;
+  return !!db.prepare('SELECT 1 FROM blocks WHERE (blocker_id = ? AND blocked_id = ?) OR (blocker_id = ? AND blocked_id = ?)')
+    .get(aId, bId, bId, aId);
+}
+
+/* Ids of everyone the given user has blocked (for filtering message history). */
+function blockedIdsOf(uid) {
+  return db.prepare('SELECT blocked_id FROM blocks WHERE blocker_id = ?').all(uid).map(r => r.blocked_id);
 }
 
 function friendIdsOf(uid) {
@@ -1376,15 +1437,25 @@ app.get('/api/users/:id', auth, (req, res) => {
   const u = db.prepare('SELECT * FROM users WHERE id = ?').get(req.params.id);
   if (!u) return res.status(404).json({ error: 'User not found' });
   const isMe = u.id === req.user.id;
+  const blocked = !isMe && isBlockedBetween(req.user.id, u.id);
   const noteRow = db.prepare('SELECT content FROM notes WHERE owner_id = ? AND target_id = ?').get(req.user.id, u.id);
   const pu = publicUser(u);
-  pu.server_roles = rolesForUser(u.id, req.user.id);
+  if (blocked) {
+    /* Blocked users are hidden: strip bio / mutuals / roles / note and only
+       expose the bare identity so the UI can render a "blocked" card. */
+    pu.server_roles = [];
+    pu.bio = '';
+    pu.custom_status = '';
+  } else {
+    pu.server_roles = rolesForUser(u.id, req.user.id);
+  }
   res.json({
     user: pu,
-    relationship: isMe ? 'self' : relationshipBetween(req.user.id, u.id),
-    mutual_servers: isMe ? [] : mutualServers(req.user.id, u.id),
-    mutual_friends: isMe ? [] : mutualFriends(req.user.id, u.id),
-    note: noteRow ? noteRow.content : ''
+    relationship: isMe ? 'self' : (blocked ? 'blocked' : relationshipBetween(req.user.id, u.id)),
+    blocked,
+    mutual_servers: (isMe || blocked) ? [] : mutualServers(req.user.id, u.id),
+    mutual_friends: (isMe || blocked) ? [] : mutualFriends(req.user.id, u.id),
+    note: blocked ? '' : (noteRow ? noteRow.content : '')
   });
 });
 
@@ -1492,6 +1563,11 @@ app.post('/api/blocks', auth, (req, res) => {
     .run(req.user.id, userId, userId, req.user.id);
   const existing = db.prepare('SELECT 1 FROM blocks WHERE blocker_id = ? AND blocked_id = ?').get(req.user.id, userId);
   if (!existing) db.prepare('INSERT INTO blocks (id, blocker_id, blocked_id, created_at) VALUES (?,?,?,?)').run(newId(), req.user.id, userId, Date.now());
+  /* A block immediately ends any call between the two users. */
+  for (const [dmId, call] of Array.from(dmCalls.entries())) {
+    const pair = [call.caller_id, call.callee_id];
+    if (pair.includes(req.user.id) && pair.includes(userId)) endDmCall(dmId, 'blocked');
+  }
   res.json({ ok: true, status: 'blocked' });
 });
 
@@ -1903,10 +1979,25 @@ app.patch('/api/servers/:id/settings', auth, (req, res) => {
     allow_everyone: 'allow_everyone' in body ? (body.allow_everyone ? 1 : 0) : cur.allow_everyone,
     default_notifications: ['all', 'mentions', 'none'].includes(body.default_notifications) ? body.default_notifications : cur.default_notifications,
     slow_mode: 'slow_mode' in body ? Math.max(0, Math.min(21600, parseInt(body.slow_mode, 10) || 0)) : cur.slow_mode,
-    system_channel_id: 'system_channel_id' in body ? (body.system_channel_id || null) : cur.system_channel_id
+    system_channel_id: 'system_channel_id' in body ? (body.system_channel_id || null) : cur.system_channel_id,
+    welcome_message: 'welcome_message' in body ? String(body.welcome_message || '').slice(0, 2000) : cur.welcome_message,
+    rules: 'rules' in body ? String(body.rules || '').slice(0, 4000) : cur.rules,
+    allow_member_invites: 'allow_member_invites' in body ? (body.allow_member_invites ? 1 : 0) : cur.allow_member_invites,
+    afk_channel_id: 'afk_channel_id' in body ? (body.afk_channel_id || null) : cur.afk_channel_id,
+    afk_timeout: 'afk_timeout' in body ? Math.max(60, Math.min(3600, parseInt(body.afk_timeout, 10) || 300)) : cur.afk_timeout,
+    require_2fa: 'require_2fa' in body ? (body.require_2fa ? 1 : 0) : cur.require_2fa,
+    raid_protection: 'raid_protection' in body ? (body.raid_protection ? 1 : 0) : cur.raid_protection,
+    system_welcome: 'system_welcome' in body ? (body.system_welcome ? 1 : 0) : cur.system_welcome,
+    default_role_id: 'default_role_id' in body ? (body.default_role_id || null) : cur.default_role_id,
+    invite_splash: 'invite_splash' in body ? (body.invite_splash ? 1 : 0) : cur.invite_splash,
+    community_name: 'community_name' in body ? String(body.community_name || '').slice(0, 80) : cur.community_name
   };
-  db.prepare(`UPDATE server_settings SET verification_level=?, explicit_filter=?, allow_everyone=?, default_notifications=?, slow_mode=?, system_channel_id=?, updated_at=? WHERE server_id=?`)
-    .run(next.verification_level, next.explicit_filter, next.allow_everyone, next.default_notifications, next.slow_mode, next.system_channel_id, Date.now(), srv.id);
+  db.prepare(`UPDATE server_settings SET verification_level=?, explicit_filter=?, allow_everyone=?, default_notifications=?, slow_mode=?, system_channel_id=?,
+      welcome_message=?, rules=?, allow_member_invites=?, afk_channel_id=?, afk_timeout=?, require_2fa=?, raid_protection=?, system_welcome=?, default_role_id=?, invite_splash=?, community_name=?, updated_at=?
+      WHERE server_id=?`)
+    .run(next.verification_level, next.explicit_filter, next.allow_everyone, next.default_notifications, next.slow_mode, next.system_channel_id,
+      next.welcome_message, next.rules, next.allow_member_invites, next.afk_channel_id, next.afk_timeout, next.require_2fa, next.raid_protection,
+      next.system_welcome, next.default_role_id, next.invite_splash, next.community_name, Date.now(), srv.id);
   addAudit(srv.id, req.user.id, 'settings_update', null, '');
   io.emit('server_settings_update', { server_id: srv.id, settings: getServerSettings(srv.id) });
   res.json({ settings: getServerSettings(srv.id) });
@@ -2087,11 +2178,42 @@ app.post('/api/servers/:id/roles/:rid/move', auth, (req, res) => {
 /* How many live invite links a single server may hold at once. */
 const MAX_ACTIVE_INVITES = 5;
 
-/* Create an invite. Body: { expires_in: minutes|'never', max_uses: number|null } */
+/* Reserved words that must never become a custom invite code, so a vanity link
+   can't collide with an app route or impersonate staff. */
+const RESERVED_INVITE_CODES = new Set([
+  'admin', 'administrator', 'api', 'app', 'assets', 'auth', 'billing', 'blog',
+  'call', 'calls', 'channels', 'community', 'dashboard', 'discord', 'dm', 'dms',
+  'download', 'explore', 'faq', 'friends', 'help', 'home', 'invite', 'invites',
+  'join', 'login', 'logout', 'me', 'mod', 'moderator', 'new', 'notifications',
+  'official', 'owner', 'password', 'profile', 'register', 'root', 'rules',
+  'server', 'servers', 'settings', 'signin', 'signup', 'staff', 'support',
+  'system', 'terms', 'user', 'users', 'voice', 'welcome'
+]);
+
+/* A custom invite code is 2-32 chars of letters, numbers, dash and underscore. */
+function validateCustomInviteCode(raw) {
+  const code = String(raw || '').trim().replace(/^gg\//i, '');
+  if (!code) return { ok: false, error: 'Enter a custom invite name.' };
+  if (code.length < 2) return { ok: false, error: 'Invite names need at least 2 characters.' };
+  if (code.length > 32) return { ok: false, error: 'Invite names can be at most 32 characters.' };
+  if (!/^[A-Za-z0-9_-]+$/.test(code)) return { ok: false, error: 'Use only letters, numbers, dashes and underscores.' };
+  if (RESERVED_INVITE_CODES.has(code.toLowerCase())) return { ok: false, error: `"${code}" is reserved. Try another name.` };
+  if (/^\d+$/.test(code)) return { ok: false, error: 'Invite names cannot be only numbers.' };
+  return { ok: true, code };
+}
+
+/* Create an invite. Body: { expires_in: minutes|'never', max_uses: number|null,
+   custom_code: 'gg/my-name' | 'my-name' } */
 app.post('/api/servers/:id/invites', auth, (req, res) => {
   const srv = getServerForUser(req.params.id, req.user.id);
   if (!srv) return res.status(404).json({ error: 'Server not found' });
-  let { expires_in, max_uses } = req.body || {};
+  const canManage = hasPerm(srv, req.user.id, 'manage_server') || isServerAdmin(srv, req.user.id);
+  const settings = getServerSettings(srv.id);
+  /* When member invites are disabled only staff may mint new links. */
+  if (!canManage && !settings.allow_member_invites) {
+    return res.status(403).json({ error: 'Only server admins can create invites here.' });
+  }
+  let { expires_in, max_uses, custom_code } = req.body || {};
   let expiresAt = null;
   if (expires_in === 'never' || expires_in === null || expires_in === undefined || expires_in === 0) {
     expiresAt = null;
@@ -2115,14 +2237,44 @@ app.post('/api/servers/:id/invites', auth, (req, res) => {
       error: `This server already has ${MAX_ACTIVE_INVITES} active invites. Revoke one before creating another.`
     });
   }
-  let code = newInviteCode();
-  // Extremely unlikely collision, but guard anyway.
-  while (db.prepare('SELECT 1 FROM invites WHERE code = ?').get(code)) code = newInviteCode();
+  let code;
+  let isCustom = false;
+  if (custom_code !== undefined && custom_code !== null && String(custom_code).trim() !== '') {
+    if (!canManage) return res.status(403).json({ error: 'Only the owner or admins can set a custom invite link.' });
+    const check = validateCustomInviteCode(custom_code);
+    if (!check.ok) return res.status(400).json({ error: check.error });
+    code = check.code;
+    isCustom = true;
+    if (db.prepare('SELECT 1 FROM invites WHERE code = ?').get(code)) {
+      return res.status(409).json({ error: `gg/${code} is already taken. Try another name.` });
+    }
+  } else {
+    code = newInviteCode();
+    // Extremely unlikely collision, but guard anyway.
+    while (db.prepare('SELECT 1 FROM invites WHERE code = ?').get(code)) code = newInviteCode();
+  }
   const now = Date.now();
   db.prepare('INSERT INTO invites (code, server_id, creator_id, created_at, expires_at, max_uses, uses) VALUES (?,?,?,?,?,?,0)')
     .run(code, srv.id, req.user.id, now, expiresAt, maxUses);
   const row = db.prepare('SELECT * FROM invites WHERE code = ?').get(code);
+  addAudit(srv.id, req.user.id, isCustom ? 'invite_custom_create' : 'invite_create', null, code);
   res.json({ invite: invitePublic(row) });
+});
+
+/* Live availability check for a custom invite name (owner/admins only). */
+app.get('/api/servers/:id/invites/check', auth, (req, res) => {
+  const srv = getServerForUser(req.params.id, req.user.id);
+  if (!srv) return res.status(404).json({ error: 'Server not found' });
+  if (!isServerAdmin(srv, req.user.id)) return res.status(403).json({ error: 'Only the owner or admins can set a custom invite link.' });
+  const check = validateCustomInviteCode(req.query.code);
+  if (!check.ok) return res.json({ available: false, error: check.error, code: String(req.query.code || '').replace(/^gg\//i, '') });
+  const taken = !!db.prepare('SELECT 1 FROM invites WHERE code = ?').get(check.code);
+  res.json({
+    available: !taken,
+    code: check.code,
+    link: `gg/${check.code}`,
+    error: taken ? `gg/${check.code} is already taken. Try another name.` : null
+  });
 });
 
 /* List a server's invites (members can view; owner/creator can revoke). */
@@ -2212,7 +2364,10 @@ app.get('/api/channels/:id/messages', auth, (req, res) => {
   const limit = Math.min(parseInt(req.query.limit) || 50, 100);
   const rows = db.prepare('SELECT * FROM messages WHERE channel_id = ? ORDER BY created_at DESC LIMIT ?').all(ch.id, limit);
   rows.reverse();
-  res.json({ messages: messagesWithMeta(rows, req.user.id) });
+  /* Hide messages from anyone the viewer has blocked (or who blocked them). */
+  const hidden = new Set(blockedIdsOf(req.user.id));
+  const visible = hidden.size ? rows.filter(m => !hidden.has(m.user_id)) : rows;
+  res.json({ messages: messagesWithMeta(visible, req.user.id) });
 });
 
 app.post('/api/channels/:id/messages', auth, (req, res) => {
@@ -2455,13 +2610,20 @@ app.get('/api/dms/:id/messages', auth, (req, res) => {
   if (!dm || (dm.user1_id !== req.user.id && dm.user2_id !== req.user.id)) return res.status(404).json({ error: 'DM not found' });
   const rows = db.prepare('SELECT * FROM messages WHERE dm_id = ? ORDER BY created_at DESC LIMIT 50').all(dm.id);
   rows.reverse();
-  res.json({ messages: messagesWithMeta(rows, req.user.id) });
+  const otherId = dm.user1_id === req.user.id ? dm.user2_id : dm.user1_id;
+  const blocked = isBlockedBetween(req.user.id, otherId);
+  /* Blocked conversations are hidden entirely until the block is lifted. */
+  res.json({ messages: blocked ? [] : messagesWithMeta(rows, req.user.id), blocked });
 });
 
 app.post('/api/dms/:id/messages', auth, (req, res) => {
   const dm = db.prepare('SELECT * FROM dm_channels WHERE id = ?').get(req.params.id);
   if (!dm || (dm.user1_id !== req.user.id && dm.user2_id !== req.user.id)) return res.status(404).json({ error: 'DM not found' });
   if (req.user.muted) return res.status(403).json({ error: 'You are muted by a platform administrator.' });
+  const dmOtherId = dm.user1_id === req.user.id ? dm.user2_id : dm.user1_id;
+  if (isBlockedBetween(req.user.id, dmOtherId)) {
+    return res.status(403).json({ error: 'You cannot message this user while a block is active. Unblock them first.' });
+  }
   const { content, plain: plainIn, attachment_url, attachment_name, attachment_type, attachment_size, attachment_spoiler, attachment_description, reply_to_id, mentions: mentionsIn } = req.body || {};
   if ((!content || !content.trim()) && !attachment_url) return res.status(400).json({ error: 'Message cannot be empty' });
   const id = newId();
@@ -3708,7 +3870,89 @@ io.on('connection', (socket) => {
     io.to(`user:${to}`).emit('voice_signal', { from: uid, data });
   });
 
+  /* ---------------- Direct-message call signaling ---------------- */
+  const dmFor = (dmId) => {
+    if (!dmId) return null;
+    const dm = db.prepare('SELECT * FROM dm_channels WHERE id = ?').get(dmId);
+    if (!dm || (dm.user1_id !== uid && dm.user2_id !== uid)) return null;
+    return dm;
+  };
+  const otherOf = (dm) => (dm.user1_id === uid ? dm.user2_id : dm.user1_id);
+
+  socket.on('dm_call_start', ({ dm_id } = {}) => {
+    const dm = dmFor(dm_id);
+    if (!dm) return;
+    const otherId = otherOf(dm);
+    if (isBlockedBetween(uid, otherId)) {
+      return socket.emit('dm_call_error', { dm_id, error: 'You cannot call this user while a block is active.' });
+    }
+    const existing = dmCalls.get(dm_id);
+    if (existing) {
+      /* Re-ring the same pair instead of stacking calls; anything else means
+         the line is busy. */
+      if (existing.caller_id === uid) {
+        return socket.emit('dm_call_ringing', { dm_id, call: dmCallPublic(existing) });
+      }
+      return socket.emit('dm_call_error', { dm_id, error: 'This conversation already has an active call.' });
+    }
+    const call = {
+      dm_id,
+      caller_id: uid,
+      callee_id: otherId,
+      state: 'ringing',
+      created_at: Date.now(),
+      started_at: null,
+      timer: null
+    };
+    call.timer = setTimeout(() => {
+      const cur = dmCalls.get(dm_id);
+      if (cur && cur.state === 'ringing') endDmCall(dm_id, 'no_answer');
+    }, DM_CALL_RING_MS);
+    dmCalls.set(dm_id, call);
+    const caller = db.prepare('SELECT * FROM users WHERE id = ?').get(uid);
+    const callerPublic = publicUser(caller);
+    socket.emit('dm_call_ringing', { dm_id, call: dmCallPublic(call) });
+    io.to(`user:${otherId}`).emit('dm_call_incoming', { dm_id, call: dmCallPublic(call), caller: callerPublic });
+    /* Red notification + badge even when the callee is browsing a server. */
+    createNotification(otherId, 'call', { dm_id, caller: callerPublic, call: dmCallPublic(call) });
+  });
+
+  socket.on('dm_call_accept', ({ dm_id } = {}) => {
+    const call = dmCalls.get(dm_id);
+    if (!call || call.callee_id !== uid) return;
+    if (call.timer) { clearTimeout(call.timer); call.timer = null; }
+    call.state = 'active';
+    call.started_at = Date.now();
+    const payload = { dm_id, call: dmCallPublic(call) };
+    io.to(`user:${call.caller_id}`).emit('dm_call_accepted', payload);
+    io.to(`user:${call.callee_id}`).emit('dm_call_accepted', payload);
+  });
+
+  socket.on('dm_call_decline', ({ dm_id } = {}) => {
+    const call = dmCalls.get(dm_id);
+    if (!call || call.callee_id !== uid) return;
+    if (call.timer) clearTimeout(call.timer);
+    dmCalls.delete(dm_id);
+    io.to(`user:${call.caller_id}`).emit('dm_call_declined', { dm_id, call: dmCallPublic(call) });
+    socket.emit('dm_call_ended', { dm_id, reason: 'declined', call: dmCallPublic(call) });
+  });
+
+  socket.on('dm_call_end', ({ dm_id } = {}) => {
+    const call = dmCalls.get(dm_id);
+    if (!call || (call.caller_id !== uid && call.callee_id !== uid)) return;
+    endDmCall(dm_id, 'ended', uid);
+  });
+
+  socket.on('dm_call_signal', ({ dm_id, to, data } = {}) => {
+    const call = dmCalls.get(dm_id);
+    if (!call || !to || !data) return;
+    if (call.caller_id !== uid && call.callee_id !== uid) return;
+    if (to !== call.caller_id && to !== call.callee_id) return;
+    io.to(`user:${to}`).emit('dm_call_signal', { dm_id, from: uid, data });
+  });
+
   socket.on('disconnect', () => {
+    endCallsForUser(uid);
     const vc = voiceChannelOf(uid);
     if (vc) removeFromVoice(socket, vc);
     // Only mark the user offline once every tab/socket has closed.

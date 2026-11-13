@@ -312,6 +312,30 @@ function migrate() {
     try { db.exec("ALTER TABLE servers ADD COLUMN banner_position TEXT DEFAULT '50% 50%'"); } catch (e) {}
   }
 
+  /* 1c-1b. Additive migration: richer per-server settings. These power the new
+     Community tab (welcome message, rules, member invites, AFK channel, 2FA
+     requirement, raid protection). Every column is added only when missing and
+     defaults are chosen so existing servers behave exactly as before. */
+  const ssCols = db.prepare('PRAGMA table_info(server_settings)').all().map(c => c.name);
+  const ssAdditions = {
+    welcome_message: "TEXT DEFAULT ''",
+    rules: "TEXT DEFAULT ''",
+    allow_member_invites: 'INTEGER DEFAULT 1',
+    afk_channel_id: 'TEXT',
+    afk_timeout: 'INTEGER DEFAULT 300',
+    require_2fa: 'INTEGER DEFAULT 0',
+    raid_protection: 'INTEGER DEFAULT 0',
+    system_welcome: 'INTEGER DEFAULT 1',
+    default_role_id: 'TEXT',
+    invite_splash: 'INTEGER DEFAULT 1',
+    community_name: "TEXT DEFAULT ''"
+  };
+  for (const [col, def] of Object.entries(ssAdditions)) {
+    if (!ssCols.includes(col)) {
+      try { db.exec(`ALTER TABLE server_settings ADD COLUMN ${col} ${def}`); } catch (e) {}
+    }
+  }
+
   // 1c-2. Additive migration: channel categories. A category groups channels
   // under a collapsible header, exactly like Discord. Channels keep working
   // without one (category_id NULL means "no category"). Never destructive.

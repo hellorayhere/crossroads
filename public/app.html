@@ -134,6 +134,7 @@
         <span class="topic" id="chat-topic"></span>
         <div class="spacer"></div>
         <div class="hdr-icons">
+          <button id="hdr-call" title="Start Voice Call" class="hdr-call hidden"><i data-ic="phone"></i></button>
           <button id="hdr-notifs" title="Notifications" class="hdr-notif"><i data-ic="bell"></i><span class="notif-badge hidden" id="notif-badge">0</span></button>
           <button id="hdr-members" title="Member List"><i data-ic="users"></i></button>
           <button id="hdr-pins" title="Pinned Messages"><i data-ic="pin"></i></button>
@@ -172,8 +173,35 @@
   </div>
 
   <!-- Modal overlay -->
-  <div class="overlay hidden" id="modal-overlay">
-    <div class="modal" id="modal"></div>
+  <!-- Direct-message voice call UI (incoming ring + active call bar) -->
+  <div id="dm-call-layer" class="dm-call-layer hidden">
+    <div id="dm-call-incoming" class="dm-call-incoming hidden">
+      <div class="dci-avatar" id="dci-avatar"></div>
+      <div class="dci-body">
+        <div class="dci-name" id="dci-name">Someone</div>
+        <div class="dci-sub" id="dci-sub">Incoming voice call…</div>
+      </div>
+      <div class="dci-actions">
+        <button class="dci-btn decline" id="dci-decline" title="Decline"><i data-ic="phone-off"></i></button>
+        <button class="dci-btn accept" id="dci-accept" title="Accept"><i data-ic="phone"></i></button>
+      </div>
+    </div>
+    <div id="dm-call-bar" class="dm-call-bar hidden">
+      <div class="dcb-pulse"><i data-ic="phone"></i></div>
+      <div class="dcb-body">
+        <div class="dcb-name" id="dcb-name">Call</div>
+        <div class="dcb-sub" id="dcb-sub">Connecting…</div>
+      </div>
+      <div class="dcb-timer" id="dcb-timer">00:00</div>
+      <div class="dcb-actions">
+        <button class="dcb-btn" id="dcb-mute" title="Mute"><i data-ic="mic"></i></button>
+        <button class="dcb-btn" id="dcb-deafen" title="Deafen"><i data-ic="headphones"></i></button>
+        <button class="dcb-btn hangup" id="dcb-hangup" title="End Call"><i data-ic="phone-off"></i></button>
+      </div>
+    </div>
+  </div>
+
+  <div class="overlay hidden" id="modal-overlay">    <div class="modal" id="modal"></div>
   </div>
 
   <script src="/socket.io/socket.io.js"></script>
