@@ -46,3 +46,4 @@ Hard rule: never wipe/delete data. Additive changes only. Do not touch DATA_DIR 
 - [x] Client: reply preview + reply bar show the real quoted text
 - [x] Client: remove every "Encrypted message" label
 - [x] Verified locally: reply preview, reply bar, backfill, sent reply
+- [x] Deployed to Render (dep-dbra09t9fdbs73dokrd0, live) and verified endpoints
