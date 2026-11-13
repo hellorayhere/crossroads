@@ -1897,6 +1897,17 @@ async function init() {
   bindGlobalEvents();
   applyLanguage();
   revealApp();
+  /* Arriving from an invite link (?invite=CODE) shows a confirmation card
+     instead of dropping the person straight into the server. The query param
+     is stripped so a reload does not re-open the prompt. */
+  try {
+    const inviteCode = new URLSearchParams(location.search).get('invite');
+    if (inviteCode) {
+      const clean = location.pathname + location.hash;
+      history.replaceState(null, '', clean);
+      openInviteConfirm(inviteCode);
+    }
+  } catch (e) { /* ignore malformed URLs */ }
   /* Watch for a newer deploy and offer a soft refresh. */
   startUpdateWatcher();
 }
@@ -4727,10 +4738,14 @@ function callEventNode(m) {
   const who = escapeHtml(a.display_name || a.username || 'Someone');
   const verb = (m.plain || 'started') === 'ended' ? 'ended the call' : 'started a call';
   node.innerHTML = `
-    <span class="ce-ico" aria-hidden="true">${icon('phone')}</span>
-    <span class="ce-text"><b>${who}</b> ${verb}</span>
-    <span class="ce-time">${shortTime(m.created_at)}</span>
-    <button class="ce-call" type="button">Call back</button>`;
+    <span class="ce-rule" aria-hidden="true"></span>
+    <span class="ce-body">
+      <span class="ce-ico" aria-hidden="true">${icon('phone')}</span>
+      <span class="ce-text"><b>${who}</b> ${verb}</span>
+      <span class="ce-time">${shortTime(m.created_at)}</span>
+      <button class="ce-call" type="button">Call back</button>
+    </span>
+    <span class="ce-rule" aria-hidden="true"></span>`;
   hydrateIcons(node);
   const btn = node.querySelector('.ce-call');
   if (btn) btn.addEventListener('click', () => {
@@ -5631,14 +5646,10 @@ function inviteEmbedNode(code) {
         <button class="ie-join" ${data.valid || data.already_member ? '' : 'disabled'}>${escapeHtml(joinLabel)}</button>
       </div>`;
     const btn = wrap.querySelector('.ie-join');
-    if (btn) btn.addEventListener('click', async () => {
+    if (btn) btn.addEventListener('click', () => {
       if (!data.valid && !data.already_member) return;
-      try {
-        const res = await api('/api/servers/join', { method: 'POST', body: JSON.stringify({ invite: code }) });
-        await loadServers();
-        openServer(res.server.id);
-        toast('Joined ' + res.server.name, 'success');
-      } catch (e) { toast(e.message, 'error'); }
+      /* Never join straight from a card - always show the confirm step. */
+      openInviteConfirm(code);
     });
   }).catch(() => { wrap.remove(); });
   return wrap;
@@ -7160,6 +7171,81 @@ function openJoinServer(prefill) {
     } catch (e) { toast(e.message, 'error'); }
   });
   $('js-invite').focus();
+}
+
+/* Invite confirmation.
+   Clicking an invite link (in chat, in a bio, or opening ?invite=CODE) must
+   never silently drop someone into a server. We resolve the code first, show
+   who is inviting them and how big the server is, and let them choose
+   "Join Server" or "Nevermind". */
+async function openInviteConfirm(rawCode) {
+  const code = String(rawCode || '').trim();
+  if (!code) return;
+  let data = null;
+  try {
+    data = await api('/api/invites/' + encodeURIComponent(code));
+  } catch (e) {
+    toast(e.message || 'That invite could not be loaded.', 'error');
+    return;
+  }
+  if (!data || !data.server) { toast('That invite is no longer valid.', 'error'); return; }
+  const s = data.server;
+  const already = !!data.already_member;
+  const valid = !!data.valid || already;
+
+  const bannerStyle = s.banner_url
+    ? `background-image:url('${escapeHtml(s.banner_url)}')`
+    : `background:linear-gradient(135deg, var(--brand), color-mix(in srgb, var(--brand) 42%, #000))`;
+  const iconHTML = s.icon_url
+    ? `<img class="icf-icon" src="${escapeHtml(s.icon_url)}" alt="">`
+    : `<div class="icf-icon icf-icon-fallback">${escapeHtml((s.name || '?')[0].toUpperCase())}</div>`;
+
+  const statusLine = already
+    ? 'You are already a member of this server.'
+    : !data.valid
+      ? (data.expired ? 'This invite has expired.' : 'This invite has reached its maximum number of uses.')
+      : 'You have been invited to join this server.';
+
+  openModal(`
+    <div class="icf-banner" style="${bannerStyle}"><div class="icf-banner-shade"></div></div>
+    <div class="icf-body">
+      <div class="icf-head">
+        ${iconHTML}
+        <div class="icf-headtext">
+          <div class="icf-name">${escapeHtml(s.name || 'Server')}</div>
+          <div class="icf-stats">
+            <span class="icf-stat"><span class="icf-dot online"></span>${Number(s.online_count) || 0} Online</span>
+            <span class="icf-stat"><span class="icf-dot total"></span>${Number(s.member_count) || 0} Member${Number(s.member_count) === 1 ? '' : 's'}</span>
+          </div>
+        </div>
+      </div>
+      ${s.description ? `<div class="icf-desc">${escapeHtml(s.description)}</div>` : ''}
+      <div class="icf-note${valid ? '' : ' bad'}">${escapeHtml(statusLine)}</div>
+      <div class="icf-actions">
+        <button class="icf-btn ghost" id="icf-nevermind">Nevermind</button>
+        <button class="icf-btn primary" id="icf-join"${valid ? '' : ' disabled'}>${already ? 'Open Server' : 'Join Server'}</button>
+      </div>
+    </div>`, { modalClass: 'invite-confirm-modal' });
+  hydrateIcons($('modal'));
+
+  $('icf-nevermind').addEventListener('click', closeModal);
+  const joinBtn = $('icf-join');
+  if (joinBtn) joinBtn.addEventListener('click', async () => {
+    if (!valid) return;
+    joinBtn.disabled = true;
+    joinBtn.textContent = already ? 'Opening\u2026' : 'Joining\u2026';
+    try {
+      const res = await api('/api/servers/join', { method: 'POST', body: JSON.stringify({ invite: code }) });
+      closeModal();
+      await loadServers();
+      openServer(res.server.id);
+      if (!already) toast('Joined ' + res.server.name, 'success');
+    } catch (e) {
+      joinBtn.disabled = false;
+      joinBtn.textContent = already ? 'Open Server' : 'Join Server';
+      toast(e.message, 'error');
+    }
+  });
 }
 
 function openCreateChannel(type, categoryId) {
@@ -12160,7 +12246,7 @@ function bindGlobalEvents() {
     if (inv) {
       e.preventDefault();
       const code = inv.dataset.invite || '';
-      if (code) openJoinServer(decodeURIComponent(code));
+      if (code) openInviteConfirm(decodeURIComponent(code));
       return;
     }
     const men = e.target.closest('.mention');
