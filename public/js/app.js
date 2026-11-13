@@ -7506,7 +7506,7 @@ function openEditChannel(c) {
         <div class="ec-head-icon">${icon('link')}</div>
         <div class="ec-wh-headtext">
           <div class="ec-section-title" style="margin:0">Webhook</div>
-          <p class="ec-wh-sub">Forward every message posted in this channel to an external URL \u2014 Discord, Slack, Zapier, or your own endpoint.</p>
+          <p class="ec-wh-sub">Create a webhook URL, then paste it into any service. Anything sent to that URL is posted in this channel.</p>
         </div>
         <label class="ec-toggle ec-wh-toggle" for="ec-wh-enabled">
           <span class="ec-toggle-text"><span class="ec-toggle-title">Connected</span></span>
@@ -7515,11 +7515,16 @@ function openEditChannel(c) {
       </div>
       <div class="ec-wh-body">
         <div class="field"><label>Webhook URL</label>
-          <input id="ec-wh-url" placeholder="https://discord.com/api/webhooks/\u2026" autocomplete="off" spellcheck="false"></div>
+          <div class="ec-wh-urlrow">
+            <input id="ec-wh-url" readonly placeholder="No webhook yet \u2014 press Create Webhook">
+            <button class="btn secondary" id="ec-wh-copy">${icon('copy')} Copy</button>
+          </div>
+          <div class="hint">Paste this URL wherever you want messages to come from \u2014 GitHub, Zapier, a bot, or a simple curl request.</div>
+        </div>
         <div class="ec-wh-row">
           <div class="field"><label>Webhook Name</label>
             <input id="ec-wh-name" placeholder="Crossroads" maxlength="80">
-            <div class="hint">The display name messages will appear under.</div></div>
+            <div class="hint">The name messages appear under in this channel.</div></div>
           <div class="field"><label>Profile Picture</label>
             <div class="ec-wh-avatar-row">
               <div class="ec-wh-avatar" id="ec-wh-avatar">${icon('user')}</div>
@@ -7531,8 +7536,9 @@ function openEditChannel(c) {
         </div>
         <div class="ec-wh-status" id="ec-wh-status"></div>
         <div class="ec-wh-actions">
+          <button class="btn" id="ec-wh-create">${icon('plus')} <span id="ec-wh-create-label">Create Webhook</span></button>
           <button class="btn secondary" id="ec-wh-test">${icon('send')} Send test</button>
-          <button class="btn danger ghost" id="ec-wh-disconnect">Disconnect</button>
+          <button class="btn danger ghost" id="ec-wh-disconnect">Delete Webhook</button>
         </div>
       </div>
     </div>
@@ -7550,6 +7556,7 @@ function openEditChannel(c) {
 
   /* ---- Webhook section ---- */
   let whAvatar = null;
+  let whHas = false;
   const whSetAvatar = (url) => {
     whAvatar = url || null;
     const box = $('ec-wh-avatar');
@@ -7563,14 +7570,23 @@ function openEditChannel(c) {
     el.textContent = msg || '';
     el.className = 'ec-wh-status' + (kind ? ' ' + kind : '');
   };
-  api('/api/servers/' + state.server.id + '/channels/' + c.id + '/webhook').then(({ webhook }) => {
-    if (!webhook) { whStatus('No webhook connected yet.', ''); return; }
-    if ($('ec-wh-url')) $('ec-wh-url').value = webhook.url || '';
-    if ($('ec-wh-name')) $('ec-wh-name').value = webhook.name || '';
-    if ($('ec-wh-enabled')) $('ec-wh-enabled').checked = !!webhook.enabled;
-    whSetAvatar(webhook.avatar_url);
-    whStatus(webhook.enabled ? 'Connected \u2014 messages are being forwarded.' : 'Saved but paused.', webhook.enabled ? 'ok' : '');
-  }).catch(() => whStatus('Could not load webhook settings.', 'err'));
+  const whApply = (webhook) => {
+    whHas = !!webhook;
+    if ($('ec-wh-url')) $('ec-wh-url').value = webhook ? (webhook.url || '') : '';
+    if ($('ec-wh-name')) $('ec-wh-name').value = webhook ? (webhook.name || '') : '';
+    if ($('ec-wh-enabled')) $('ec-wh-enabled').checked = webhook ? !!webhook.enabled : false;
+    whSetAvatar(webhook ? webhook.avatar_url : null);
+    if ($('ec-wh-create-label')) $('ec-wh-create-label').textContent = whHas ? 'Regenerate URL' : 'Create Webhook';
+    if ($('ec-wh-copy')) $('ec-wh-copy').disabled = !whHas;
+    if ($('ec-wh-test')) $('ec-wh-test').disabled = !whHas;
+    if ($('ec-wh-disconnect')) $('ec-wh-disconnect').disabled = !whHas;
+    whStatus(whHas
+      ? (webhook.enabled ? 'Connected \u2014 anything sent to this URL is posted here.' : 'Paused \u2014 messages sent to this URL are ignored.')
+      : 'No webhook yet. Press Create Webhook to generate one.', whHas ? (webhook.enabled ? 'ok' : '') : '');
+  };
+  whApply(null);
+  api('/api/servers/' + state.server.id + '/channels/' + c.id + '/webhook').then(({ webhook }) => whApply(webhook))
+    .catch(() => whStatus('Could not load webhook settings.', 'err'));
   $('ec-wh-upload').addEventListener('click', () => $('ec-wh-file').click());
   $('ec-wh-file').addEventListener('change', async (e) => {
     const f = e.target.files && e.target.files[0];
@@ -7581,26 +7597,49 @@ function openEditChannel(c) {
       whStatus('Uploading\u2026', '');
       const d = await uploadImage(f);
       whSetAvatar(d.url);
-      whStatus('Picture ready \u2014 save to apply.', 'ok');
+      whStatus('Picture ready \u2014 press Save Changes to apply.', 'ok');
     } catch (err) { whStatus('Upload failed: ' + err.message, 'err'); }
     e.target.value = '';
   });
-  $('ec-wh-remove').addEventListener('click', () => { whSetAvatar(null); whStatus('Picture removed \u2014 save to apply.', ''); });
-  $('ec-wh-disconnect').addEventListener('click', async () => {
+  $('ec-wh-remove').addEventListener('click', () => { whSetAvatar(null); whStatus('Picture removed \u2014 press Save Changes to apply.', ''); });
+  $('ec-wh-copy').addEventListener('click', () => {
+    const url = $('ec-wh-url').value.trim();
+    if (!url) { toast('Create a webhook first', 'error'); return; }
+    copyToClipboard(url, 'Webhook URL');
+  });
+  $('ec-wh-create').addEventListener('click', async () => {
+    if (whHas && !confirm('Regenerate the webhook URL? The old URL will stop working.')) return;
     try {
-      await api('/api/servers/' + state.server.id + '/channels/' + c.id + '/webhook', { method: 'DELETE' });
-      $('ec-wh-url').value = ''; $('ec-wh-name').value = ''; $('ec-wh-enabled').checked = false;
-      whSetAvatar(null); whStatus('Webhook disconnected.', '');
-      toast('Webhook disconnected', 'success');
-    } catch (err) { toast(err.message, 'error'); }
+      whStatus(whHas ? 'Regenerating\u2026' : 'Creating\u2026', '');
+      const { webhook } = await api('/api/servers/' + state.server.id + '/channels/' + c.id + '/webhook', {
+        method: 'POST',
+        body: JSON.stringify({
+          name: $('ec-wh-name').value.trim(),
+          avatar_url: whAvatar,
+          enabled: true
+        })
+      });
+      whApply(webhook);
+      toast(whHas ? 'Webhook URL regenerated' : 'Webhook created', 'success');
+    } catch (err) { whStatus(err.message, 'err'); toast(err.message, 'error'); }
   });
   $('ec-wh-test').addEventListener('click', async () => {
+    if (!whHas) { toast('Create a webhook first', 'error'); return; }
     whStatus('Sending test\u2026', '');
     try {
       await api('/api/servers/' + state.server.id + '/channels/' + c.id + '/webhook/test', { method: 'POST' });
-      whStatus('Test delivered \u2014 check your endpoint.', 'ok');
-      toast('Test message sent', 'success');
+      whStatus('Test posted in this channel.', 'ok');
+      toast('Test message posted', 'success');
     } catch (err) { whStatus(err.message, 'err'); toast(err.message, 'error'); }
+  });
+  $('ec-wh-disconnect').addEventListener('click', async () => {
+    if (!whHas) return;
+    if (!confirm('Delete this webhook? The URL will stop working immediately.')) return;
+    try {
+      await api('/api/servers/' + state.server.id + '/channels/' + c.id + '/webhook', { method: 'DELETE' });
+      whApply(null);
+      toast('Webhook deleted', 'success');
+    } catch (err) { toast(err.message, 'error'); }
   });
 
   $('ec-save').addEventListener('click', async () => {
@@ -7621,14 +7660,12 @@ function openEditChannel(c) {
     }
     try {
       await api('/api/servers/' + state.server.id + '/channels/' + c.id, { method: 'PATCH', body: JSON.stringify(payload) });
-      /* Save the webhook alongside the channel when a URL is present. */
-      const whUrl = $('ec-wh-url') ? $('ec-wh-url').value.trim() : '';
-      if (whUrl) {
+      /* Keep the webhook's name / avatar / connected state in sync. */
+      if (whHas) {
         try {
           await api('/api/servers/' + state.server.id + '/channels/' + c.id + '/webhook', {
-            method: 'PUT',
+            method: 'PATCH',
             body: JSON.stringify({
-              url: whUrl,
               name: $('ec-wh-name').value.trim(),
               avatar_url: whAvatar,
               enabled: !!($('ec-wh-enabled') && $('ec-wh-enabled').checked)

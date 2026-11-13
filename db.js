@@ -389,9 +389,10 @@ function migrate() {
     }
   }
 
-  /* 1c-2. Per-channel outgoing webhook. A channel has at most one webhook.
-     When `enabled` is 1 every message posted in the channel is forwarded to
-     `url`, using `name` + `avatar_url` as the webhook's display identity.
+  /* 1c-2. Per-channel incoming webhook. A channel has at most one webhook.
+     The user presses "Create Webhook" and the server mints a random URL such
+     as https://host/api/webhooks/<token>. Anything POSTed to that URL is
+     posted into this channel under the webhook's name + avatar.
      Purely additive: the table is created if missing and never dropped. */
   try {
     db.exec(`CREATE TABLE IF NOT EXISTS channel_webhooks (
@@ -403,6 +404,19 @@ function migrate() {
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL
     )`);
+  } catch (e) {}
+  /* Later additions for the incoming-webhook flow. */
+  try {
+    const whCols = db.prepare('PRAGMA table_info(channel_webhooks)').all().map(c => c.name);
+    if (!whCols.includes('token')) {
+      try { db.exec('ALTER TABLE channel_webhooks ADD COLUMN token TEXT'); } catch (e) {}
+    }
+    if (!whCols.includes('bot_user_id')) {
+      try { db.exec('ALTER TABLE channel_webhooks ADD COLUMN bot_user_id TEXT'); } catch (e) {}
+    }
+    if (!whCols.includes('last_used_at')) {
+      try { db.exec('ALTER TABLE channel_webhooks ADD COLUMN last_used_at INTEGER'); } catch (e) {}
+    }
   } catch (e) {}
 
   // 1d. Additive migration for server member roles (owner / admin / member).
@@ -418,6 +432,15 @@ function migrate() {
   if (!memCols.includes('timeout_until')) {
     try { db.exec('ALTER TABLE server_members ADD COLUMN timeout_until INTEGER'); } catch (e) {}
   }
+  // 1d-4. Additive migration: hidden bot accounts that back incoming webhooks.
+  //        They are real user rows (so messages have a valid author) but must
+  //        never show up in search, member lists, or friends.
+  try {
+    const uCols = db.prepare('PRAGMA table_info(users)').all().map(c => c.name);
+    if (!uCols.includes('is_webhook')) {
+      try { db.exec('ALTER TABLE users ADD COLUMN is_webhook INTEGER DEFAULT 0'); } catch (e) {}
+    }
+  } catch (e) {}
   // Backfill: make sure every server owner is marked as 'owner' (never destructive).
   try {
     db.exec(`UPDATE server_members SET role = 'owner'

@@ -4064,6 +4064,10 @@ body[data-theme="light"] .update-card { box-shadow: 0 24px 70px rgba(0, 0, 0, .2
 .ec-wh-toggle:hover { border-color: transparent; background: transparent; }
 .ec-wh-body { padding: 16px; display: flex; flex-direction: column; gap: 14px; }
 .ec-wh-row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.ec-wh-urlrow { display: flex; gap: 8px; align-items: stretch; }
+.ec-wh-urlrow input { flex: 1; min-width: 0; font-family: ui-monospace, monospace; font-size: 12.5px; }
+.ec-wh-urlrow .btn { flex: 0 0 auto; padding: 8px 12px; font-size: 13px; white-space: nowrap; }
+.ec-wh-urlrow .btn:disabled { opacity: .45; cursor: not-allowed; }
 .ec-wh-avatar-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .ec-wh-avatar { width: 46px; height: 46px; border-radius: 50%; flex: 0 0 auto; display: grid; place-items: center; overflow: hidden; background: color-mix(in srgb, var(--chat-bg) 60%, #000); border: 1px solid var(--divider); color: var(--text-muted); }
 .ec-wh-avatar svg { width: 20px; height: 20px; }

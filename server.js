@@ -1087,57 +1087,115 @@ function safeWebhookAvatar(raw) {
   return null;
 }
 
-/* Fire-and-forget: forward a channel message to the channel's webhook.
-   Never throws, never blocks message delivery, never retries destructively.
-   A slow or dead webhook therefore cannot break or slow down chatting. */
-function dispatchChannelWebhook(ch, full) {
-  let wh;
-  try { wh = getChannelWebhook(ch.id); } catch (e) { return; }
-  if (!wh || !wh.enabled || !wh.url || !isValidWebhookUrl(wh.url)) return;
-
-  const author = (full && full.author) || {};
-  const displayName = (wh.name && String(wh.name).trim()) || author.display_name || author.username || 'Crossroads';
-  const avatar = wh.avatar_url || author.avatar_url || undefined;
-
-  let content = full && full.content ? String(full.content) : '';
-  /* Encrypted bodies are unreadable to the server; use the plaintext copy if
-     the client provided one, otherwise note that the message is encrypted. */
-  if (isEncryptedContent(content)) content = (full.plain && String(full.plain)) || '[encrypted message]';
-  if (full && full.attachment_url) {
-    const label = full.attachment_name || 'attachment';
-    content = (content ? content + '\n' : '') + `${label}: ${full.attachment_url}`;
-  }
-
-  const payload = {
-    content: (content || '').slice(0, 1900) || undefined,
-    username: String(displayName).slice(0, 80),
-    avatar_url: avatar || undefined,
-    /* Discord-compatible extras so generic receivers still get full context. */
-    embeds: [{
-      author: { name: `${author.display_name || author.username || 'Unknown'} (@${author.username || 'unknown'})` },
-      description: (content || '').slice(0, 1900) || undefined,
-      timestamp: new Date((full && full.created_at) || Date.now()).toISOString(),
-      footer: { text: `Crossroads \u00b7 #${ch.name}` }
-    }]
-  };
-
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 8000);
-  return fetch(wh.url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
-    signal: controller.signal
-  }).then(r => {
-    if (!r.ok) console.warn('[webhook] non-2xx', r.status, 'for channel', ch.id);
-    return { ok: r.ok, status: r.status };
-  }).catch(err => {
-    console.warn('[webhook] send failed for channel', ch.id, err && err.message);
-    return { ok: false, error: err && err.message };
-  }).finally(() => clearTimeout(timer));
+/* Absolute base URL used to build the public webhook endpoint. Render sets
+   RENDER_EXTERNAL_URL automatically; PUBLIC_BASE_URL can override it. */
+function webhookBaseUrl(req) {
+  const env = process.env.PUBLIC_BASE_URL || process.env.RENDER_EXTERNAL_URL;
+  if (env) return String(env).replace(/\/+$/, '');
+  const host = (req && req.get && req.get('host')) || 'localhost:3000';
+  const fwd = req && req.get && req.get('x-forwarded-proto');
+  const proto = fwd === 'https' || /onrender\.com$/i.test(host) ? 'https' : ((req && req.protocol) || 'http');
+  return proto + '://' + host;
 }
 
-/* ---------------- Mentions & notifications ---------------- */
+const webhookTokenGen = () => crypto.randomBytes(24).toString('base64url');
+
+/* Each webhook gets its own hidden bot account so the messages it posts have a
+   real author row (name + avatar) without polluting search or member lists. */
+function ensureWebhookBot(wh, name, avatarUrl) {
+  const display = String(name || 'Webhook').slice(0, 80);
+  let bot = wh.bot_user_id ? db.prepare('SELECT * FROM users WHERE id = ?').get(wh.bot_user_id) : null;
+  if (!bot) {
+    let username = display.toLowerCase().replace(/[^a-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 24) || 'webhook';
+    let disc = randomDiscriminator();
+    for (let i = 0; i < 8; i++) {
+      const clash = db.prepare('SELECT 1 FROM users WHERE LOWER(username) = LOWER(?) AND discriminator = ?').get(username, disc);
+      if (!clash) break;
+      disc = randomDiscriminator();
+    }
+    const id = 'wh_' + newId();
+    db.prepare(`INSERT INTO users (id, username, discriminator, email, password_hash, display_name, avatar_url, status, created_at, is_webhook)
+                VALUES (?,?,?,NULL,?,?,?,?,?,1)`)
+      .run(id, username, disc, 'x' + newId(), display, avatarUrl || null, 'offline', Date.now());
+    bot = db.prepare('SELECT * FROM users WHERE id = ?').get(id);
+    db.prepare('UPDATE channel_webhooks SET bot_user_id = ? WHERE channel_id = ?').run(id, wh.channel_id);
+  } else {
+    db.prepare('UPDATE users SET display_name = ?, avatar_url = ? WHERE id = ?')
+      .run(display, avatarUrl || null, bot.id);
+  }
+  return bot;
+}
+
+/* Create (or regenerate) the random webhook URL for a channel. */
+function mintChannelWebhook(req, ch, name, avatarUrl, enabled) {
+  const token = webhookTokenGen();
+  const url = webhookBaseUrl(req) + '/api/webhooks/' + token;
+  const now = Date.now();
+  const existing = getChannelWebhook(ch.id);
+  if (existing) {
+    db.prepare('UPDATE channel_webhooks SET url = ?, token = ?, name = ?, avatar_url = ?, enabled = ?, updated_at = ? WHERE channel_id = ?')
+      .run(url, token, name || null, avatarUrl || null, enabled ? 1 : 0, now, ch.id);
+  } else {
+    db.prepare('INSERT INTO channel_webhooks (channel_id, url, token, name, avatar_url, enabled, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?)')
+      .run(ch.id, url, token, name || null, avatarUrl || null, enabled ? 1 : 0, now, now);
+  }
+  const wh = getChannelWebhook(ch.id);
+  ensureWebhookBot(wh, wh.name, wh.avatar_url);
+  return getChannelWebhook(ch.id);
+}
+
+function webhookPublic(wh) {
+  if (!wh) return null;
+  return {
+    url: wh.url, token: wh.token || null, name: wh.name || '',
+    avatar_url: wh.avatar_url || null, enabled: !!wh.enabled,
+    created_at: wh.created_at, updated_at: wh.updated_at, last_used_at: wh.last_used_at || null
+  };
+}
+
+/* Extract readable text from the many shapes an external service may send:
+   Discord/Slack style JSON, plain text, form fields, or embeds. */
+function incomingWebhookText(body) {
+  if (body == null) return '';
+  if (typeof body === 'string') return body.trim();
+  const b = body || {};
+  let text = b.content || b.text || b.message || b.body || '';
+  if (!text && Array.isArray(b.embeds) && b.embeds.length) {
+    text = b.embeds.map(e => [e.title, e.description, e.url].filter(Boolean).join('\n')).join('\n\n');
+  }
+  if (!text && b.embed && typeof b.embed === 'object') {
+    text = [b.embed.title, b.embed.description].filter(Boolean).join('\n');
+  }
+  if (!text && Array.isArray(b.attachments) && b.attachments.length) {
+    text = b.attachments.map(a => a.url || a.text || '').filter(Boolean).join('\n');
+  }
+  if (!text && typeof b === 'object') {
+    const keys = Object.keys(b);
+    if (keys.length) { try { text = JSON.stringify(b); } catch (e) { text = ''; } }
+  }
+  return String(text || '').trim();
+}
+
+/* Insert a message into a channel on behalf of a webhook. Shared by the public
+   endpoint and the in-app "Send test" button. */
+function postWebhookMessage(wh, ch, rawText) {
+  const text = String(rawText || '').trim().slice(0, 4000);
+  if (!text) return null;
+  const bot = wh.bot_user_id ? db.prepare('SELECT * FROM users WHERE id = ?').get(wh.bot_user_id) : null;
+  if (!bot) return null;
+  const id = newId();
+  const now = Date.now();
+  db.prepare(`INSERT INTO messages (id, channel_id, user_id, content, created_at, mentions)
+              VALUES (?,?,?,?,?,?)`)
+    .run(id, ch.id, bot.id, text, now, '[]');
+  const m = db.prepare('SELECT * FROM messages WHERE id = ?').get(id);
+  const full = messageWithMeta(m, bot.id);
+  io.to(`channel:${ch.id}`).emit('message', full);
+  try { db.prepare('UPDATE channel_webhooks SET last_used_at = ? WHERE channel_id = ?').run(now, ch.id); } catch (e) {}
+  return full;
+}
+
+/* ---------------- Mentions & notifications ---------------- *//* ---------------- Mentions & notifications ---------------- */
 function parseMentionIds(content) {
   if (!content) return [];
   const names = new Set();
@@ -1701,10 +1759,10 @@ app.get('/api/users', auth, (req, res) => {
   const q = (req.query.q || '').trim();
   let rows;
   if (q) {
-    rows = db.prepare("SELECT * FROM users WHERE username LIKE ? OR (username || '#' || discriminator) LIKE ? LIMIT 25")
+    rows = db.prepare("SELECT * FROM users WHERE COALESCE(is_webhook,0) = 0 AND (username LIKE ? OR (username || '#' || discriminator) LIKE ?) LIMIT 25")
       .all(`%${q}%`, `%${q}%`);
   } else {
-    rows = db.prepare('SELECT * FROM users WHERE id != ? ORDER BY created_at DESC LIMIT 25').all(req.user.id);
+    rows = db.prepare('SELECT * FROM users WHERE id != ? AND COALESCE(is_webhook,0) = 0 ORDER BY created_at DESC LIMIT 25').all(req.user.id);
   }
   res.json({ users: rows.map(publicUser) });
 });
@@ -2110,73 +2168,101 @@ app.patch('/api/servers/:id/channels/:cid', auth, (req, res) => {
   res.json({ channel: updated });
 });
 
-/* -------- Channel webhook: read / save / remove (manage_channels only) -------- */
+/* -------- Channel incoming webhook (manage_channels only) -------- */
+function webhookChannelFor(req) {
+  const srv = getServerForUser(req.params.id, req.user.id);
+  if (!srv) return { error: [404, 'Server not found'] };
+  if (!hasPerm(srv, req.user.id, 'manage_channels')) return { error: [403, 'You need the Manage Channels permission'] };
+  const ch = db.prepare('SELECT * FROM channels WHERE id = ? AND server_id = ?').get(req.params.cid, srv.id);
+  if (!ch) return { error: [404, 'Channel not found'] };
+  return { srv, ch };
+}
+
 app.get('/api/servers/:id/channels/:cid/webhook', auth, (req, res) => {
-  const srv = getServerForUser(req.params.id, req.user.id);
-  if (!srv) return res.status(404).json({ error: 'Server not found' });
-  if (!hasPerm(srv, req.user.id, 'manage_channels')) return res.status(403).json({ error: 'You need the Manage Channels permission' });
-  const ch = db.prepare('SELECT * FROM channels WHERE id = ? AND server_id = ?').get(req.params.cid, srv.id);
-  if (!ch) return res.status(404).json({ error: 'Channel not found' });
-  const wh = getChannelWebhook(ch.id);
-  res.json({ webhook: wh ? {
-    url: wh.url, name: wh.name || '', avatar_url: wh.avatar_url || null,
-    enabled: !!wh.enabled, created_at: wh.created_at, updated_at: wh.updated_at
-  } : null });
+  const { error, ch } = webhookChannelFor(req);
+  if (error) return res.status(error[0]).json({ error: error[1] });
+  res.json({ webhook: webhookPublic(getChannelWebhook(ch.id)) });
 });
 
-app.put('/api/servers/:id/channels/:cid/webhook', auth, (req, res) => {
-  const srv = getServerForUser(req.params.id, req.user.id);
-  if (!srv) return res.status(404).json({ error: 'Server not found' });
-  if (!hasPerm(srv, req.user.id, 'manage_channels')) return res.status(403).json({ error: 'You need the Manage Channels permission' });
-  const ch = db.prepare('SELECT * FROM channels WHERE id = ? AND server_id = ?').get(req.params.cid, srv.id);
-  if (!ch) return res.status(404).json({ error: 'Channel not found' });
+/* Create the webhook (mints a random URL) or regenerate its token. */
+app.post('/api/servers/:id/channels/:cid/webhook', auth, (req, res) => {
+  const { error, ch } = webhookChannelFor(req);
+  if (error) return res.status(error[0]).json({ error: error[1] });
   const body = req.body || {};
-  const url = String(body.url || '').trim();
-  if (!isValidWebhookUrl(url)) return res.status(400).json({ error: 'Enter a valid http(s) webhook URL' });
-  const name = String(body.name || '').trim().slice(0, 80) || null;
+  const name = String(body.name || '').trim().slice(0, 80) || (ch.name + ' webhook');
   const avatar_url = safeWebhookAvatar(body.avatar_url);
-  const enabled = body.enabled === false || body.enabled === 0 || body.enabled === '0' ? 0 : 1;
-  const now = Date.now();
-  const existing = getChannelWebhook(ch.id);
-  if (existing) {
-    db.prepare('UPDATE channel_webhooks SET url = ?, name = ?, avatar_url = ?, enabled = ?, updated_at = ? WHERE channel_id = ?')
-      .run(url, name, avatar_url, enabled, now, ch.id);
-  } else {
-    db.prepare('INSERT INTO channel_webhooks (channel_id, url, name, avatar_url, enabled, created_at, updated_at) VALUES (?,?,?,?,?,?,?)')
-      .run(ch.id, url, name, avatar_url, enabled, now, now);
-  }
-  const wh = getChannelWebhook(ch.id);
-  res.json({ webhook: {
-    url: wh.url, name: wh.name || '', avatar_url: wh.avatar_url || null,
-    enabled: !!wh.enabled, created_at: wh.created_at, updated_at: wh.updated_at
-  } });
+  const enabled = body.enabled === false || body.enabled === 0 ? 0 : 1;
+  const wh = mintChannelWebhook(req, ch, name, avatar_url, enabled);
+  res.json({ webhook: webhookPublic(wh) });
 });
 
-app.post('/api/servers/:id/channels/:cid/webhook/test', auth, async (req, res) => {
-  const srv = getServerForUser(req.params.id, req.user.id);
-  if (!srv) return res.status(404).json({ error: 'Server not found' });
-  if (!hasPerm(srv, req.user.id, 'manage_channels')) return res.status(403).json({ error: 'You need the Manage Channels permission' });
-  const ch = db.prepare('SELECT * FROM channels WHERE id = ? AND server_id = ?').get(req.params.cid, srv.id);
-  if (!ch) return res.status(404).json({ error: 'Channel not found' });
+/* Update name / avatar / enabled without touching the URL. */
+app.patch('/api/servers/:id/channels/:cid/webhook', auth, (req, res) => {
+  const { error, ch } = webhookChannelFor(req);
+  if (error) return res.status(error[0]).json({ error: error[1] });
   const wh = getChannelWebhook(ch.id);
-  if (!wh || !wh.enabled) return res.status(400).json({ error: 'Connect and save a webhook first' });
-  const result = await dispatchChannelWebhook(ch, {
-    content: 'This is a test message from Crossroads \u2014 your webhook is connected.',
-    created_at: Date.now(),
-    author: { display_name: req.user.display_name, username: req.user.username, avatar_url: req.user.avatar_url }
-  });
-  if (result && result.ok) return res.json({ ok: true, status: result.status });
-  return res.status(502).json({ error: 'Webhook endpoint did not accept the test message' + (result && result.status ? ' (HTTP ' + result.status + ')' : '') });
+  if (!wh) return res.status(404).json({ error: 'This channel has no webhook yet' });
+  const body = req.body || {};
+  const name = 'name' in body ? (String(body.name || '').trim().slice(0, 80) || null) : wh.name;
+  const avatar_url = 'avatar_url' in body ? safeWebhookAvatar(body.avatar_url) : wh.avatar_url;
+  const enabled = 'enabled' in body ? (body.enabled === false || body.enabled === 0 ? 0 : 1) : wh.enabled;
+  db.prepare('UPDATE channel_webhooks SET name = ?, avatar_url = ?, enabled = ?, updated_at = ? WHERE channel_id = ?')
+    .run(name, avatar_url, enabled, Date.now(), ch.id);
+  const updated = getChannelWebhook(ch.id);
+  ensureWebhookBot(updated, updated.name, updated.avatar_url);
+  res.json({ webhook: webhookPublic(getChannelWebhook(ch.id)) });
+});
+
+/* In-app test: posts a message through the same path an external caller uses. */
+app.post('/api/servers/:id/channels/:cid/webhook/test', auth, (req, res) => {
+  const { error, ch } = webhookChannelFor(req);
+  if (error) return res.status(error[0]).json({ error: error[1] });
+  const wh = getChannelWebhook(ch.id);
+  if (!wh || !wh.token) return res.status(400).json({ error: 'Create a webhook first' });
+  if (!wh.enabled) return res.status(400).json({ error: 'This webhook is paused' });
+  const msg = postWebhookMessage(wh, ch, 'This is a test message from Crossroads \u2014 your webhook is working.');
+  if (!msg) return res.status(500).json({ error: 'Could not post the test message' });
+  res.json({ ok: true, message_id: msg.id });
 });
 
 app.delete('/api/servers/:id/channels/:cid/webhook', auth, (req, res) => {
-  const srv = getServerForUser(req.params.id, req.user.id);
-  if (!srv) return res.status(404).json({ error: 'Server not found' });
-  if (!hasPerm(srv, req.user.id, 'manage_channels')) return res.status(403).json({ error: 'You need the Manage Channels permission' });
-  const ch = db.prepare('SELECT * FROM channels WHERE id = ? AND server_id = ?').get(req.params.cid, srv.id);
-  if (!ch) return res.status(404).json({ error: 'Channel not found' });
+  const { error, ch } = webhookChannelFor(req);
+  if (error) return res.status(error[0]).json({ error: error[1] });
+  const wh = getChannelWebhook(ch.id);
   db.prepare('DELETE FROM channel_webhooks WHERE channel_id = ?').run(ch.id);
+  if (wh && wh.bot_user_id) {
+    try { db.prepare('DELETE FROM users WHERE id = ? AND is_webhook = 1').run(wh.bot_user_id); } catch (e) {}
+  }
   res.json({ ok: true });
+});
+
+/* -------- Public receiver: anything POSTed here lands in the channel -------- */
+/* Simple in-memory flood guard so a leaked URL cannot be used to spam a channel
+   at machine speed. 30 messages per minute per token. */
+const webhookHits = new Map();
+function webhookRateLimited(token) {
+  const now = Date.now();
+  const arr = (webhookHits.get(token) || []).filter(t => now - t < 60000);
+  arr.push(now);
+  webhookHits.set(token, arr);
+  if (webhookHits.size > 5000) webhookHits.clear();
+  return arr.length > 30;
+}
+
+app.post('/api/webhooks/:token', (req, res) => {
+  const token = String(req.params.token || '');
+  if (!token || token.length < 16) return res.status(404).json({ error: 'Unknown webhook' });
+  if (webhookRateLimited(token)) return res.status(429).json({ error: 'Too many messages, slow down' });
+  const wh = db.prepare('SELECT * FROM channel_webhooks WHERE token = ?').get(token);
+  if (!wh) return res.status(404).json({ error: 'Unknown webhook' });
+  if (!wh.enabled) return res.status(403).json({ error: 'This webhook is paused' });
+  const ch = db.prepare('SELECT * FROM channels WHERE id = ?').get(wh.channel_id);
+  if (!ch) return res.status(404).json({ error: 'Channel no longer exists' });
+  const text = incomingWebhookText(req.body);
+  if (!text) return res.status(400).json({ error: 'No message content found' });
+  const msg = postWebhookMessage(wh, ch, text);
+  if (!msg) return res.status(500).json({ error: 'Could not post the message' });
+  res.json({ ok: true, id: msg.id, channel_id: ch.id });
 });
 
 /* Delete a channel and all of its messages (owner + admins). */
@@ -2191,6 +2277,11 @@ app.delete('/api/servers/:id/channels/:cid', auth, (req, res) => {
   const wipe = db.transaction(() => {
     db.prepare('DELETE FROM reactions WHERE message_id IN (SELECT id FROM messages WHERE channel_id = ?)').run(ch.id);
     db.prepare('DELETE FROM messages WHERE channel_id = ?').run(ch.id);
+    try {
+      const wh = db.prepare('SELECT bot_user_id FROM channel_webhooks WHERE channel_id = ?').get(ch.id);
+      if (wh && wh.bot_user_id) db.prepare('DELETE FROM users WHERE id = ? AND is_webhook = 1').run(wh.bot_user_id);
+      db.prepare('DELETE FROM channel_webhooks WHERE channel_id = ?').run(ch.id);
+    } catch (e) {}
     db.prepare('DELETE FROM channels WHERE id = ?').run(ch.id);
   });
   wipe();
@@ -2658,6 +2749,11 @@ app.delete('/api/servers/:id', auth, (req, res) => {
     for (const cid of chans) {
       db.prepare('DELETE FROM reactions WHERE message_id IN (SELECT id FROM messages WHERE channel_id = ?)').run(cid);
       db.prepare('DELETE FROM messages WHERE channel_id = ?').run(cid);
+      try {
+        const wh = db.prepare('SELECT bot_user_id FROM channel_webhooks WHERE channel_id = ?').get(cid);
+        if (wh && wh.bot_user_id) db.prepare('DELETE FROM users WHERE id = ? AND is_webhook = 1').run(wh.bot_user_id);
+        db.prepare('DELETE FROM channel_webhooks WHERE channel_id = ?').run(cid);
+      } catch (e) {}
     }
     db.prepare('DELETE FROM channels WHERE server_id = ?').run(srv.id);
     db.prepare('DELETE FROM server_members WHERE server_id = ?').run(srv.id);
@@ -2735,9 +2831,6 @@ app.post('/api/channels/:id/messages', auth, (req, res) => {
   const m = db.prepare('SELECT * FROM messages WHERE id = ?').get(id);
   const full = messageWithMeta(m, req.user.id);
   io.to(`channel:${ch.id}`).emit('message', full);
-  /* Forward to the channel's webhook (if one is connected). Fire-and-forget so
-     a slow endpoint can never delay or fail the message send. */
-  dispatchChannelWebhook(ch, full);
   const ctx = { kind: 'channel', channel_id: ch.id, server_id: ch.server_id, channel_name: ch.name };
   for (const uid of mentionIds) createNotification(uid, 'mention', Object.assign({ message: full }, ctx));
   if (reply_to_id) {
