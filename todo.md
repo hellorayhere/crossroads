@@ -17,6 +17,6 @@
 - [x] Visual verification in browser (2-col grid, 40px toggle, no overflow)
 
 ## C. Ship
-- [ ] Commit + push to main
-- [ ] Trigger Render deploy, poll until live
-- [ ] Verify live site loads and CSS contains new rules
+- [x] Commit + push to main
+- [x] Trigger Render deploy, poll until live (dep-dbrajmk9v7es73c1cek0)
+- [x] Verify live site loads and CSS/JS contain new rules
