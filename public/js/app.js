@@ -7581,6 +7581,14 @@ function openEditChannel(c) {
           </div>
         </div>
         <div class="ec-wh-status" id="ec-wh-status"></div>
+        <div class="ec-wh-compose">
+          <label class="ec-wh-compose-label">Send a Message</label>
+          <div class="ec-wh-compose-row">
+            <textarea id="ec-wh-msg" rows="2" maxlength="2000" placeholder="Type a message to post in #${escapeHtml(c.name)} as this webhook…"></textarea>
+            <button class="btn" id="ec-wh-send">${icon('send')} Send Message</button>
+          </div>
+          <div class="hint">Posts immediately through the webhook, exactly like an outside service would.</div>
+        </div>
         <div class="ec-wh-actions">
           <button class="btn" id="ec-wh-create">${icon('plus')} <span id="ec-wh-create-label">Create Webhook</span></button>
           <button class="btn secondary" id="ec-wh-test">${icon('send')} Send test</button>
@@ -7654,7 +7662,16 @@ function openEditChannel(c) {
     copyToClipboard(url, 'Webhook URL');
   });
   $('ec-wh-create').addEventListener('click', async () => {
-    if (whHas && !confirm('Regenerate the webhook URL? The old URL will stop working.')) return;
+    if (whHas) {
+      const ok = await confirmDialog({
+        title: 'Regenerate webhook URL?',
+        body: 'A new URL will be created and the old URL will stop working immediately. Any service still pointing at the old URL will fail to send.',
+        confirmText: 'Regenerate URL',
+        cancelText: 'Keep Current',
+        danger: true
+      });
+      if (!ok) return;
+    }
     try {
       whStatus(whHas ? 'Regenerating\u2026' : 'Creating\u2026', '');
       const { webhook } = await api('/api/servers/' + state.server.id + '/channels/' + c.id + '/webhook', {
@@ -7669,6 +7686,25 @@ function openEditChannel(c) {
       toast(whHas ? 'Webhook URL regenerated' : 'Webhook created', 'success');
     } catch (err) { whStatus(err.message, 'err'); toast(err.message, 'error'); }
   });
+  $('ec-wh-send').addEventListener('click', async () => {
+    if (!whHas) { toast('Create a webhook first', 'error'); return; }
+    const box = $('ec-wh-msg');
+    const content = box.value.trim();
+    if (!content) { toast('Type a message first', 'error'); box.focus(); return; }
+    const btn = $('ec-wh-send');
+    btn.disabled = true;
+    whStatus('Sending\u2026', '');
+    try {
+      await api('/api/servers/' + state.server.id + '/channels/' + c.id + '/webhook/send', {
+        method: 'POST',
+        body: JSON.stringify({ content })
+      });
+      box.value = '';
+      whStatus('Message sent to #' + c.name + '.', 'ok');
+      toast('Message sent', 'success');
+    } catch (err) { whStatus(err.message, 'err'); toast(err.message, 'error'); }
+    finally { btn.disabled = false; }
+  });
   $('ec-wh-test').addEventListener('click', async () => {
     if (!whHas) { toast('Create a webhook first', 'error'); return; }
     whStatus('Sending test\u2026', '');
@@ -7680,7 +7716,13 @@ function openEditChannel(c) {
   });
   $('ec-wh-disconnect').addEventListener('click', async () => {
     if (!whHas) return;
-    if (!confirm('Delete this webhook? The URL will stop working immediately.')) return;
+    const ok = await confirmDialog({
+      title: 'Delete this webhook?',
+      body: 'The URL will stop working immediately and messages sent to it will be rejected.',
+      confirmText: 'Delete Webhook',
+      danger: true
+    });
+    if (!ok) return;
     try {
       await api('/api/servers/' + state.server.id + '/channels/' + c.id + '/webhook', { method: 'DELETE' });
       whApply(null);

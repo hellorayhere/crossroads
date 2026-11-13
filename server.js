@@ -106,6 +106,12 @@ function effectiveStatus(uid, dbStatus) {
   return dbStatus || 'online';
 }
 
+/* Webhook senders are wildly inconsistent: some post JSON, some raw text, some
+   a form body, and a few send a JSON content-type with a body that is not valid
+   JSON. Capturing the raw bytes for the webhook routes first means none of them
+   ever fail on body parsing — the handler decodes whatever arrived. */
+app.use(['/api/webhooks', '/webhooks'], express.raw({ type: () => true, limit: '2mb' }));
+
 app.use(express.json({ limit: '25mb' }));
 app.use(express.urlencoded({ extended: true }));
 /* Uploads are user-supplied, so they are served with hardening headers. Media
@@ -2274,6 +2280,21 @@ app.post('/api/servers/:id/channels/:cid/webhook/test', auth, (req, res) => {
   res.json({ ok: true, message_id: msg.id });
 });
 
+/* Post a custom message through the webhook from the Edit Channel panel, so the
+   owner can try the exact text a third-party service would send. */
+app.post('/api/servers/:id/channels/:cid/webhook/send', auth, (req, res) => {
+  const { error, ch } = webhookChannelFor(req);
+  if (error) return res.status(error[0]).json({ error: error[1] });
+  const wh = getChannelWebhook(ch.id);
+  if (!wh || !wh.token) return res.status(400).json({ error: 'Create a webhook first' });
+  if (!wh.enabled) return res.status(400).json({ error: 'This webhook is paused' });
+  const content = String((req.body && req.body.content) || '').trim();
+  if (!content) return res.status(400).json({ error: 'Type a message first' });
+  const msg = postWebhookMessage(wh, ch, content, null);
+  if (!msg) return res.status(500).json({ error: 'Could not send the message' });
+  res.json({ ok: true, message_id: msg.id, message: msg });
+});
+
 app.delete('/api/servers/:id/channels/:cid/webhook', auth, (req, res) => {
   const { error, ch } = webhookChannelFor(req);
   if (error) return res.status(error[0]).json({ error: error[1] });
@@ -2298,22 +2319,126 @@ function webhookRateLimited(token) {
   return arr.length > 30;
 }
 
-app.post('/api/webhooks/:token', (req, res) => {
-  const token = String(req.params.token || '');
-  if (!token || token.length < 16) return res.status(404).json({ error: 'Unknown webhook' });
-  if (webhookRateLimited(token)) return res.status(429).json({ error: 'Too many messages, slow down' });
-  const wh = db.prepare('SELECT * FROM channel_webhooks WHERE token = ?').get(token);
-  if (!wh) return res.status(404).json({ error: 'Unknown webhook' });
-  if (!wh.enabled) return res.status(403).json({ error: 'This webhook is paused' });
+/* Third-party senders expect very different URL shapes. Discord uses
+   /api/webhooks/<id>/<token>, Slack-style tools POST raw text, and most clients
+   probe the URL with GET (or an OPTIONS preflight) before sending. Serving only
+   POST /api/webhooks/<token> made all of those report "webhook does not exist".
+   These routes accept every common shape and resolve the token from either
+   path segment. */
+function findWebhookBySegments(params) {
+  const cands = [params.token, params.extra].filter(Boolean).map(String);
+  for (const c of cands) {
+    if (c.length < 16) continue;
+    const wh = db.prepare('SELECT * FROM channel_webhooks WHERE token = ?').get(c);
+    if (wh) return wh;
+  }
+  /* Fall back to matching the tail of the stored URL, which covers proxies that
+     rewrite the path (e.g. /hooks/<token> behind a gateway). */
+  for (const c of cands) {
+    if (c.length < 16) continue;
+    const wh = db.prepare("SELECT * FROM channel_webhooks WHERE url LIKE ?").get('%/' + c);
+    if (wh) return wh;
+  }
+  return null;
+}
+
+function webhookCors(req, res) {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PATCH, DELETE, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
+  res.setHeader('Access-Control-Max-Age', '86400');
+}
+
+/* Turn the captured raw bytes into something the message builder understands:
+   a parsed JSON object when possible, otherwise the decoded text. */
+function decodeWebhookBody(req) {
+  let b = req.body;
+  if (Buffer.isBuffer(b)) b = b.toString('utf8');
+  if (typeof b === 'string') {
+    const s = b.trim();
+    if (!s) return '';
+    if (s[0] === '{' || s[0] === '[') {
+      try { return JSON.parse(s); } catch (e) { return s; }
+    }
+    return s;
+  }
+  return b;
+}
+
+const WEBHOOK_PATHS = [
+  '/api/webhooks/:token',
+  '/api/webhooks/:token/:extra',
+  '/webhooks/:token',
+  '/webhooks/:token/:extra'
+];
+
+
+app.options(WEBHOOK_PATHS, (req, res) => { webhookCors(req, res); res.status(204).end(); });
+
+app.all(WEBHOOK_PATHS, (req, res) => {
+  webhookCors(req, res);
+  if (req.method === 'OPTIONS') return res.status(204).end();
+
+  const wh = findWebhookBySegments(req.params);
+  if (!wh) return res.status(404).json({ error: 'Unknown webhook', code: 10015 });
+
   const ch = db.prepare('SELECT * FROM channels WHERE id = ?').get(wh.channel_id);
-  if (!ch) return res.status(404).json({ error: 'Channel no longer exists' });
-  const embed = incomingWebhookEmbed(req.body);
-  const text = incomingWebhookText(req.body);
+  if (!ch) return res.status(404).json({ error: 'Channel no longer exists', code: 10003 });
+
+  const bot = wh.bot_user_id ? db.prepare('SELECT * FROM users WHERE id = ?').get(wh.bot_user_id) : null;
+  const info = {
+    id: wh.channel_id,
+    type: 1,
+    guild_id: ch.server_id,
+    channel_id: ch.id,
+    name: (wh.name || (bot && bot.display_name) || 'Crossroads'),
+    avatar: wh.avatar_url || null,
+    token: wh.token,
+    url: wh.url,
+    enabled: !!wh.enabled
+  };
+
+  /* Clients verify a webhook with GET before they ever send to it. Answering
+     with the webhook object makes those checks pass. */
+  if (req.method === 'GET' || req.method === 'HEAD') return res.json(info);
+
+  /* Deleting through the API should not silently remove a channel's webhook
+     from a third-party tool, so acknowledge it without side effects. */
+  if (req.method === 'DELETE') return res.status(204).end();
+
+  const body = decodeWebhookBody(req);
+
+  if (req.method === 'PATCH') {
+    const b = (body && typeof body === 'object') ? body : {};
+    const name = typeof b.name === 'string' ? b.name.slice(0, 80) : null;
+    const avatar = typeof b.avatar_url === 'string' ? b.avatar_url.slice(0, 2000) : null;
+    try {
+      if (name != null || avatar != null) {
+        db.prepare('UPDATE channel_webhooks SET name = COALESCE(?, name), avatar_url = COALESCE(?, avatar_url), updated_at = ? WHERE channel_id = ?')
+          .run(name, avatar, Date.now(), wh.channel_id);
+        if (bot && name != null) db.prepare('UPDATE users SET display_name = ? WHERE id = ?').run(name, bot.id);
+      }
+    } catch (e) {}
+    return res.json(info);
+  }
+
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+
+  if (webhookRateLimited(wh.token)) return res.status(429).json({ error: 'Too many messages, slow down' });
+  if (!wh.enabled) return res.status(403).json({ error: 'This webhook is paused' });
+
+  const embed = incomingWebhookEmbed(body);
+  const text = incomingWebhookText(body);
   if (!text && !embed) return res.status(400).json({ error: 'No message content found' });
   const msg = postWebhookMessage(wh, ch, text, embed);
   if (!msg) return res.status(500).json({ error: 'Could not post the message' });
+
+  /* Discord returns the created message when ?wait=true is passed. */
+  const wantsWait = String(req.query.wait || '') === 'true' || String(req.query.wait || '') === '1';
+  if (wantsWait) return res.json(Object.assign({ ok: true, channel_id: ch.id }, msg));
   res.json({ ok: true, id: msg.id, channel_id: ch.id });
 });
+
 
 /* Delete a channel and all of its messages (owner + admins). */
 app.delete('/api/servers/:id/channels/:cid', auth, (req, res) => {
