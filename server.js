@@ -97,8 +97,14 @@ const DANGEROUS_EXT = new Set([
   '.html', '.htm', '.xhtml', '.svg', '.svgz', '.xml', '.xhtml'
 ]);
 app.use('/uploads', express.static(UPLOAD_DIR, {
+  /* Filenames are random ids and never reused, so uploads are safe to cache
+     for a year. Long-lived caching removes the re-download delay when a
+     video/image is re-rendered (e.g. after a fullscreen toggle). */
+  maxAge: '365d',
+  immutable: true,
   setHeaders(res, filePath) {
     res.set('X-Content-Type-Options', 'nosniff');
+    res.set('Cache-Control', 'public, max-age=31536000, immutable');
     res.set('Content-Security-Policy', "default-src 'none'; img-src 'self'; media-src 'self'; style-src 'unsafe-inline'");
     const ext = path.extname(filePath).toLowerCase();
     if (DANGEROUS_EXT.has(ext)) {
@@ -196,10 +202,23 @@ function startKeepAlive() {
 }
 
 /* ---------------- Uploads ---------------- */
+/* Browsers and some clients send files with no extension (or a wrong one).
+   Deriving the extension from the MIME type keeps the served Content-Type and
+   the <video>/<img> element in agreement, which is what makes playback work. */
+const MIME_EXT = {
+  'video/mp4': '.mp4', 'video/webm': '.webm', 'video/ogg': '.ogv', 'video/quicktime': '.mov',
+  'video/x-matroska': '.mkv', 'video/x-msvideo': '.avi',
+  'audio/mpeg': '.mp3', 'audio/ogg': '.ogg', 'audio/wav': '.wav', 'audio/webm': '.weba',
+  'audio/mp4': '.m4a', 'audio/aac': '.aac', 'audio/flac': '.flac',
+  'image/png': '.png', 'image/jpeg': '.jpg', 'image/gif': '.gif', 'image/webp': '.webp',
+  'image/avif': '.avif', 'image/svg+xml': '.svg', 'image/bmp': '.bmp',
+  'application/pdf': '.pdf', 'application/zip': '.zip'
+};
 const storage = multer.diskStorage({
   destination: (req, file, cb) => cb(null, UPLOAD_DIR),
   filename: (req, file, cb) => {
-    const ext = path.extname(file.originalname) || '';
+    let ext = path.extname(file.originalname || '') || '';
+    if (!ext) ext = MIME_EXT[String(file.mimetype || '').toLowerCase()] || '';
     cb(null, `${newId()}${ext}`);
   }
 });
@@ -786,9 +805,13 @@ function replyPreviewOf(m) {
   const orig = db.prepare('SELECT * FROM messages WHERE id = ?').get(m.reply_to_id);
   if (!orig) return null;
   const author = db.prepare('SELECT * FROM users WHERE id = ?').get(orig.user_id);
+  const enc = isEncryptedContent(orig.content);
   return {
     id: orig.id,
-    content: orig.content,
+    /* Never leak the raw E2E envelope into a reply preview. The client paints
+       the real text once it decrypts the quoted message. */
+    content: enc ? null : orig.content,
+    encrypted: enc,
     attachment_url: orig.attachment_url,
     attachment_name: orig.attachment_name,
     attachment_type: orig.attachment_type,
@@ -851,9 +874,11 @@ function messagesWithMeta(rows, currentUserId) {
       for (const u of db.prepare(`SELECT * FROM users WHERE id IN (${ph2})`).all(...origAuthorIds)) origAuthors[u.id] = u;
     }
     for (const o of origs) {
+      const enc = isEncryptedContent(o.content);
       replyMap[o.id] = {
         id: o.id,
-        content: o.content,
+        content: enc ? null : o.content,
+        encrypted: enc,
         attachment_url: o.attachment_url,
         attachment_name: o.attachment_name,
         attachment_type: o.attachment_type,
@@ -2710,14 +2735,19 @@ app.get('/api/embed', auth, async (req, res) => {
 /* ---------------- Upload ----------------
    Accepts any file type (images, video, audio, archives, documents…).
    Hard limit: 250 MB. */
-app.post('/api/upload', auth, (req, res) => {
-  upload.single('file')(req, res, (err) => {
+app.post('/api/upload', auth, async (req, res) => {
+  upload.single('file')(req, res, async (err) => {
     if (err) {
       if (err.code === 'LIMIT_FILE_SIZE') return res.status(413).json({ error: 'File is too large (maximum 250 MB)' });
       return res.status(400).json({ error: err.message || 'Upload failed' });
     }
     if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
-    persist.backupUpload(req.file.filename);
+    /* Mirror to the durable store before responding. Fire-and-forget could race
+       a follow-up message that references the URL, and a rejected promise here
+       used to surface as an unhandled rejection. Failure is non-fatal: the file
+       is already on local disk and reconcileUploads() will retry at next boot. */
+    try { await persist.backupUpload(req.file.filename); }
+    catch (e) { console.log('[upload] backup failed (will retry):', e.message); }
     res.json({
       url: `/uploads/${req.file.filename}`,
       name: req.file.originalname,

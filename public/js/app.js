@@ -1881,21 +1881,71 @@ function showGlobalBanner(d) {
     }
   }
   if (!content && d.maintenance) {
-    title = 'Maintenance in progress';
-    content = d.maintenance_message || 'Some features may be temporarily unavailable.';
-    level = 'warning';
-    key = 'maintenance';
+    renderMaintenanceBanner(d.maintenance_message);
+    return;
   }
   if (!content) return;
   const el = document.createElement('div');
   el.className = 'global-banner ' + level;
-  el.innerHTML = `<div><b>${escapeHtml(title)}</b><span>${escapeHtml(content)}</span></div><button title="Dismiss">${icon('xmark')}</button>`;
+  el.innerHTML = `<div class="gb-ico">${icon(level === 'critical' ? 'circle-exclamation' : (level === 'success' ? 'check' : 'bell'))}</div>
+    <div class="gb-main"><div class="gb-head"><span class="gb-title">${escapeHtml(title)}</span></div>
+    <div class="gb-text">${escapeHtml(content)}</div></div>
+    <button class="gb-close" title="Dismiss">${icon('xmark')}</button>`;
   document.body.appendChild(el);
   hydrateIcons(el);
-  el.querySelector('button').addEventListener('click', () => {
+  el.querySelector('.gb-close').addEventListener('click', () => {
     if (key) sessionStorage.setItem('cr_ann_dismissed', key);
-    el.remove();
+    el.classList.add('leaving');
+    setTimeout(() => el.remove(), 200);
   });
+}
+
+/* ------------------------------------------------------------
+   Maintenance notice
+   ------------------------------------------------------------
+   A proper status card instead of the old one-line strip: an icon, a title,
+   the operator's message, a live "we're on it" line and a dismiss button.
+   While it is on screen we re-check the flag every 45s, so the card removes
+   itself the moment maintenance is switched off (no stale warning left
+   sitting on people's screens). */
+let maintenancePoll = null;
+
+function renderMaintenanceBanner(message) {
+  const el = document.createElement('div');
+  el.className = 'global-banner maintenance';
+  el.setAttribute('role', 'status');
+  el.setAttribute('aria-live', 'polite');
+  el.innerHTML = `
+    <div class="gb-ico" aria-hidden="true"><span class="gb-ring"></span>${icon('settings')}</div>
+    <div class="gb-main">
+      <div class="gb-head">
+        <span class="gb-title">Maintenance in progress</span>
+        <span class="gb-pill">Live</span>
+      </div>
+      <div class="gb-text">${escapeHtml(message || 'Some features may be temporarily unavailable.')}</div>
+      <div class="gb-foot"><span class="gb-dot" aria-hidden="true"></span>We're working on it — messaging keeps working while we do.</div>
+    </div>
+    <button class="gb-close" title="Dismiss" aria-label="Dismiss maintenance notice">${icon('xmark')}</button>
+    <div class="gb-progress" aria-hidden="true"></div>`;
+  document.body.appendChild(el);
+  hydrateIcons(el);
+  el.querySelector('.gb-close').addEventListener('click', () => {
+    el.classList.add('leaving');
+    setTimeout(() => el.remove(), 220);
+  });
+
+  if (!maintenancePoll) {
+    maintenancePoll = setInterval(async () => {
+      try {
+        const d = await api('/api/global-messages');
+        if (!d || !d.maintenance) {
+          const cur = document.querySelector('.global-banner.maintenance');
+          if (cur) { cur.classList.add('leaving'); setTimeout(() => cur.remove(), 220); }
+          clearInterval(maintenancePoll); maintenancePoll = null;
+        }
+      } catch (e) { /* keep the notice up while we cannot confirm */ }
+    }, 45000);
+  }
 }
 
 /* ============================================================
@@ -1916,7 +1966,8 @@ function connectSocket() {
      stalled), which is the "nothing loads in real time" bug. */
   socket.on('message', (m) => {
     if (state.channel && m.channel_id === state.channel.id) {
-      state.messages.push(m); appendMessage(m);
+      /* Render first (skeleton for ciphertext), decrypt in place. */
+      if (upsertMessage(m)) appendMessage(m); else updateMessageNode(m);
       e2eDecryptMessage(m).then(() => updateMessageNode(m)).catch(() => {});
     } else {
       e2eDecryptMessage(m).catch(() => {});
@@ -1924,7 +1975,7 @@ function connectSocket() {
   });
   socket.on('dm_message', (m) => {
     if (state.dm && m.dm_id === state.dm.id) {
-      state.messages.push(m); appendMessage(m);
+      if (upsertMessage(m)) appendMessage(m); else updateMessageNode(m);
       e2eDecryptMessage(m).then(() => updateMessageNode(m)).catch(() => {});
     } else {
       e2eDecryptMessage(m).catch(() => {});
@@ -1937,7 +1988,7 @@ function connectSocket() {
       const who = fullTag(data.message.author);
       bumpDmUnread(data.dm_id);
       await e2eDecryptMessage(data.message);
-      maybeDesktopNotify('New message from ' + who, data.message.content || '');
+      maybeDesktopNotify('New message from ' + who, isE2EContent(data.message.content) ? 'Sent you an encrypted message' : (data.message.content || ''));
       if (setting('notifSounds') !== false) playPing();
     }
   });
@@ -3873,11 +3924,58 @@ function renderMessages() {
   scrollToBottom();
 }
 
+/* True when a string is a raw end-to-end encrypted envelope. The reply preview
+   used to print that envelope verbatim ("\u0001E2E1:{\"v\":2,...}") because the
+   server can only hand back ciphertext and the client rendered it before the
+   decryption pass ran. Nothing that looks like an envelope may ever reach the
+   DOM - see replyPreviewText(). */
+function isE2EContent(s) {
+  return typeof s === 'string' && s.indexOf(E2E_PREFIX) === 0;
+}
+
+/* Text shown for a quoted message. Ciphertext becomes a neutral label instead
+   of the raw envelope; the real text is painted in once decryption finishes. */
+function replyPreviewText(r) {
+  if (!r) return 'Message';
+  if (r.encrypted || isE2EContent(r.content)) return 'Encrypted message';
+  if (r.content) return r.content;
+  if (r.attachment_name) return r.attachment_name;
+  return r.attachment_url ? 'Attachment' : 'Message';
+}
+
 function replyRefHTML(r) {
   const name = r.author ? (r.author.display_name || r.author.username) : 'Unknown';
-  const txt = r.content ? r.content : (r.attachment_name ? 'Attachment' : 'Message');
+  const enc = !!(r.encrypted || isE2EContent(r.content));
+  const txt = replyPreviewText(r);
   const ava = r.author ? `<span class="rr-ava">${r.author.avatar_url ? `<img src="${escapeHtml(r.author.avatar_url)}" alt="">` : ''}</span>` : '';
-  return `<div class="reply-ref" data-jump="${r.id}"><span class="rr-line"></span>${ava}<span class="rr-name">${escapeHtml(name)}</span><span class="rr-text">${escapeHtml(txt)}</span></div>`;
+  const att = (!enc && r.attachment_url) ? `<span class="rr-att">${icon('paperclip')}</span>` : '';
+  return `<div class="reply-ref" data-jump="${r.id}"><span class="rr-line"></span>${ava}<span class="rr-name">${escapeHtml(name)}</span>${att}<span class="rr-text${enc ? ' rr-enc' : ''}"${enc ? ' data-e2e="1"' : ''}>${escapeHtml(txt)}</span></div>`;
+}
+
+/* Repaint a reply reference after the quoted message has been decrypted (or
+   after an edit). Called from updateMessageNode so live socket messages, which
+   render before their keys are ready, end up showing real text. */
+function updateReplyRef(node, m) {
+  if (!node || !m || !m.reply_to) return;
+  const ref = node.querySelector('.reply-ref');
+  if (!ref) return;
+  const r = m.reply_to;
+  const txtEl = ref.querySelector('.rr-text');
+  if (!txtEl) return;
+  const enc = !!(r.encrypted || isE2EContent(r.content));
+  const next = replyPreviewText(r);
+  if (txtEl.textContent !== next) txtEl.textContent = next;
+  txtEl.classList.toggle('rr-enc', enc);
+  if (enc) txtEl.setAttribute('data-e2e', '1'); else txtEl.removeAttribute('data-e2e');
+  const nameEl = ref.querySelector('.rr-name');
+  if (nameEl && r.author) {
+    const n = r.author.display_name || r.author.username;
+    if (nameEl.textContent !== n) nameEl.textContent = n;
+  }
+  const ava = ref.querySelector('.rr-ava');
+  if (ava && r.author && r.author.avatar_url && !ava.querySelector('img')) {
+    ava.innerHTML = `<img src="${escapeHtml(r.author.avatar_url)}" alt="">`;
+  }
 }
 
 function messageNode(m, grouped, animate) {
@@ -3907,7 +4005,7 @@ function messageNode(m, grouped, animate) {
   const nEmoji = emojiOnly ? emojiCount(bodyText || '') : 0;
   const jumboCls = emojiOnly ? (nEmoji <= 3 ? ' jumbo' : (nEmoji <= 6 ? ' jumbo lg' : '')) : '';
   node.innerHTML = `${toolbar}${gutter}<div class="body">${m.reply_to ? replyRefHTML(m.reply_to) : ''}${head}
-    <div class="text" data-content>${m.pinned ? `<span class="msg-pin" title="Pinned message">${icon('pin')}</span>` : ''}${failed ? `<span class="text-body msg-undecryptable" title="This message was encrypted for a different device and cannot be read here">${icon('lock')} Encrypted message</span>` : (pending ? `<span class="text-body msg-pending">Decrypting\u2026</span>` : `<span class="text-body${jumboCls}">${formatContent(bodyText)}</span>`)}${m.edited_at ? `<span class="msg-edited" title="Edited ${escapeHtml(formatTime(m.edited_at))}">(edited)</span>` : ''}</div>
+    <div class="text" data-content>${m.pinned ? `<span class="msg-pin" title="Pinned message">${icon('pin')}</span>` : ''}${failed ? `<span class="text-body msg-undecryptable" title="This message was encrypted for a different device and cannot be read here">${icon('lock')} Encrypted message</span>` : (pending ? `<span class="text-body msg-pending" aria-label="Loading message"><span class="msg-skeleton"></span><span class="msg-skeleton short"></span></span>` : `<span class="text-body${jumboCls}">${formatContent(bodyText)}</span>`)}${m.edited_at ? `<span class="msg-edited" title="Edited ${escapeHtml(formatTime(m.edited_at))}">(edited)</span>` : ''}</div>
     <div class="attachment-slot"></div>
     <div class="embed-slot"></div>
     <div class="reactions">${reactionsHTML(m.reactions)}</div>
@@ -3954,6 +4052,18 @@ function messageNode(m, grouped, animate) {
     });
   });
   return node;
+}
+
+/* Insert a message into state exactly once. The sender now paints its own
+   message optimistically from the POST response, and the socket echo of that
+   same message arrives a moment later - without this guard the message would
+   appear twice. */
+function upsertMessage(m) {
+  if (!m || !m.id) return false;
+  const i = state.messages.findIndex(x => x && x.id === m.id);
+  if (i >= 0) { state.messages[i] = Object.assign({}, state.messages[i], m); return false; }
+  state.messages.push(m);
+  return true;
 }
 
 function appendMessage(m) {
@@ -4187,7 +4297,7 @@ function videoPlayerNode(url, name) {
   const player = document.createElement('div');
   player.className = 'vp';
   player.innerHTML = `
-    <video class="vp-video" src="${escapeHtml(url)}" preload="metadata" playsinline></video>
+    <video class="vp-video" src="${escapeHtml(url)}" preload="metadata" playsinline webkit-playsinline></video>
     <button class="vp-big-play" type="button" aria-label="Play video">${icon('play')}</button>
     <div class="vp-controls">
       <button class="vp-btn vp-toggle" type="button" aria-label="Play">${icon('play')}</button>
@@ -4226,19 +4336,60 @@ function videoPlayerNode(url, name) {
     muteBtn.setAttribute('aria-label', v === 0 ? 'Unmute' : 'Mute');
   };
 
-  const start = () => { player.classList.add('playing'); video.play().catch(() => {}); };
-  bigPlay.addEventListener('click', start);
+  /* Playback used to fail silently: play() rejects while the file is still
+     buffering (or when the browser blocks sound), and the promise was simply
+     swallowed, so the play button looked dead. We now retry as soon as the
+     media can play, and fall back to a muted start if audio autoplay is
+     blocked - the user can unmute from the control bar. */
+  const start = () => {
+    player.classList.add('playing');
+    const attempt = () => {
+      const p = video.play();
+      if (p && p.catch) p.catch((err) => {
+        const name = (err && err.name) || '';
+        if (name === 'NotAllowedError') {
+          /* Autoplay-with-sound blocked: start muted, keep the player usable. */
+          video.muted = true; setVolIcon();
+          video.play().catch(() => {});
+        } else if (video.readyState < 2) {
+          /* Not enough data yet - play the moment it can. */
+          video.addEventListener('canplay', () => video.play().catch(() => {}), { once: true });
+        }
+      });
+    };
+    attempt();
+  };
+  bigPlay.addEventListener('click', (e) => { e.stopPropagation(); start(); });
   toggle.addEventListener('click', () => { if (video.paused) start(); else video.pause(); });
   video.addEventListener('click', () => { if (video.paused) start(); else video.pause(); });
+  /* Clicking anywhere on the poster (including the padding around the button)
+     starts playback, so a slow first frame can never swallow the click. */
+  player.addEventListener('click', (e) => {
+    if (e.target.closest('.vp-controls')) return;
+    if (video.paused) start();
+  });
 
   video.addEventListener('play', () => { setPlayIcon(true); player.classList.add('playing'); });
   video.addEventListener('pause', () => setPlayIcon(false));
   video.addEventListener('ended', () => { setPlayIcon(false); player.classList.remove('playing'); });
+  /* Buffering indicator so a slow network reads as "loading", not "broken". */
+  video.addEventListener('waiting', () => player.classList.add('buffering'));
+  video.addEventListener('playing', () => player.classList.remove('buffering'));
+  video.addEventListener('canplay', () => player.classList.remove('buffering'));
+  const applyAspect = () => {
+    if (!video.videoWidth || !video.videoHeight) return;
+    /* Give the frame its true proportions so nothing is ever letterboxed into
+       the wrong box (and so fullscreen keeps the original aspect ratio). */
+    player.style.setProperty('--vp-ar', video.videoWidth + ' / ' + video.videoHeight);
+    player.classList.add('has-meta');
+  };
   video.addEventListener('loadedmetadata', () => {
     dur.textContent = fmt(video.duration);
+    applyAspect();
     /* Nudge to the first frame so the collapsed state shows a real thumbnail. */
     try { if (!video.currentTime) video.currentTime = 0.01; } catch (e) { /* ignore */ }
   });
+  video.addEventListener('loadeddata', applyAspect);
   video.addEventListener('timeupdate', () => {
     cur.textContent = fmt(video.currentTime);
     if (video.duration) seek.value = Math.round((video.currentTime / video.duration) * 1000);
@@ -4301,6 +4452,12 @@ function bindVideoAvailability(player, wrap, url, name, sizeText) {
   if (!video) return;
   let attempts = 0;
   let settled = false;
+  let userStarted = false;
+
+  /* Once the person presses play we stop touching the element: the old code
+     reset src/load() during retries, which killed an in-progress playback and
+     made videos look like they refused to play. */
+  video.addEventListener('play', () => { userStarted = true; });
 
   const showMissing = () => {
     if (settled || !wrap.isConnected) return;
@@ -4327,36 +4484,27 @@ function bindVideoAvailability(player, wrap, url, name, sizeText) {
     }
   };
 
-  const recover = async () => {
-    if (settled) return;
+  /* Reload the media element only while it has no metadata yet, and never once
+     the user has started playback. */
+  const retry = () => {
+    if (settled || userStarted || !video.isConnected) return;
+    if (video.readyState >= 1) return;          /* metadata arrived - all good */
+    if (attempts >= 3) return;
     attempts++;
-    const gone = await probe();
-    if (gone || settled) return;
-    if (attempts >= 4) {
-      /* Still failing but never got a 404: keep the player rather than lie
-         about the file being gone. A later play attempt can still succeed. */
-      return;
-    }
-    /* Reload the source after a short backoff (transient cold-start). */
     setTimeout(() => {
-      if (settled || !video.isConnected) return;
-      try {
-        const src = video.getAttribute('src');
-        video.removeAttribute('src');
-        video.load();
-        video.setAttribute('src', src);
-        video.load();
-      } catch (e) { /* ignore */ }
-      recover();
-    }, 800 * attempts);
+      if (settled || userStarted || !video.isConnected || video.readyState >= 1) return;
+      try { video.load(); } catch (e) { /* ignore */ }
+      retry();
+    }, 700 * attempts);
   };
 
-  video.addEventListener('error', () => {
+  video.addEventListener('error', async () => {
     if (settled) return;
     /* MEDIA_ERR_ABORTED (1) is usually our own src reset - ignore it. */
     const code = video.error ? video.error.code : 0;
     if (code === 1) return;
-    recover();
+    const gone = await probe();
+    if (!gone) retry();
   });
 }
 
@@ -4756,6 +4904,16 @@ async function sendMessage() {
     payload.attachment_size = state.pendingAttachment.size;
   }
   if (state.replyTo) payload.reply_to_id = state.replyTo.id;
+  /* Keep the quoted message so the optimistic bubble can show a real preview
+     immediately (the socket echo arrives a beat later). */
+  const quoted = state.replyTo ? {
+    id: state.replyTo.id,
+    content: state.replyTo.content,
+    attachment_url: state.replyTo.attachment_url || null,
+    attachment_name: state.replyTo.attachment_name || null,
+    attachment_type: state.replyTo.attachment_type || null,
+    author: state.replyTo.author
+  } : null;
 
   input.value = '';
   autoGrow(input);
@@ -4763,8 +4921,18 @@ async function sendMessage() {
   setReplyTo(null);
   closeMentionPop();
   try {
-    if (t.kind === 'channel') await api('/api/channels/' + t.id + '/messages', { method: 'POST', body: JSON.stringify(payload) });
-    else await api('/api/dms/' + t.id + '/messages', { method: 'POST', body: JSON.stringify(payload) });
+    let res;
+    if (t.kind === 'channel') res = await api('/api/channels/' + t.id + '/messages', { method: 'POST', body: JSON.stringify(payload) });
+    else res = await api('/api/dms/' + t.id + '/messages', { method: 'POST', body: JSON.stringify(payload) });
+    /* Paint our own message right away - we already hold the plaintext, so
+       there is no reason to wait for the socket echo (or show a placeholder).
+       upsertMessage() keeps the later echo from duplicating it. */
+    const sent = res && res.message;
+    if (sent) {
+      if (quoted && !sent.reply_to) sent.reply_to = quoted;
+      if (isE2EContent(sent.content)) { try { await e2eDecryptMessage(sent); } catch (e) { /* keep skeleton */ } }
+      if (upsertMessage(sent)) appendMessage(sent); else updateMessageNode(sent);
+    }
     if (t.kind === 'dm') loadDMs();
   } catch (e) { toast(e.message, 'error'); }
 }
@@ -4811,7 +4979,7 @@ function renderReplyBar() {
   bar.classList.remove('hidden');
   $('composer-box').classList.add('replying');
   const name = m.author.display_name || m.author.username;
-  const txt = m.content ? m.content.slice(0, 120) : 'Attachment';
+  const txt = replyPreviewText(m).slice(0, 120);
   bar.innerHTML = `<span class="rb-text">Replying to <b>${escapeHtml(name)}</b> \u2014 ${escapeHtml(txt)}</span><button id="rb-cancel" title="Cancel Reply">${icon('xmark')}</button>`;
   $('rb-cancel').addEventListener('click', () => setReplyTo(null));
 }
@@ -5102,15 +5270,28 @@ function openMessageContextMenu(x, y, m) {
 function updateMessageNode(m) {
   const node = document.querySelector(`[data-mid="${m.id}"]`);
   if (!node) return;
+  /* The quoted message may have finished decrypting after the node was built. */
+  updateReplyRef(node, m);
   const body = node.querySelector('.text-body');
+  const stillPending = isE2EContent(m.content);
   if (body && m.decrypt_failed) {
     body.innerHTML = icon('lock') + ' Encrypted message';
     body.className = 'text-body msg-undecryptable';
+  } else if (body && stillPending) {
+    /* Keys are still being set up: keep the neutral skeleton, never the
+       ciphertext (and never the word "Decrypting"). */
+    if (!body.classList.contains('msg-pending')) {
+      body.className = 'text-body msg-pending';
+      body.innerHTML = '<span class="msg-skeleton"></span><span class="msg-skeleton short"></span>';
+    }
   } else if (body) {
-    body.innerHTML = formatContent(m.content);
+    const bodyText = isEmbeddableMediaUrl((extractUrls(m.content || '')[0] || ''))
+      ? stripEmbeddableUrls(m.content)
+      : m.content;
+    body.innerHTML = formatContent(bodyText);
     /* Recompute the jumbo-emoji treatment after an edit. */
-    const onlyEmoji = isEmojiOnly(m.content || '');
-    const cnt = onlyEmoji ? emojiCount(m.content || '') : 0;
+    const onlyEmoji = isEmojiOnly(bodyText || '');
+    const cnt = onlyEmoji ? emojiCount(bodyText || '') : 0;
     body.className = 'text-body' + (onlyEmoji ? (cnt <= 3 ? ' jumbo' : (cnt <= 6 ? ' jumbo lg' : '')) : '');
   }
   const text = node.querySelector('.text');
@@ -5218,7 +5399,7 @@ function notifInfo(n) {
   const u = d.user || (d.message && d.message.author);
   const name = u ? (u.display_name || u.username) : 'Someone';
   const where = d.kind === 'channel' ? `in #${d.channel_name || 'a channel'}` : (d.kind === 'dm' ? 'in a direct message' : '');
-  const preview = d.message && d.message.content ? d.message.content : '';
+  const preview = d.message ? replyPreviewText(d.message) : '';
   let ico = 'bell', plain = 'New notification', html = 'New notification';
   if (n.type === 'friend_request') { ico = 'user-plus'; plain = `${name} sent you a friend request`; html = `<b>${escapeHtml(name)}</b> sent you a friend request`; }
   else if (n.type === 'friend_accepted') { ico = 'user-check'; plain = `${name} accepted your friend request`; html = `<b>${escapeHtml(name)}</b> accepted your friend request`; }

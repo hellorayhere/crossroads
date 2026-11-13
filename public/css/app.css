@@ -334,7 +334,7 @@ button:active, .rail-item:active, .channel:active, .dm-item:active, .member:acti
 .msg-toolbar button:hover { background: var(--hover); color: var(--text-normal); }
 
 .attachment { margin-top: 6px; }
-.attachment img, .attachment video { max-width: 400px; max-height: 320px; border-radius: var(--radius); display: block; cursor: pointer; border: 1px solid var(--divider); }
+.attachment img, .attachment video { max-width: 400px; max-height: 320px; border-radius: var(--radius); display: block; cursor: pointer; border: 1px solid var(--divider); object-fit: contain; }
 /* Bare media (images, GIFs, videos) sit directly under the message with no
    embed box, border or background. */
 .attachment.media { margin-top: 5px; }
@@ -1072,7 +1072,7 @@ button:active, .rail-item:active, .channel:active, .dm-item:active, .member:acti
 .lb-dl:hover, .lb-close:hover { background: rgba(255,255,255,.18); color: #fff; }
 .lb-dl .ic, .lb-close .ic { width: 20px; height: 20px; }
 .lb-stage { flex: 1 1 auto; min-height: 0; display: grid; place-items: center; padding: 0 24px 24px; overflow: auto; }
-.lb-stage img, .lb-stage video { max-width: 92vw; max-height: 100%; border-radius: 8px; box-shadow: 0 8px 40px rgba(0,0,0,.6); }
+.lb-stage img, .lb-stage video { max-width: 92vw; max-height: 100%; border-radius: 8px; box-shadow: 0 8px 40px rgba(0,0,0,.6); object-fit: contain; }
 .lb-stage img { cursor: zoom-out; }
 @media (max-width: 640px) { .lb-bar { padding: 10px 12px; } .lb-stage { padding: 0 8px 12px; } }
 
@@ -1874,10 +1874,49 @@ body[data-theme="light"] .oprofile-modal .bio-link { color: #0066cc; }
    ROUND 4 — custom video player, channel reordering, search, voice
    ============================================================ */
 
+/* ---------- Message body placeholder (replaces "Decrypting…") ---------- */
+.msg-pending { display: inline-flex; flex-direction: column; gap: 6px; width: min(320px, 60vw); vertical-align: middle; }
+.msg-skeleton {
+  display: block; height: 11px; border-radius: 6px;
+  background: linear-gradient(90deg,
+    color-mix(in srgb, var(--text-normal) 10%, transparent) 25%,
+    color-mix(in srgb, var(--text-normal) 20%, transparent) 37%,
+    color-mix(in srgb, var(--text-normal) 10%, transparent) 63%);
+  background-size: 400% 100%;
+  animation: msgShimmer 1.35s ease-in-out infinite;
+}
+.msg-skeleton.short { width: 55%; }
+@keyframes msgShimmer { 0% { background-position: 100% 0; } 100% { background-position: 0 0; } }
+@media (prefers-reduced-motion: reduce) {
+  .msg-skeleton { animation: none; }
+  .global-banner, .global-banner.maintenance .gb-ring, .global-banner.maintenance .gb-dot, .global-banner.maintenance .gb-progress { animation: none; }
+}
+
+/* Reply reference: an encrypted quote reads as a neutral label, never the
+   raw envelope. */
+.reply-ref .rr-text.rr-enc { color: var(--text-muted); font-style: italic; }
+.reply-ref .rr-att { display: inline-flex; align-items: center; color: var(--text-muted); }
+.reply-ref .rr-att .ic { width: 13px; height: 13px; }
+
+/* Buffering spinner on the custom video player. */
+.vp.buffering::after {
+  content: ''; position: absolute; inset: 0; margin: auto; width: 34px; height: 34px;
+  border-radius: 50%; border: 3px solid rgba(255,255,255,.25); border-top-color: #fff;
+  animation: vpSpin .8s linear infinite; pointer-events: none;
+}
+@keyframes vpSpin { to { transform: rotate(360deg); } }
+
 /* ---------- Custom video player ---------- */
 .attachment.video-attachment { margin-top: 5px; }
-.vp { position: relative; display: inline-block; max-width: 400px; border-radius: 8px; overflow: hidden; background: #000; line-height: 0; }
-.vp .vp-video { display: block; width: 100%; max-width: 400px; max-height: 320px; border: none; border-radius: 0; background: #000; cursor: pointer; }
+.vp {
+  position: relative; display: inline-block; width: min(400px, 100%); max-width: 400px;
+  aspect-ratio: var(--vp-ar, 16 / 9); min-height: 120px;
+  border-radius: 8px; overflow: hidden; background: #000; line-height: 0;
+}
+/* The frame keeps its real proportions as soon as metadata arrives, so the
+   poster/play button never sits in a zero-height or distorted box. */
+.vp.has-meta { aspect-ratio: var(--vp-ar, 16 / 9); }
+.vp .vp-video { display: block; width: 100%; height: 100%; max-width: 400px; max-height: 320px; border: none; border-radius: 0; background: #000; cursor: pointer; object-fit: contain; }
 .vp-big-play {
   position: absolute; inset: 0; margin: auto; width: 64px; height: 64px; border-radius: 50%;
   background: rgba(0,0,0,.55); color: #fff; display: grid; place-items: center; cursor: pointer;
@@ -1905,18 +1944,39 @@ body[data-theme="light"] .oprofile-modal .bio-link { color: #0066cc; }
 .vp-vol { width: 70px; -webkit-appearance: none; appearance: none; height: 4px; border-radius: 2px; background: rgba(255,255,255,.32); cursor: pointer; }
 .vp-vol::-webkit-slider-thumb { -webkit-appearance: none; width: 12px; height: 12px; border-radius: 50%; background: #fff; cursor: pointer; }
 .vp-vol::-moz-range-thumb { width: 12px; height: 12px; border-radius: 50%; background: #fff; border: none; cursor: pointer; }
-.vp:fullscreen, .vp:-webkit-full-screen, .vp:-moz-full-screen, .vp:-ms-fullscreen {
+/* IMPORTANT: each vendor fullscreen selector lives in its own rule. A single
+   unknown pseudo-class inside a comma-separated list makes browsers throw the
+   WHOLE rule away - which is exactly why fullscreen used to leave the video
+   stuck at its 400x320 thumbnail size (or stretched by the UA defaults). */
+.vp:fullscreen {
   max-width: none; width: 100%; height: 100%; border-radius: 0; background: #000;
   display: flex; align-items: center; justify-content: center;
 }
-.vp:fullscreen .vp-video, .vp:-webkit-full-screen .vp-video, .vp:-moz-full-screen .vp-video, .vp:-ms-fullscreen .vp-video {
-  max-width: none; max-height: none; width: 100%; height: 100%; object-fit: contain;
+.vp:-webkit-full-screen {
+  max-width: none; width: 100%; height: 100%; border-radius: 0; background: #000;
+  display: flex; align-items: center; justify-content: center;
 }
-/* When the browser only allows the <video> itself to go fullscreen, keep it
-   filling the screen with the correct aspect ratio. */
-.vp-video:fullscreen, .vp-video:-webkit-full-screen { width: 100%; height: 100%; max-width: none; max-height: none; object-fit: contain; background: #000; }
+.vp:fullscreen .vp-video {
+  width: 100%; height: 100%; max-width: none; max-height: none;
+  object-fit: contain; background: #000;
+}
+.vp:-webkit-full-screen .vp-video {
+  width: 100%; height: 100%; max-width: none; max-height: none;
+  object-fit: contain; background: #000;
+}
+/* When the browser only allows the <video> element itself to go fullscreen,
+   keep it filling the screen at its true aspect ratio (never stretched). */
+.vp-video:fullscreen {
+  width: 100%; height: 100%; max-width: none; max-height: none;
+  object-fit: contain; background: #000;
+}
+.vp-video:-webkit-full-screen {
+  width: 100%; height: 100%; max-width: none; max-height: none;
+  object-fit: contain; background: #000;
+}
 /* Controls stay visible on top while fullscreen. */
-.vp:fullscreen .vp-controls, .vp:-webkit-full-screen .vp-controls { opacity: 1; pointer-events: auto; }
+.vp:fullscreen .vp-controls { opacity: 1; pointer-events: auto; }
+.vp:-webkit-full-screen .vp-controls { opacity: 1; pointer-events: auto; }
 @media (max-width: 640px) { .vp-vol { display: none; } }
 
 /* ---------- Channel reordering (drag handle + drop indicators) ---------- */
@@ -2722,11 +2782,15 @@ body[data-theme="light"] .toast { box-shadow: 0 8px 24px rgba(0, 0, 0, .12); }
 
 /* Global announcement banner (all users) */
 .global-banner {
-  position: fixed; top: 12px; left: 50%; transform: translateX(-50%); z-index: 9000;
-  max-width: min(680px, 92vw); display: flex; align-items: flex-start; gap: 10px;
-  padding: 12px 14px; border-radius: 9px; background: var(--menu-bg);
+  position: fixed; top: 14px; left: 50%; transform: translateX(-50%); z-index: 9000;
+  max-width: min(620px, 94vw); display: flex; align-items: flex-start; gap: 12px;
+  padding: 13px 14px; border-radius: 12px; background: var(--menu-bg);
   border: 1px solid var(--divider); box-shadow: var(--elevation-lg); font-size: 13px;
+  animation: gbIn .24s cubic-bezier(.2,.8,.2,1) both;
 }
+@keyframes gbIn { from { opacity: 0; transform: translate(-50%, -10px); } to { opacity: 1; transform: translate(-50%, 0); } }
+.global-banner.leaving { animation: gbOut .22s ease forwards; }
+@keyframes gbOut { to { opacity: 0; transform: translate(-50%, -10px); } }
 .global-banner.info { border-left: 3px solid var(--blurple); }
 .global-banner.success { border-left: 3px solid var(--green); }
 .global-banner.warning { border-left: 3px solid #f0b232; }
@@ -2734,6 +2798,79 @@ body[data-theme="light"] .toast { box-shadow: 0 8px 24px rgba(0, 0, 0, .12); }
 .global-banner b { color: var(--text-header); display: block; margin-bottom: 2px; }
 .global-banner span { color: var(--text-normal); line-height: 1.45; }
 .global-banner button { margin-left: auto; background: transparent; border: 0; color: var(--text-muted); cursor: pointer; font-size: 15px; }
+.global-banner .gb-ico {
+  flex: 0 0 auto; width: 34px; height: 34px; border-radius: 10px; display: grid; place-items: center;
+  background: color-mix(in srgb, var(--blurple) 18%, transparent); color: var(--blurple);
+}
+.global-banner .gb-ico .ic { width: 18px; height: 18px; }
+.global-banner.success .gb-ico { background: color-mix(in srgb, var(--green) 18%, transparent); color: var(--green); }
+.global-banner.critical .gb-ico { background: color-mix(in srgb, var(--red) 18%, transparent); color: var(--red); }
+.global-banner .gb-main { min-width: 0; flex: 1 1 auto; }
+.global-banner .gb-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.global-banner .gb-title { color: var(--text-header); font-weight: 700; font-size: 13.5px; letter-spacing: .01em; }
+.global-banner .gb-text { color: var(--text-normal); line-height: 1.5; margin-top: 2px; }
+.global-banner .gb-close {
+  flex: 0 0 auto; width: 26px; height: 26px; border-radius: 7px; display: grid; place-items: center;
+  background: transparent; border: 0; color: var(--text-muted); cursor: pointer; transition: background .12s ease, color .12s ease;
+}
+.global-banner .gb-close:hover { background: color-mix(in srgb, var(--text-normal) 12%, transparent); color: var(--text-header); }
+.global-banner .gb-close .ic { width: 15px; height: 15px; }
+
+/* ---------- Maintenance notice (revamped) ---------- */
+.global-banner.maintenance {
+  align-items: center; gap: 14px; padding: 15px 16px 16px;
+  background:
+    radial-gradient(120% 160% at 0% 0%, color-mix(in srgb, #f0b232 14%, transparent) 0%, transparent 62%),
+    var(--menu-bg);
+  border: 1px solid color-mix(in srgb, #f0b232 34%, var(--divider));
+  border-left: 3px solid #f0b232;
+  box-shadow: 0 18px 46px rgba(0,0,0,.42), 0 0 0 1px rgba(240,178,50,.08);
+  overflow: hidden;
+}
+.global-banner.maintenance .gb-ico {
+  position: relative; width: 42px; height: 42px; border-radius: 13px;
+  background: color-mix(in srgb, #f0b232 16%, transparent); color: #f0b232;
+}
+.global-banner.maintenance .gb-ico .ic { width: 21px; height: 21px; }
+.global-banner.maintenance .gb-ring {
+  position: absolute; inset: -5px; border-radius: 17px;
+  border: 1.5px solid color-mix(in srgb, #f0b232 40%, transparent);
+  animation: gbRing 2.6s ease-out infinite;
+}
+@keyframes gbRing {
+  0% { transform: scale(.94); opacity: .85; }
+  70% { transform: scale(1.14); opacity: 0; }
+  100% { opacity: 0; }
+}
+.global-banner.maintenance .gb-title { font-size: 14px; }
+.global-banner.maintenance .gb-pill {
+  font-size: 9.5px; font-weight: 800; letter-spacing: .09em; text-transform: uppercase;
+  padding: 2px 7px; border-radius: 999px;
+  color: #f0b232; background: color-mix(in srgb, #f0b232 16%, transparent);
+  border: 1px solid color-mix(in srgb, #f0b232 30%, transparent);
+}
+.global-banner.maintenance .gb-text { font-size: 13px; color: var(--text-normal); margin-top: 3px; }
+.global-banner.maintenance .gb-foot {
+  display: flex; align-items: center; gap: 7px; margin-top: 8px;
+  font-size: 11.5px; color: var(--text-muted);
+}
+.global-banner.maintenance .gb-dot {
+  width: 6px; height: 6px; border-radius: 50%; background: #f0b232; flex: 0 0 auto;
+  box-shadow: 0 0 0 0 rgba(240,178,50,.6); animation: gbDot 1.9s infinite;
+}
+@keyframes gbDot { 0% { box-shadow: 0 0 0 0 rgba(240,178,50,.55); } 70% { box-shadow: 0 0 0 6px rgba(240,178,50,0); } 100% { box-shadow: 0 0 0 0 rgba(240,178,50,0); } }
+.global-banner.maintenance .gb-progress {
+  position: absolute; left: 0; right: 0; bottom: 0; height: 2px;
+  background: linear-gradient(90deg, transparent, #f0b232, transparent);
+  background-size: 45% 100%; background-repeat: no-repeat;
+  animation: gbSweep 2.8s ease-in-out infinite;
+}
+@keyframes gbSweep { 0% { background-position: -50% 0; } 100% { background-position: 150% 0; } }
+@media (max-width: 560px) {
+  .global-banner.maintenance { top: 8px; padding: 13px 12px 14px; gap: 10px; }
+  .global-banner.maintenance .gb-ico { width: 36px; height: 36px; border-radius: 11px; }
+  .global-banner.maintenance .gb-foot { display: none; }
+}
 
 /* ============================================================
    ADMIN CONSOLE — ROUND 2 (dashboard, staff, notes, lists)
