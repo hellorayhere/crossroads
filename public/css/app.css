@@ -338,6 +338,37 @@ button:active, .rail-item:active, .channel:active, .dm-item:active, .member:acti
 .msg-group.compact .head { display: none; }
 .msg-group.fade-in { animation: none; }
 .msg-group.flash { animation: flashHighlight 1.4s ease; }
+
+/* Inline "X started a call" event row */
+.call-event {
+  display: flex; align-items: center; gap: 10px;
+  margin: 8px 16px; padding: 10px 12px;
+  border: 1px solid var(--divider);
+  border-left: 3px solid var(--green);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--green) 7%, transparent);
+  font-size: 14px; color: var(--text-normal);
+}
+.call-event .ce-ico {
+  flex: 0 0 auto; width: 28px; height: 28px; border-radius: 50%;
+  display: grid; place-items: center;
+  background: color-mix(in srgb, var(--green) 18%, transparent);
+  color: var(--green);
+}
+.call-event .ce-ico .ic { width: 15px; height: 15px; }
+.call-event .ce-text { flex: 1 1 auto; min-width: 0; }
+.call-event .ce-text b { color: var(--text-header); font-weight: 700; }
+.call-event .ce-time { flex: 0 0 auto; font-size: 11.5px; color: var(--text-muted); }
+.call-event .ce-call {
+  flex: 0 0 auto; padding: 6px 12px; border-radius: 6px; border: 0;
+  background: var(--green); color: #fff; font: inherit; font-size: 12.5px; font-weight: 600;
+  cursor: pointer; transition: filter .12s ease;
+}
+.call-event .ce-call:hover { filter: brightness(1.08); }
+@media (max-width: 560px) {
+  .call-event { margin: 6px 10px; gap: 8px; font-size: 13px; }
+  .call-event .ce-time { display: none; }
+}
 @keyframes flashHighlight { 0%,100% { background: transparent; } 15% { background: rgba(88,101,242,.22); } }
 
 /* reply preview inside a message */
@@ -743,7 +774,7 @@ button:active, .rail-item:active, .channel:active, .dm-item:active, .member:acti
   --pf-bg: color-mix(in srgb, var(--accent) 38%, var(--pf-base));
   --pf-card: color-mix(in srgb, var(--accent) 50%, var(--pf-base));
   --pf-hover: color-mix(in srgb, var(--accent) 62%, var(--pf-base));
-  width: 100%; max-width: 880px; padding: 0; overflow: hidden;
+  width: 100%; max-width: 1000px; padding: 0; overflow: hidden;
   background:
     /* A dark scrim over the lower half keeps body text legible while the top
        of the card stays vividly accent-coloured. */
@@ -754,7 +785,7 @@ button:active, .rail-item:active, .channel:active, .dm-item:active, .member:acti
       color-mix(in srgb, var(--accent) 26%, var(--pf-base)) 100%);
   color: #dbdee1;
   border-radius: 10px; border: 1px solid rgba(0,0,0,.4);
-  display: flex; flex-direction: column; max-height: 90vh;
+  display: flex; flex-direction: column; max-height: 92vh;
   box-shadow: 0 8px 32px rgba(0,0,0,.55);
 }
 /* A soft accent wash behind the content so the tint reads as a gradient rather
@@ -766,7 +797,7 @@ button:active, .rail-item:active, .channel:active, .dm-item:active, .member:acti
 }
 .oprofile-modal { position: relative; }
 .oprofile-banner {
-  position: relative; z-index: 0; height: 176px; width: 100%; flex: 0 0 auto;
+  position: relative; z-index: 0; height: 208px; width: 100%; flex: 0 0 auto;
   background: var(--accent); background-size: cover; background-position: center;
 }
 .oprofile-banner::after {
@@ -774,7 +805,7 @@ button:active, .rail-item:active, .channel:active, .dm-item:active, .member:acti
   background: linear-gradient(180deg, rgba(0,0,0,0) 55%, rgba(0,0,0,.16));
 }
 
-.dp-body { position: relative; z-index: 1; padding: 0 26px 26px; display: flex; flex-direction: column; min-height: 0; overflow: visible; }
+.dp-body { position: relative; z-index: 1; padding: 0 32px 30px; display: flex; flex-direction: column; min-height: 0; overflow: visible; }
 .dp-scroll { overflow-y: auto; overflow-x: hidden; min-height: 0; padding-bottom: 4px; }
 
 /* Avatar straddles the banner, then the name sits beside it with the action
@@ -788,8 +819,8 @@ button:active, .rail-item:active, .channel:active, .dm-item:active, .member:acti
    top of the banner art. Now the row starts exactly at the banner's bottom edge
    and the avatar alone is offset upward, so the name, handle and custom status
    always render on clean background below the banner. */
-.dp-head { display: flex; align-items: flex-start; gap: 18px; margin-top: 0; position: relative; z-index: 5; }
-.dp-avatar { flex: 0 0 auto; position: relative; z-index: 10; margin-top: -58px; left: -12px; }
+.dp-head { display: flex; align-items: flex-start; gap: 22px; margin-top: 0; position: relative; z-index: 5; }
+.dp-avatar { flex: 0 0 auto; position: relative; z-index: 10; margin-top: -66px; left: -12px; }
 .dp-avatar .avatar {
   /* No accent ring around the profile picture: the border stays 7px wide so
      the avatar's size and position are unchanged, but it is transparent. */
@@ -799,10 +830,10 @@ button:active, .rail-item:active, .channel:active, .dm-item:active, .member:acti
 .dp-avatar .avatar .status-dot { z-index: 11; }
 .dp-identity { flex: 1 1 auto; min-width: 0; padding-top: 8px; }
 .dp-name {
-  font-size: 26px; font-weight: 700; line-height: 1.2; color: #f2f3f5;
+  font-size: 30px; font-weight: 700; line-height: 1.2; color: #f2f3f5;
   word-break: break-word; overflow-wrap: anywhere;
 }
-.dp-handle { font-size: 14px; color: #dbdee1; margin-top: 3px; word-break: break-word; }
+.dp-handle { font-size: 15px; color: #dbdee1; margin-top: 4px; word-break: break-word; }
 .dp-handle .dp-pronoun { color: #949ba4; }
 .dp-custom { font-size: 13px; color: #b5bac1; margin-top: 6px; word-break: break-word; }
 .dp-actions { flex: 0 0 auto; display: flex; align-items: center; gap: 8px; padding-top: 8px; }
@@ -1086,7 +1117,7 @@ button:active, .rail-item:active, .channel:active, .dm-item:active, .member:acti
 .settings-panel .field .hint { font-size: 12px; color: var(--text-muted); margin-top: 6px; }
 .settings-avatar-row { display: flex; align-items: center; gap: 16px; margin-bottom: 20px; }
 .settings-avatar-row .sa-actions { display: flex; flex-direction: column; gap: 8px; }
-.settings-avatar-row .sa-btn-row { display: flex; align-items: center; gap: 8px; }
+.settings-avatar-row .sa-btn-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .settings-avatar-row .sa-actions button { padding: 8px 14px; border-radius: var(--radius-sm); background: var(--brand); color: #fff; font-size: 13px; font-weight: 600; }
 .settings-avatar-row .sa-actions button.ghost { background: color-mix(in srgb, var(--chat-bg) 70%, #fff); }
 .settings-avatar-row .sa-actions button:hover { filter: brightness(1.1); }
@@ -1104,6 +1135,15 @@ button:active, .rail-item:active, .channel:active, .dm-item:active, .member:acti
 .settings-avatar-row .sa-remove-sm:hover {
   background: var(--red); border-color: var(--red); color: #fff; filter: none;
 }
+/* Red "Remove Banner Image" control that lives beside Change Avatar. */
+.settings-avatar-row .sa-actions button.sa-remove-banner {
+  display: inline-flex; align-items: center; gap: 6px;
+  background: var(--red); border: 1px solid var(--red); color: #fff;
+  padding: 8px 12px; font-size: 12.5px; font-weight: 600;
+  border-radius: var(--radius-sm); cursor: pointer;
+}
+.settings-avatar-row .sa-actions button.sa-remove-banner .ic { width: 14px; height: 14px; }
+.settings-avatar-row .sa-actions button.sa-remove-banner:hover { filter: brightness(1.08); }
 .color-row { display: flex; gap: 8px; flex-wrap: wrap; }
 .color-row .swatch { width: 34px; height: 34px; border-radius: 50%; border: 3px solid transparent; cursor: pointer; }
 .color-row .swatch.sel { border-color: var(--text-header); }
@@ -1402,13 +1442,13 @@ button:active, .rail-item:active, .channel:active, .dm-item:active, .member:acti
 @media (max-width: 900px) { .members { display: none; } .profile-body-grid, .settings-body { grid-template-columns: 1fr; } .profile-nav, .settings-nav { display: none; } }
 @media (max-width: 720px) {
   .oprofile-modal { max-width: 100%; }
-  .oprofile-banner { height: 112px; }
+  .oprofile-banner { height: 140px; }
   .dp-body { padding: 0 16px 18px; }
   .dp-head { flex-wrap: wrap; margin-top: 0; gap: 12px; }
-  .dp-avatar { margin-top: -44px; left: -8px; }
-  .dp-avatar .avatar { width: 76px !important; height: 76px !important; }
+  .dp-avatar { margin-top: -50px; left: -8px; }
+  .dp-avatar .avatar { width: 88px !important; height: 88px !important; }
   .dp-identity { flex: 1 1 140px; }
-  .dp-name { font-size: 20px; }
+  .dp-name { font-size: 23px; }
   .dp-actions { flex: 1 1 100%; padding-bottom: 0; }
   .dp-grid { grid-template-columns: 1fr; gap: 18px; }
 }
@@ -3160,16 +3200,6 @@ body[data-theme="light"] .toast { box-shadow: 0 8px 24px rgba(0, 0, 0, .12); }
   box-shadow: 0 12px 32px rgba(0,0,0,.34);
   overflow: hidden;
 }
-.global-banner.maintenance .gb-ico {
-  position: relative; flex: 0 0 auto; width: 34px; height: 34px; border-radius: 8px;
-  display: grid; place-items: center;
-  background: color-mix(in srgb, #e0a82e 14%, transparent);
-  border: 1px solid color-mix(in srgb, #e0a82e 30%, transparent);
-  color: #e0a82e;
-}
-.global-banner.maintenance .gb-bang {
-  font-size: 18px; font-weight: 800; line-height: 1; font-family: inherit;
-}
 .global-banner.maintenance .gb-title { font-size: 13.5px; font-weight: 700; }
 .global-banner.maintenance .gb-pill {
   font-size: 9.5px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase;
@@ -3190,7 +3220,6 @@ body[data-theme="light"] .toast { box-shadow: 0 8px 24px rgba(0, 0, 0, .12); }
 }
 @media (max-width: 560px) {
   .global-banner.maintenance { top: 8px; padding: 12px 12px; gap: 10px; }
-  .global-banner.maintenance .gb-ico { width: 30px; height: 30px; border-radius: 7px; }
   .global-banner.maintenance .gb-foot { display: none; }
 }
 
@@ -4033,43 +4062,123 @@ body[data-theme="light"] .update-card { box-shadow: 0 24px 70px rgba(0, 0, 0, .2
 .dm-call-layer.hidden { display: none; }
 .dm-call-incoming, .dm-call-bar { pointer-events: auto; }
 
+/* ---- shared bits ---- */
+.dci-avatar-wrap, .dcb-avatar-wrap { position: relative; flex: 0 0 auto; display: grid; place-items: center; }
+.dci-avatar, .dcb-avatar {
+  border-radius: 50%; background-size: cover; background-position: center;
+  background-color: #5865f2; display: flex; align-items: center; justify-content: center;
+  font-weight: 800; color: #fff; overflow: hidden; position: relative; z-index: 1;
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,.08);
+}
+.dci-ring, .dcb-ring {
+  position: absolute; inset: -6px; border-radius: 50%;
+  border: 2px solid rgba(59,165,93,.55);
+  animation: dcbRing 2s ease-out infinite;
+}
+@keyframes dcbRing {
+  0% { transform: scale(.92); opacity: .9; }
+  75% { transform: scale(1.16); opacity: 0; }
+  100% { opacity: 0; }
+}
+.dm-call-bar.is-ringing .dcb-ring { border-color: rgba(240,178,50,.6); }
+.dm-call-bar.is-ringing .dcb-ring { animation-duration: 1.5s; }
+
+/* ---- incoming call card ---- */
 .dm-call-incoming {
-  display: flex; align-items: center; gap: 14px; width: 340px; padding: 14px 16px;
-  border-radius: 14px; background: #1e1f22; border: 1px solid #2b2d31;
-  box-shadow: 0 12px 40px rgba(0,0,0,.55); animation: dci-in .22s ease-out;
+  position: relative; overflow: hidden;
+  width: 372px; padding: 18px 18px 16px;
+  border-radius: 16px;
+  background: linear-gradient(180deg, #232428 0%, #1a1b1e 100%);
+  border: 1px solid #33353b;
+  box-shadow: 0 22px 60px rgba(0,0,0,.6), 0 0 0 1px rgba(255,255,255,.03);
+  animation: dci-in .26s cubic-bezier(.2,.9,.25,1);
 }
 .dm-call-incoming.hidden { display: none; }
-@keyframes dci-in { from { transform: translateY(10px); opacity: 0; } to { transform: none; opacity: 1; } }
-.dci-avatar { width: 44px; height: 44px; border-radius: 50%; background-size: cover; background-position: center; background-color: #5865f2; flex: 0 0 auto; display: flex; align-items: center; justify-content: center; font-weight: 800; color: #fff; }
+@keyframes dci-in { from { transform: translateY(14px) scale(.97); opacity: 0; } to { transform: none; opacity: 1; } }
+.dci-glow {
+  position: absolute; top: -60px; left: -40px; width: 220px; height: 160px;
+  background: radial-gradient(closest-side, rgba(59,165,93,.28), transparent 70%);
+  pointer-events: none;
+}
+.dci-head { display: flex; align-items: center; gap: 14px; position: relative; }
+.dci-avatar { width: 56px; height: 56px; font-size: 22px; }
 .dci-body { flex: 1 1 auto; min-width: 0; }
-.dci-name { font-weight: 700; color: #f2f3f5; font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dci-kicker {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 10.5px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase;
+  color: #3ba55d;
+}
+.dci-live-dot { width: 6px; height: 6px; border-radius: 50%; background: #3ba55d; animation: dciDot 1.4s ease-in-out infinite; }
+@keyframes dciDot { 0%,100% { opacity: 1; } 50% { opacity: .3; } }
+.dci-name { font-weight: 700; color: #f2f3f5; font-size: 17px; line-height: 1.25; margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .dci-sub { font-size: 12.5px; color: #b5bac1; margin-top: 2px; }
 .dci-meta { font-size: 11px; color: #80848e; margin-top: 3px; letter-spacing: .01em; }
-.dci-actions { display: flex; gap: 8px; }
-.dci-btn { width: 40px; height: 40px; border-radius: 50%; border: none; cursor: pointer; color: #fff; display: flex; align-items: center; justify-content: center; font-size: 17px; transition: transform .12s ease, filter .12s ease; }
-.dci-btn:hover { transform: scale(1.07); filter: brightness(1.1); }
-.dci-btn.decline { background: #da373c; }
-.dci-btn.accept { background: #248046; }
+.dci-actions { display: flex; gap: 10px; margin-top: 16px; }
+.dci-act {
+  flex: 1 1 0; display: flex; align-items: center; justify-content: center; gap: 8px;
+  height: 44px; border: 0; border-radius: 10px; cursor: pointer;
+  font-size: 13.5px; font-weight: 700; color: #fff;
+  transition: filter .12s ease, transform .1s ease;
+}
+.dci-act:hover { filter: brightness(1.12); }
+.dci-act:active { transform: scale(.98); }
+.dci-act .ic { width: 17px; height: 17px; }
+.dci-act.decline { background: #da373c; }
+.dci-act.accept { background: #248046; }
 
+/* ---- active call bar ---- */
 .dm-call-bar {
-  display: flex; align-items: center; gap: 12px; width: 380px; padding: 12px 14px;
-  border-radius: 14px; background: #1e1f22; border: 1px solid #2b2d31;
-  box-shadow: 0 12px 40px rgba(0,0,0,.55); animation: dci-in .22s ease-out;
+  position: relative; overflow: hidden;
+  width: 392px; padding: 15px 15px 13px;
+  border-radius: 16px;
+  background: linear-gradient(180deg, #232428 0%, #1a1b1e 100%);
+  border: 1px solid #33353b;
+  box-shadow: 0 22px 60px rgba(0,0,0,.6), 0 0 0 1px rgba(255,255,255,.03);
+  animation: dci-in .26s cubic-bezier(.2,.9,.25,1);
 }
 .dm-call-bar.hidden { display: none; }
-.dcb-pulse { width: 38px; height: 38px; border-radius: 50%; background: #248046; color: #fff; display: flex; align-items: center; justify-content: center; flex: 0 0 auto; animation: dcb-pulse 1.8s infinite; }
-@keyframes dcb-pulse { 0%,100% { box-shadow: 0 0 0 0 rgba(36,128,70,.55); } 50% { box-shadow: 0 0 0 8px rgba(36,128,70,0); } }
+.dcb-top { display: flex; align-items: center; gap: 13px; }
+.dcb-avatar { width: 46px; height: 46px; font-size: 18px; }
 .dcb-body { flex: 1 1 auto; min-width: 0; }
-.dcb-name { font-weight: 700; color: #f2f3f5; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dcb-kicker {
+  font-size: 10px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase;
+  color: #80848e;
+}
+.dm-call-bar.is-active .dcb-kicker { color: #3ba55d; }
+.dcb-name { font-weight: 700; color: #f2f3f5; font-size: 15px; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .dcb-sub { font-size: 12px; color: #b5bac1; margin-top: 1px; }
 .dcb-meta { font-size: 10.5px; color: #80848e; margin-top: 2px; letter-spacing: .01em; }
-.dcb-timer { font-variant-numeric: tabular-nums; color: #b5bac1; font-size: 13px; font-weight: 600; }
-.dcb-actions { display: flex; gap: 6px; }
-.dcb-btn { width: 36px; height: 36px; border-radius: 50%; border: none; cursor: pointer; background: #313338; color: #dbdee1; display: flex; align-items: center; justify-content: center; font-size: 15px; transition: background .12s ease, color .12s ease; }
-.dcb-btn:hover { background: #3f4147; color: #fff; }
-.dcb-btn.off { background: #da373c; color: #fff; }
+.dcb-timer {
+  flex: 0 0 auto; font-variant-numeric: tabular-nums; color: #dbdee1;
+  font-size: 12.5px; font-weight: 700;
+  padding: 5px 9px; border-radius: 8px;
+  background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.07);
+}
+.dcb-actions { display: flex; gap: 8px; margin-top: 13px; }
+.dcb-btn {
+  flex: 1 1 0; display: flex; flex-direction: column; align-items: center; gap: 4px;
+  padding: 8px 4px 7px; border: 0; border-radius: 10px; cursor: pointer;
+  background: rgba(255,255,255,.055); color: #dbdee1;
+  transition: background .12s ease, color .12s ease, transform .1s ease;
+}
+.dcb-btn:hover { background: rgba(255,255,255,.1); color: #fff; }
+.dcb-btn:active { transform: scale(.97); }
+.dcb-btn .ic { width: 17px; height: 17px; }
+.dcb-btn-ico { display: grid; place-items: center; }
+.dcb-btn-lbl { font-size: 10.5px; font-weight: 600; letter-spacing: .01em; }
+.dcb-btn.off { background: rgba(218,55,60,.18); color: #ff8b8b; }
+.dcb-btn.off:hover { background: rgba(218,55,60,.3); color: #ffb3b3; }
 .dcb-btn.hangup { background: #da373c; color: #fff; }
 .dcb-btn.hangup:hover { background: #b32b2f; }
+
+@media (max-width: 700px) {
+  .dm-call-layer { right: 10px; left: 10px; bottom: 10px; align-items: stretch; }
+  .dm-call-incoming, .dm-call-bar { width: auto; }
+  .sidebar-banner { height: 160px; min-height: 160px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .dci-ring, .dcb-ring, .dci-live-dot { animation: none; }
+}
 
 /* Blocked-conversation notice inside a DM */
 .dm-blocked-notice { margin: 18px auto; max-width: 520px; text-align: center; padding: 18px 20px; border-radius: 12px; background: color-mix(in srgb, var(--chat-bg) 72%, #000); border: 1px solid var(--divider); color: var(--text-muted); font-size: 14px; line-height: 1.5; }

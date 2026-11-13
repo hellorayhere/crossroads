@@ -2012,14 +2012,13 @@ function renderMaintenanceBanner(message) {
   el.setAttribute('role', 'status');
   el.setAttribute('aria-live', 'polite');
   el.innerHTML = `
-    <div class="gb-ico" aria-hidden="true"><span class="gb-bang">!</span></div>
     <div class="gb-main">
       <div class="gb-head">
         <span class="gb-title">Maintenance in progress</span>
         <span class="gb-pill">Scheduled</span>
       </div>
       <div class="gb-text">${escapeHtml(message || 'Some features may be temporarily unavailable.')}</div>
-      <div class="gb-foot"><span class="gb-dot" aria-hidden="true"></span>We're working on it — messaging keeps working while we do.</div>
+      <div class="gb-foot"><span class="gb-dot" aria-hidden="true"></span>Thanks for your patience — messages, calls and files keep working normally.</div>
     </div>
     <button class="gb-close" title="Dismiss" aria-label="Dismiss maintenance notice"><span aria-hidden="true">×</span></button>`;
   document.body.appendChild(el);
@@ -4146,36 +4145,63 @@ function renderDmCallUI() {
   inc.classList.toggle('hidden', !incoming);
   const showBar = !incoming && dmCall.state !== 'idle';
   bar.classList.toggle('hidden', !showBar);
+  const paintAvatar = (el, u) => {
+    if (!el) return;
+    if (u && u.avatar_url) { el.style.backgroundImage = `url("${u.avatar_url}")`; el.textContent = ''; }
+    else { el.style.backgroundImage = ''; el.textContent = ((u && u.username) || '?').slice(0, 1).toUpperCase(); }
+  };
   if (incoming) {
     const u = dmCall.incoming.caller || {};
     $('dci-name').textContent = u.display_name || u.username || 'Someone';
-    $('dci-sub').textContent = 'Incoming voice call…';
+    $('dci-sub').textContent = 'Voice call \u00b7 ringing';
     const meta = $('dci-meta');
-    if (meta) meta.textContent = 'Encrypted · Answer to connect';
-    const av = $('dci-avatar');
-    if (u.avatar_url) { av.style.backgroundImage = `url("${u.avatar_url}")`; av.textContent = ''; }
-    else { av.style.backgroundImage = ''; av.textContent = (u.username || '?').slice(0, 1).toUpperCase(); }
+    if (meta) meta.textContent = 'End-to-end encrypted \u00b7 answer to connect';
+    paintAvatar($('dci-avatar'), u);
   }
   if (showBar) {
     const u = dmCallPeerUser();
     const nm = u.display_name || u.username || 'Call';
+    bar.classList.toggle('is-ringing', dmCall.state === 'ringing');
+    bar.classList.toggle('is-active', dmCall.state === 'active');
+    paintAvatar($('dcb-avatar'), u);
+    const kicker = $('dcb-kicker');
+    if (kicker) {
+      kicker.textContent = dmCall.state === 'ringing' ? 'Calling'
+        : dmCall.state === 'connecting' ? 'Connecting' : 'Voice connected';
+    }
     $('dcb-name').textContent = nm;
-    $('dcb-sub').textContent = dmCall.state === 'ringing' ? 'Ringing…'
-      : dmCall.state === 'connecting' ? 'Connecting…' : 'Voice connected';
+    $('dcb-sub').textContent = dmCall.state === 'ringing' ? 'Ringing\u2026'
+      : dmCall.state === 'connecting' ? 'Connecting\u2026' : 'Voice connected';
     const meta = $('dcb-meta');
     if (meta) {
       meta.textContent = dmCall.state === 'ringing'
-        ? `Waiting for ${nm} to answer · encrypted`
+        ? `Waiting for ${nm} to answer`
         : dmCall.state === 'connecting'
-          ? 'Establishing secure audio · encrypted'
-          : 'End-to-end encrypted · peer-to-peer';
+          ? 'Establishing secure audio'
+          : 'End-to-end encrypted \u00b7 peer-to-peer';
     }
-    $('dcb-mute').classList.toggle('off', dmCall.muted);
-    $('dcb-deafen').classList.toggle('off', dmCall.deafened);
-    $('dcb-mute').innerHTML = `<i data-ic="${dmCall.muted ? 'mic-off' : 'mic'}"></i>`;
-    $('dcb-deafen').innerHTML = `<i data-ic="${dmCall.deafened ? 'headphones-off' : 'headphones'}"></i>`;
-    if (window.refreshIcons) window.refreshIcons();
-    $('dcb-timer').textContent = dmCall.state === 'active' && dmCall.startedAt ? fmtCallTime(Date.now() - dmCall.startedAt) : '00:00';
+    const muteBtn = $('dcb-mute');
+    const deafBtn = $('dcb-deafen');
+    if (muteBtn) {
+      muteBtn.classList.toggle('off', dmCall.muted);
+      muteBtn.title = dmCall.muted ? 'Unmute' : 'Mute';
+      const ico = muteBtn.querySelector('.dcb-btn-ico');
+      if (ico) ico.innerHTML = `<i data-ic="${dmCall.muted ? 'mic-off' : 'mic'}"></i>`;
+      const lbl = $('dcb-mute-lbl');
+      if (lbl) lbl.textContent = dmCall.muted ? 'Unmute' : 'Mute';
+      hydrateIcons(muteBtn);
+    }
+    if (deafBtn) {
+      deafBtn.classList.toggle('off', dmCall.deafened);
+      deafBtn.title = dmCall.deafened ? 'Undeafen' : 'Deafen';
+      const ico = deafBtn.querySelector('.dcb-btn-ico');
+      if (ico) ico.innerHTML = `<i data-ic="${dmCall.deafened ? 'headphones-off' : 'headphones'}"></i>`;
+      const lbl = $('dcb-deafen-lbl');
+      if (lbl) lbl.textContent = dmCall.deafened ? 'Undeafen' : 'Deafen';
+      hydrateIcons(deafBtn);
+    }
+    const timer = $('dcb-timer');
+    if (timer) timer.textContent = dmCall.state === 'active' && dmCall.startedAt ? fmtCallTime(Date.now() - dmCall.startedAt) : '00:00';
   }
   updateCallButton();
   renderRail();
@@ -4190,12 +4216,33 @@ function startDmCallTimer() {
   }, 1000);
 }
 
+/* Looping ringtone (public/sounds/ringtone.mp3). One shared <audio> element is
+   reused so the browser only downloads it once; it is rewound and replayed on
+   every new ring and hard-stopped the moment the call is answered, declined or
+   cancelled. Respects the user's "notification sounds" setting. */
+let ringtoneEl = null;
+function getRingtoneEl() {
+  if (!ringtoneEl) {
+    ringtoneEl = new Audio('/sounds/ringtone.mp3');
+    ringtoneEl.preload = 'auto';
+    ringtoneEl.loop = true;
+    ringtoneEl.volume = 0.6;
+  }
+  return ringtoneEl;
+}
 function startDmRing() {
   stopDmRing();
-  dmCall.ringId = setInterval(() => { if (setting('notifSounds') !== false) playPing(); }, 1600);
+  if (setting('notifSounds') === false) return;
+  const el = getRingtoneEl();
+  try { el.currentTime = 0; } catch (e) { /* not seekable yet */ }
+  const p = el.play();
+  if (p && typeof p.catch === 'function') p.catch(() => { /* blocked before a gesture */ });
 }
 function stopDmRing() {
   if (dmCall.ringId) { clearInterval(dmCall.ringId); dmCall.ringId = 0; }
+  if (ringtoneEl) {
+    try { ringtoneEl.pause(); ringtoneEl.currentTime = 0; } catch (e) {}
+  }
 }
 
 /* Tear everything down and return to idle. `notify` controls whether we tell
@@ -4235,7 +4282,9 @@ async function ensureDmCallMic() {
     dmCall.rawStream = raw;
     /* Reuse the same gain/analyser processing chain as server voice. */
     const processed = buildProcessedMic(raw);
-    dmCall.localStream = processed || raw;
+    /* buildProcessedMic returns { stream }, not a MediaStream - using the
+       wrapper here made getAudioTracks() throw and every DM call fail. */
+    dmCall.localStream = (processed && processed.stream) || raw;
     dmCall.localStream.getAudioTracks().forEach(t => { t.enabled = !dmCall.muted; });
     return true;
   } catch (e) {
@@ -4259,7 +4308,12 @@ async function startDmCall() {
   dmCall.state = 'ringing';
   dmCall.incoming = null;
   dmCall.call = null;
+  dmCall.muted = false;
+  dmCall.deafened = false;
+  applyDmCallAudioState();
   socket.emit('dm_call_start', { dm_id: state.dm.id });
+  /* Ring locally too, so the caller knows the call is still going out. */
+  startDmRing();
   renderDmCallUI();
 }
 
@@ -4275,6 +4329,9 @@ async function acceptDmCall() {
   dmCall.signalExtra = { dm_id: inc.dm_id };
   dmCall.incoming = null;
   dmCall.state = 'connecting';
+  dmCall.muted = false;
+  dmCall.deafened = false;
+  applyDmCallAudioState();
   stopDmRing();
   socket.emit('dm_call_accept', { dm_id: inc.dm_id });
   renderDmCallUI();
@@ -4318,6 +4375,7 @@ function onDmCallIncoming(payload) {
 function onDmCallAccepted(payload) {
   if (!payload || payload.dm_id !== dmCall.dmId) return;
   if (dmCall.state === 'active') return;
+  stopDmRing();
   dmCall.state = 'connecting';
   dmCall.startedAt = (payload.call && payload.call.started_at) || Date.now();
   renderDmCallUI();
@@ -4331,19 +4389,29 @@ function onDmCallAccepted(payload) {
   renderDmCallUI();
 }
 
+function applyDmCallAudioState() {
+  if (dmCall.localStream) {
+    dmCall.localStream.getAudioTracks().forEach(t => { t.enabled = !dmCall.muted; });
+  }
+  Object.values(dmCall.peers).forEach(p => { if (p.audioEl) p.audioEl.muted = dmCall.deafened; });
+}
+
 function toggleDmCallMute() {
   if (dmCall.state === 'idle') return;
   dmCall.muted = !dmCall.muted;
-  if (dmCall.localStream) dmCall.localStream.getAudioTracks().forEach(t => { t.enabled = !dmCall.muted; });
+  /* Unmuting always lifts a deafen too - otherwise the button appears to do
+     nothing because the mic stays disabled. */
+  if (!dmCall.muted) dmCall.deafened = false;
+  applyDmCallAudioState();
   renderDmCallUI();
 }
 
 function toggleDmCallDeafen() {
   if (dmCall.state === 'idle') return;
   dmCall.deafened = !dmCall.deafened;
-  if (dmCall.deafened) { dmCall.muted = true; }
-  if (dmCall.localStream) dmCall.localStream.getAudioTracks().forEach(t => { t.enabled = !dmCall.muted; });
-  Object.values(dmCall.peers).forEach(p => { if (p.audioEl) p.audioEl.muted = dmCall.deafened; });
+  /* Deafening implies muting; undeafening restores the mic. */
+  dmCall.muted = dmCall.deafened;
+  applyDmCallAudioState();
   renderDmCallUI();
 }
 
@@ -4358,6 +4426,7 @@ function wireDmCallUI() {
   on('dcb-hangup', 'click', hangupDmCall);
   on('dcb-mute', 'click', toggleDmCallMute);
   on('dcb-deafen', 'click', toggleDmCallDeafen);
+  on('dcb-settings', 'click', () => openSettings('voice'));
 }
 
 function renderVoicePanel() {
@@ -4552,7 +4621,7 @@ function renderMessages() {
 
   let prev = null;
   for (const m of state.messages) {
-    const grouped = prev && prev.author && m.author && prev.author.id === m.author.id && (m.created_at - prev.created_at) < 5 * 60 * 1000 && !m.reply_to;
+    const grouped = prev && prev.author && m.author && m.kind !== 'call' && prev.kind !== 'call' && prev.author.id === m.author.id && (m.created_at - prev.created_at) < 5 * 60 * 1000 && !m.reply_to;
     inner.appendChild(messageNode(m, grouped));
     prev = m;
   }
@@ -4648,7 +4717,31 @@ async function hydrateReplyRef(m, node) {
   finally { r._hydrating = false; }
 }
 
+/* Automatic "X started a call" row. Rendered as a quiet centred event instead
+   of a normal chat bubble so it never looks like a message someone typed. */
+function callEventNode(m) {
+  const node = document.createElement('div');
+  node.className = 'call-event';
+  node.dataset.mid = m.id;
+  const a = m.author || {};
+  const who = escapeHtml(a.display_name || a.username || 'Someone');
+  const verb = (m.plain || 'started') === 'ended' ? 'ended the call' : 'started a call';
+  node.innerHTML = `
+    <span class="ce-ico" aria-hidden="true">${icon('phone')}</span>
+    <span class="ce-text"><b>${who}</b> ${verb}</span>
+    <span class="ce-time">${shortTime(m.created_at)}</span>
+    <button class="ce-call" type="button">Call back</button>`;
+  hydrateIcons(node);
+  const btn = node.querySelector('.ce-call');
+  if (btn) btn.addEventListener('click', () => {
+    if (dmCall.state !== 'idle') { toast('You are already in a call.', 'info'); return; }
+    startDmCall();
+  });
+  return node;
+}
+
 function messageNode(m, grouped, animate) {
+  if (m && m.kind === 'call') return callEventNode(m);
   const node = document.createElement('div');
   node.className = 'msg-group' + (grouped ? ' compact' : '');
   node.dataset.mid = m.id;
@@ -4748,7 +4841,7 @@ function appendMessage(m) {
   const inner = $('messages-inner');
   if (!inner) { renderMessages(); return; }
   const prev = state.messages[state.messages.length - 2];
-  const grouped = prev && prev.author && m.author && prev.author.id === m.author.id && (m.created_at - prev.created_at) < 5 * 60 * 1000 && !m.reply_to;
+  const grouped = prev && prev.author && m.author && m.kind !== 'call' && prev.kind !== 'call' && prev.author.id === m.author.id && (m.created_at - prev.created_at) < 5 * 60 * 1000 && !m.reply_to;
   const node = messageNode(m, grouped, true);
   inner.appendChild(node);
   typewriterMessage(node, m);
@@ -7540,7 +7633,7 @@ function renderOtherProfile(user, ctx) {
     <div class="oprofile-banner" style="${bannerStyle}"></div>
     <div class="dp-body">
       <div class="dp-head">
-        <div class="dp-avatar">${avatarHTML(user, 104, user.status || 'offline')}</div>
+        <div class="dp-avatar">${avatarHTML(user, 120, user.status || 'offline')}</div>
         <div class="dp-identity">
           <div class="dp-name">${escapeHtml(displayName)}${badgeChips(user)}</div>
           <div class="dp-handle">${escapeHtml(fullTag(user))}${user.pronouns ? ` <span class="dp-pronoun">\u00b7 ${escapeHtml(user.pronouns)}</span>` : ''}</div>
@@ -8162,6 +8255,7 @@ function settingsPanelHTML(section) {
                 <div class="sa-btn-row">
                   <button id="sa-upload">Change Avatar</button>
                   <button class="sa-remove-sm" id="sa-remove" title="Remove avatar" aria-label="Remove avatar"><span aria-hidden="true">×</span></button>
+                  <button class="sa-remove-banner${u.banner_url ? '' : ' hidden'}" id="sa-remove-banner" title="Remove banner image">${icon('trash')} Remove Banner Image</button>
                 </div>
                 <input type="file" id="sa-file" accept="image/*" class="hidden">
               </div>
@@ -8572,6 +8666,7 @@ function wireAccountPanel() {
   const markDirty = () => setSettingsDirty(true);
 
   const removeBtn = $('sa-remove');
+  const bannerInlineRemove = $('sa-remove-banner');
   /* The small remove button only appears while an avatar is actually set. */
   const syncRemoveBtn = () => { if (removeBtn) removeBtn.classList.toggle('hidden', !settingsUploads.avatar_url); };
   syncRemoveBtn();
@@ -8608,6 +8703,7 @@ function wireAccountPanel() {
     }
     /* The Remove button only makes sense while an image/GIF is actually set. */
     if (bannerRemoveBtn) bannerRemoveBtn.classList.toggle('hidden', !settingsUploads.banner_url);
+    if (bannerInlineRemove) bannerInlineRemove.classList.toggle('hidden', !settingsUploads.banner_url);
     previewSelf({ banner_url: settingsUploads.banner_url, banner_color: bannerColor });
   };
   $('set-banner-file-btn').addEventListener('click', () => $('set-banner-file').click());
@@ -8616,6 +8712,12 @@ function wireAccountPanel() {
     paintBanner();
     markDirty();
     toast('Banner removed \u2014 save to apply', 'success');
+  });
+  if (bannerInlineRemove) bannerInlineRemove.addEventListener('click', () => {
+    settingsUploads.banner_url = null;
+    paintBanner();
+    markDirty();
+    toast('Banner removed — save to apply', 'success');
   });
   $('set-banner-file').addEventListener('change', (e) => {
     const f = e.target.files[0]; e.target.value = ''; if (!f) return;

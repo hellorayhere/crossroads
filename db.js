@@ -306,6 +306,11 @@ function migrate() {
   if (!msgCols.includes('attachment_description')) {
     try { db.exec('ALTER TABLE messages ADD COLUMN attachment_description TEXT'); } catch (e) {}
   }
+  /* 1b-6. Additive migration: message kind. NULL/'text' is a normal message;
+     'call' marks an automatic "X started a call" event row. Additive only. */
+  if (!msgCols.includes('kind')) {
+    try { db.exec('ALTER TABLE messages ADD COLUMN kind TEXT'); } catch (e) {}
+  }
   // The pinned index must be created AFTER the column exists (safe for old DBs).
   try { db.exec('CREATE INDEX IF NOT EXISTS idx_messages_pinned ON messages(pinned)'); } catch (e) {}
 

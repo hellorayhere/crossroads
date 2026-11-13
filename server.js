@@ -18,6 +18,7 @@ try {
   if (!_mcols.includes('attachment_spoiler')) db.exec('ALTER TABLE messages ADD COLUMN attachment_spoiler INTEGER DEFAULT 0');
   if (!_mcols.includes('attachment_description')) db.exec('ALTER TABLE messages ADD COLUMN attachment_description TEXT');
   if (!_mcols.includes('content_plain')) db.exec('ALTER TABLE messages ADD COLUMN content_plain TEXT');
+  if (!_mcols.includes('kind')) db.exec('ALTER TABLE messages ADD COLUMN kind TEXT');
 } catch (e) { console.error('[migrate] message columns:', e.message); }
 
 const persist = require('./persist');
@@ -974,6 +975,7 @@ function messageWithMeta(m, currentUserId) {
     dm_id: m.dm_id,
     content: m.content,
     plain: m.content_plain || null,
+    kind: m.kind || 'text',
     attachment_url: m.attachment_url,
     attachment_name: m.attachment_name,
     attachment_type: m.attachment_type,
@@ -1041,6 +1043,7 @@ function messagesWithMeta(rows, currentUserId) {
     dm_id: m.dm_id,
     content: m.content,
     plain: m.content_plain || null,
+    kind: m.kind || 'text',
     attachment_url: m.attachment_url,
     attachment_name: m.attachment_name,
     attachment_type: m.attachment_type,
@@ -4096,6 +4099,19 @@ io.on('connection', (socket) => {
     const calleePublic = callee ? publicUser(callee) : null;
     socket.emit('dm_call_ringing', { dm_id, call: dmCallPublic(call) });
     io.to(`user:${otherId}`).emit('dm_call_incoming', { dm_id, call: dmCallPublic(call), caller: callerPublic });
+    /* Drop a permanent "X started a call" event into the conversation so both
+       people see it in the message history, not just as a transient toast. */
+    try {
+      const evtId = newId();
+      db.prepare(`INSERT INTO messages (id, dm_id, user_id, content, content_plain, kind, created_at)
+                  VALUES (?,?,?,?,?,?,?)`)
+        .run(evtId, dm_id, uid, '', 'started', 'call', Date.now());
+      const evt = db.prepare('SELECT * FROM messages WHERE id = ?').get(evtId);
+      const evtFull = messageWithMeta(evt, uid);
+      db.prepare('DELETE FROM dm_hidden WHERE dm_id = ?').run(dm_id);
+      io.to(`dm:${dm_id}`).emit('dm_message', evtFull);
+      io.to(`user:${otherId}`).emit('dm_notify', { dm_id, message: evtFull });
+    } catch (e) { console.error('[dm call event]', e.message); }
     /* Red notification + badge even when the callee is browsing a server. */
     createNotification(otherId, 'call', { dm_id, caller: callerPublic, call: dmCallPublic(call) });
     /* The caller also gets a record of the outgoing call, so both sides see

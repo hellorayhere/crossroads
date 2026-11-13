@@ -1,17 +1,35 @@
-# Crossroads — current round
+# Crossroads — Round 4
 
-## A. Spoiler actually works
-- [x] Root cause: `sendMessage()` never put `attachment_spoiler` / `attachment_description` into the payload, so the server always stored `0`
-- [x] Add both fields to the outgoing payload
-- [x] Harden render: blur description/size/file-card too, block lightbox clicks before reveal, keyboard (Enter/Space) reveal, focus ring, `revealed` hides overlay
-- [x] Verified live in browser: hidden state blurs image + description, click reveals, no lightbox opens
+## A. Direct-message call UI revamp
+- [x] New incoming-call card (avatar ring, kicker, name, meta, Accept/Decline)
+- [x] New in-call bar (avatar, kicker, name, sub, meta, timer, 4 buttons)
+- [x] Mute / Deafen / Settings / End wired and state-synced (labels + icons + `.off`)
+- [x] Fixed `ensureDmCallMic` using the `{stream}` wrapper instead of the MediaStream (every DM call threw)
+- [x] Reset mute/deafen on new/answered call
 
-## B. Remove profile banner image/GIF
-- [x] Account tab banner editor: added red "Remove" button, auto-hides when no banner is set, marks settings dirty
-- [x] Own profile hero: added "Remove" button that clears `banner_url` immediately and repaints
-- [x] Verified in browser: both buttons appear only with a banner and clear it correctly
+## B. Ringtone
+- [x] `/sounds/ringtone.mp3` served (200, 481 KB)
+- [x] Shared looping `<audio>` used by start/stop ring, respects notifSounds
 
-## C. Ship
+## C. "started a call" in chat
+- [x] `messages.kind` additive column + migrations
+- [x] Server inserts call event on `dm_call_start`, broadcasts `dm_message`/`dm_notify`
+- [x] Client `callEventNode` renders "X started a call" + Call back
+- [x] Grouping guard so call rows never group with text
+
+## D. Maintenance banner
+- [x] Removed the `!` marker (and its CSS); zero SVG icons
+- [x] Reworded footer to "Thanks for your patience — messages, calls and files keep working normally."
+
+## E. Profile UI
+- [x] Red "Remove Banner Image" button beside "Change Avatar" (visible only with a banner)
+- [x] Other-user profile enlarged (1000px, 208px banner, 120px avatar, 30px name)
+
+## F. Network errors
+- [x] Mic wrapper bug fixed
+- [x] No failed resource requests / no JS errors across DM, server, channel, settings, profile flows
+
+## G. Ship
 - [ ] Commit + push
 - [ ] Deploy + poll until live
-- [ ] Verify live assets
+- [ ] Verify live version

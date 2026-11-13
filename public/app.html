@@ -175,30 +175,66 @@
   <!-- Modal overlay -->
   <!-- Direct-message voice call UI (incoming ring + active call bar) -->
   <div id="dm-call-layer" class="dm-call-layer hidden">
+
+    <!-- Incoming call -------------------------------------------------->
     <div id="dm-call-incoming" class="dm-call-incoming hidden">
-      <div class="dci-avatar" id="dci-avatar"></div>
-      <div class="dci-body">
-        <div class="dci-name" id="dci-name">Someone</div>
-        <div class="dci-sub" id="dci-sub">Incoming voice call…</div>
-        <div class="dci-meta" id="dci-meta"></div>
+      <div class="dci-glow" aria-hidden="true"></div>
+      <div class="dci-head">
+        <div class="dci-avatar-wrap">
+          <span class="dci-ring" aria-hidden="true"></span>
+          <div class="dci-avatar" id="dci-avatar"></div>
+        </div>
+        <div class="dci-body">
+          <div class="dci-kicker"><span class="dci-live-dot" aria-hidden="true"></span>Incoming call</div>
+          <div class="dci-name" id="dci-name">Someone</div>
+          <div class="dci-sub" id="dci-sub">Voice call</div>
+          <div class="dci-meta" id="dci-meta"></div>
+        </div>
       </div>
       <div class="dci-actions">
-        <button class="dci-btn decline" id="dci-decline" title="Decline"><i data-ic="phone-off"></i></button>
-        <button class="dci-btn accept" id="dci-accept" title="Accept"><i data-ic="phone"></i></button>
+        <button class="dci-act decline" id="dci-decline" title="Decline" aria-label="Decline call">
+          <span class="dci-act-ico"><i data-ic="phone-off"></i></span>
+          <span class="dci-act-lbl">Decline</span>
+        </button>
+        <button class="dci-act accept" id="dci-accept" title="Accept" aria-label="Accept call">
+          <span class="dci-act-ico"><i data-ic="phone"></i></span>
+          <span class="dci-act-lbl">Accept</span>
+        </button>
       </div>
     </div>
+
+    <!-- Active / outgoing call ----------------------------------------->
     <div id="dm-call-bar" class="dm-call-bar hidden">
-      <div class="dcb-pulse"><i data-ic="phone"></i></div>
-      <div class="dcb-body">
-        <div class="dcb-name" id="dcb-name">Call</div>
-        <div class="dcb-sub" id="dcb-sub">Connecting…</div>
-        <div class="dcb-meta" id="dcb-meta"></div>
+      <div class="dcb-top">
+        <div class="dcb-avatar-wrap">
+          <span class="dcb-ring" aria-hidden="true"></span>
+          <div class="dcb-avatar" id="dcb-avatar"></div>
+        </div>
+        <div class="dcb-body">
+          <div class="dcb-kicker" id="dcb-kicker">Voice call</div>
+          <div class="dcb-name" id="dcb-name">Call</div>
+          <div class="dcb-sub" id="dcb-sub">Connecting…</div>
+          <div class="dcb-meta" id="dcb-meta"></div>
+        </div>
+        <div class="dcb-timer" id="dcb-timer">00:00</div>
       </div>
-      <div class="dcb-timer" id="dcb-timer">00:00</div>
       <div class="dcb-actions">
-        <button class="dcb-btn" id="dcb-mute" title="Mute"><i data-ic="mic"></i></button>
-        <button class="dcb-btn" id="dcb-deafen" title="Deafen"><i data-ic="headphones"></i></button>
-        <button class="dcb-btn hangup" id="dcb-hangup" title="End Call"><i data-ic="phone-off"></i></button>
+        <button class="dcb-btn" id="dcb-mute" title="Mute" aria-label="Mute microphone">
+          <span class="dcb-btn-ico"><i data-ic="mic"></i></span>
+          <span class="dcb-btn-lbl" id="dcb-mute-lbl">Mute</span>
+        </button>
+        <button class="dcb-btn" id="dcb-deafen" title="Deafen" aria-label="Deafen">
+          <span class="dcb-btn-ico"><i data-ic="headphones"></i></span>
+          <span class="dcb-btn-lbl" id="dcb-deafen-lbl">Deafen</span>
+        </button>
+        <button class="dcb-btn" id="dcb-settings" title="Voice Settings" aria-label="Voice settings">
+          <span class="dcb-btn-ico"><i data-ic="settings"></i></span>
+          <span class="dcb-btn-lbl">Settings</span>
+        </button>
+        <button class="dcb-btn hangup" id="dcb-hangup" title="End Call" aria-label="End call">
+          <span class="dcb-btn-ico"><i data-ic="phone-off"></i></span>
+          <span class="dcb-btn-lbl">End</span>
+        </button>
       </div>
     </div>
   </div>
