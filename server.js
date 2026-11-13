@@ -456,6 +456,7 @@ function publicUser(u, opts = {}) {
     platform_admin: isGlobalAdmin(u),
     platform_owner: isOwner(u),
     badges: badgesForUser(u.id),
+    bot: !!u.is_webhook,
     created_at: u.created_at
   };
   if (opts.self) out.twofa_enabled = !!u.twofa_enabled;
@@ -988,6 +989,7 @@ function messageWithMeta(m, currentUserId) {
     reply_to: replyPreviewOf(m),
     mentions: safeParse(m.mentions, []),
     pinned: !!m.pinned,
+    embed: safeParse(m.embed, null),
     author: publicUser(author),
     reactions: groupReactions(reactions, currentUserId)
   };
@@ -1056,6 +1058,7 @@ function messagesWithMeta(rows, currentUserId) {
     reply_to: m.reply_to_id ? (replyMap[m.reply_to_id] || null) : null,
     mentions: safeParse(m.mentions, []),
     pinned: !!m.pinned,
+    embed: safeParse(m.embed, null),
     author: publicUser(authorMap[m.user_id]),
     reactions: groupReactions(reactMap[m.id] || [], currentUserId)
   }));
@@ -1153,6 +1156,34 @@ function webhookPublic(wh) {
   };
 }
 
+/* Normalise an embed object from any sender into a safe, renderable shape. */
+function sanitizeEmbed(e) {
+  if (!e || typeof e !== 'object') return null;
+  const out = {};
+  if (e.title) out.title = String(e.title).slice(0, 256);
+  if (e.description) out.description = String(e.description).slice(0, 4000);
+  if (e.url) out.url = String(e.url).slice(0, 2000);
+  if (e.color != null) {
+    let n = Number(e.color);
+    if (Number.isFinite(n)) out.color = '#' + Math.max(0, Math.min(0xffffff, Math.trunc(n))).toString(16).padStart(6, '0');
+    else if (/^#[0-9a-f]{6}$/i.test(String(e.color))) out.color = String(e.color);
+  }
+  const thumb = e.thumbnail && (e.thumbnail.url || e.thumbnail);
+  if (thumb && typeof thumb === 'string') out.thumbnail = thumb.slice(0, 2000);
+  const img = e.image && (e.image.url || e.image);
+  if (img && typeof img === 'string') out.image = img.slice(0, 2000);
+  if (e.footer) out.footer = String(e.footer.text || e.footer).slice(0, 256);
+  if (e.author) out.author_name = String(e.author.name || e.author).slice(0, 256);
+  if (Array.isArray(e.fields)) {
+    out.fields = e.fields.slice(0, 10).map(f => ({
+      name: String((f && f.name) || '').slice(0, 256),
+      value: String((f && f.value) || '').slice(0, 1024),
+      inline: !!(f && f.inline)
+    })).filter(f => f.name || f.value);
+  }
+  return Object.keys(out).length ? out : null;
+}
+
 /* Extract readable text from the many shapes an external service may send:
    Discord/Slack style JSON, plain text, form fields, or embeds. */
 function incomingWebhookText(body) {
@@ -1176,18 +1207,27 @@ function incomingWebhookText(body) {
   return String(text || '').trim();
 }
 
+/* Pick the embed (if any) out of a webhook payload. */
+function incomingWebhookEmbed(body) {
+  const b = (body && typeof body === 'object') ? body : {};
+  if (Array.isArray(b.embeds) && b.embeds.length) return sanitizeEmbed(b.embeds[0]);
+  if (b.embed && typeof b.embed === 'object') return sanitizeEmbed(b.embed);
+  return null;
+}
+
 /* Insert a message into a channel on behalf of a webhook. Shared by the public
    endpoint and the in-app "Send test" button. */
-function postWebhookMessage(wh, ch, rawText) {
+function postWebhookMessage(wh, ch, rawText, embed) {
   const text = String(rawText || '').trim().slice(0, 4000);
-  if (!text) return null;
+  const emb = embed ? sanitizeEmbed(embed) : null;
+  if (!text && !emb) return null;
   const bot = wh.bot_user_id ? db.prepare('SELECT * FROM users WHERE id = ?').get(wh.bot_user_id) : null;
   if (!bot) return null;
   const id = newId();
   const now = Date.now();
-  db.prepare(`INSERT INTO messages (id, channel_id, user_id, content, created_at, mentions)
-              VALUES (?,?,?,?,?,?)`)
-    .run(id, ch.id, bot.id, text, now, '[]');
+  db.prepare(`INSERT INTO messages (id, channel_id, user_id, content, embed, created_at, mentions)
+              VALUES (?,?,?,?,?,?,?)`)
+    .run(id, ch.id, bot.id, text, emb ? JSON.stringify(emb) : null, now, '[]');
   const m = db.prepare('SELECT * FROM messages WHERE id = ?').get(id);
   const full = messageWithMeta(m, bot.id);
   io.to(`channel:${ch.id}`).emit('message', full);
@@ -1195,7 +1235,7 @@ function postWebhookMessage(wh, ch, rawText) {
   return full;
 }
 
-/* ---------------- Mentions & notifications ---------------- *//* ---------------- Mentions & notifications ---------------- */
+/* ---------------- Mentions & notifications ---------------- */
 function parseMentionIds(content) {
   if (!content) return [];
   const names = new Set();
@@ -2220,7 +2260,16 @@ app.post('/api/servers/:id/channels/:cid/webhook/test', auth, (req, res) => {
   const wh = getChannelWebhook(ch.id);
   if (!wh || !wh.token) return res.status(400).json({ error: 'Create a webhook first' });
   if (!wh.enabled) return res.status(400).json({ error: 'This webhook is paused' });
-  const msg = postWebhookMessage(wh, ch, 'This is a test message from Crossroads \u2014 your webhook is working.');
+  const msg = postWebhookMessage(wh, ch, 'Your webhook is connected and working.', {
+    title: 'Webhook connected',
+    description: 'Anything sent to this URL will appear in **#' + ch.name + '** with the name and avatar you chose.',
+    color: 0x5865F2,
+    fields: [
+      { name: 'Channel', value: '#' + ch.name, inline: true },
+      { name: 'Status', value: 'Active', inline: true }
+    ],
+    footer: 'Crossroads webhooks'
+  });
   if (!msg) return res.status(500).json({ error: 'Could not post the test message' });
   res.json({ ok: true, message_id: msg.id });
 });
@@ -2258,9 +2307,10 @@ app.post('/api/webhooks/:token', (req, res) => {
   if (!wh.enabled) return res.status(403).json({ error: 'This webhook is paused' });
   const ch = db.prepare('SELECT * FROM channels WHERE id = ?').get(wh.channel_id);
   if (!ch) return res.status(404).json({ error: 'Channel no longer exists' });
+  const embed = incomingWebhookEmbed(req.body);
   const text = incomingWebhookText(req.body);
-  if (!text) return res.status(400).json({ error: 'No message content found' });
-  const msg = postWebhookMessage(wh, ch, text);
+  if (!text && !embed) return res.status(400).json({ error: 'No message content found' });
+  const msg = postWebhookMessage(wh, ch, text, embed);
   if (!msg) return res.status(500).json({ error: 'Could not post the message' });
   res.json({ ok: true, id: msg.id, channel_id: ch.id });
 });

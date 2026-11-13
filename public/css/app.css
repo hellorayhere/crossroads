@@ -440,32 +440,30 @@ button:active, .rail-item:active, .channel:active, .dm-item:active, .member:acti
 .attachment .file-card a { color: var(--link); text-decoration: none; font-weight: 600; }
 .attachment .file-card .fsize { font-size: 12px; color: var(--text-muted); }
 
-/* ---- Rich file embed (non-media attachments) ---- */
+/* ---- Rich file attachment (Discord-style card) ---- */
 .attachment.file-attachment { margin-top: 6px; }
 .file-card.rich {
-  display: flex; align-items: center; gap: 14px; width: min(440px, 100%);
-  padding: 12px 14px; background: linear-gradient(180deg,
-    color-mix(in srgb, var(--card) 92%, #fff 8%), var(--card));
-  border: 1px solid var(--divider); border-radius: 12px; position: relative;
-  transition: border-color .16s ease, transform .16s ease, box-shadow .16s ease;
+  display: flex; align-items: center; gap: 12px; width: min(432px, 100%);
+  padding: 12px 14px 12px 12px;
+  background: color-mix(in srgb, var(--card) 88%, #000);
+  border: 1px solid color-mix(in srgb, var(--divider) 80%, #fff 6%);
+  border-radius: 8px; position: relative;
+  transition: background .14s ease, border-color .14s ease;
 }
-.file-card.rich::before {
-  content: ''; position: absolute; left: 0; top: 12px; bottom: 12px; width: 3px;
-  border-radius: 3px; background: var(--fc-accent, var(--brand)); opacity: .9;
+.file-card.rich:hover {
+  background: color-mix(in srgb, var(--card) 74%, #000);
+  border-color: color-mix(in srgb, var(--divider) 60%, #fff 14%);
 }
-.file-card.rich:hover { border-color: color-mix(in srgb, var(--brand) 55%, var(--divider));
-  transform: translateY(-1px); box-shadow: 0 8px 22px rgba(0,0,0,.28); }
 .file-card.rich .fc-icon {
-  flex: 0 0 auto; width: 46px; height: 46px; border-radius: 11px; position: relative;
+  flex: 0 0 auto; width: 58px; height: 58px; border-radius: 8px; position: relative;
   display: grid; place-items: center; color: #fff; overflow: hidden;
-  background: var(--fc-accent, var(--brand));
-  box-shadow: inset 0 0 0 1px rgba(255,255,255,.08);
+  background: color-mix(in srgb, var(--fc-accent, var(--brand)) 82%, #000);
 }
-.file-card.rich .fc-icon .ic { width: 20px; height: 20px; opacity: .95; }
+.file-card.rich .fc-icon .ic { width: 26px; height: 26px; opacity: .96; }
 .file-card.rich .fc-icon .fc-ext {
-  position: absolute; bottom: 3px; right: 4px; font-size: 8px; font-weight: 800;
-  letter-spacing: .03em; padding: 1px 3px; border-radius: 3px;
-  background: rgba(0,0,0,.32); color: rgba(255,255,255,.92);
+  position: absolute; bottom: 4px; right: 5px; font-size: 8.5px; font-weight: 800;
+  letter-spacing: .04em; padding: 1px 3px; border-radius: 3px;
+  background: rgba(0,0,0,.35); color: rgba(255,255,255,.95);
 }
 .file-card.rich .fc-icon.pdf   { --fc-accent: #e5484d; }
 .file-card.rich .fc-icon.doc   { --fc-accent: #2b6cb0; }
@@ -480,17 +478,18 @@ button:active, .rail-item:active, .channel:active, .dm-item:active, .member:acti
 .file-card.rich .fc-icon.txt   { --fc-accent: #5b6b7f; }
 .file-card.rich .fc-main { flex: 1; min-width: 0; }
 .file-card.rich .fc-name {
-  font-size: 14px; font-weight: 600; color: var(--text-header);
+  display: block; font-size: 14.5px; font-weight: 600; color: var(--link);
+  text-decoration: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.file-card.rich .fc-name:hover { text-decoration: underline; }
+.file-card.rich .fc-sub {
+  font-size: 12px; color: var(--text-muted); margin-top: 4px;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
-.file-card.rich .fc-sub {
-  font-size: 12px; color: var(--text-muted); margin-top: 3px;
-  display: flex; align-items: center; gap: 6px; white-space: nowrap;
-  overflow: hidden; text-overflow: ellipsis;
-}
-.file-card.rich .fc-actions { flex: 0 0 auto; display: flex; gap: 4px; }
+.file-card.rich .fc-actions { flex: 0 0 auto; display: flex; gap: 2px; opacity: 0; transition: opacity .12s ease; }
+.file-card.rich:hover .fc-actions, .file-card.rich:focus-within .fc-actions { opacity: 1; }
 .file-card.rich .fc-act {
-  width: 32px; height: 32px; border-radius: 8px; display: grid; place-items: center;
+  width: 30px; height: 30px; border-radius: 6px; display: grid; place-items: center;
   color: var(--text-muted); background: transparent; text-decoration: none;
   transition: background .14s ease, color .14s ease;
 }
@@ -498,6 +497,50 @@ button:active, .rail-item:active, .channel:active, .dm-item:active, .member:acti
 .file-card.rich .fc-act .ic { width: 17px; height: 17px; }
 .file-card.rich.missing { border-style: dashed; opacity: .9; }
 .file-card.rich.missing .fc-icon { --fc-accent: color-mix(in srgb, var(--red) 55%, #000); }
+.file-card.rich.missing .fc-actions { opacity: 1; }
+
+/* ---- BOT tag next to an author name ---- */
+.bot-tag {
+  display: inline-flex; align-items: center; gap: 3px; flex: 0 0 auto;
+  margin-left: 6px; padding: 1px 5px 1px 4px; border-radius: 4px;
+  background: var(--brand); color: #fff; font-size: 10px; font-weight: 700;
+  letter-spacing: .02em; line-height: 1.5; text-transform: uppercase;
+  vertical-align: middle; user-select: none;
+}
+.bot-tag .ic { width: 11px; height: 11px; }
+.bot-tag span { transform: translateY(.5px); }
+
+/* ---- Reply highlight (when someone replies to you) ---- */
+.msg-group.reply-to-me {
+  background: color-mix(in srgb, var(--brand) 9%, transparent);
+  box-shadow: inset 3px 0 0 color-mix(in srgb, var(--brand) 70%, transparent);
+  border-radius: 4px;
+}
+.msg-group.reply-to-me:hover { background: color-mix(in srgb, var(--brand) 13%, transparent); }
+
+/* ---- Rich embed card (webhook / structured embeds) ---- */
+.msg-embed {
+  position: relative; display: flex; gap: 0; margin-top: 6px;
+  width: min(432px, 100%); border-radius: 6px; overflow: hidden;
+  background: color-mix(in srgb, var(--card) 72%, #000);
+  border: 1px solid color-mix(in srgb, var(--divider) 80%, #fff 6%);
+}
+.msg-embed .emb-accent { flex: 0 0 4px; background: var(--embed-accent, var(--brand)); }
+.msg-embed .emb-body { flex: 1; min-width: 0; padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; }
+.msg-embed .emb-author { font-size: 12.5px; font-weight: 700; color: var(--text-header); }
+.msg-embed .emb-title { font-size: 15px; font-weight: 700; color: var(--text-header); text-decoration: none; }
+.msg-embed a.emb-title:hover { text-decoration: underline; }
+.msg-embed .emb-desc { font-size: 13.5px; color: var(--text-normal); line-height: 1.45; white-space: pre-wrap; word-break: break-word; }
+.msg-embed .emb-fields { display: flex; flex-wrap: wrap; gap: 8px 16px; }
+.msg-embed .emb-field { flex: 1 1 100%; min-width: 0; }
+.msg-embed .emb-field.inline { flex: 1 1 40%; }
+.msg-embed .emb-fname { font-size: 12.5px; font-weight: 700; color: var(--text-header); margin-bottom: 2px; }
+.msg-embed .emb-fval { font-size: 13px; color: var(--text-normal); white-space: pre-wrap; word-break: break-word; }
+.msg-embed .emb-image { margin-top: 2px; }
+.msg-embed .emb-image img { max-width: 100%; max-height: 300px; border-radius: 4px; display: block; cursor: pointer; }
+.msg-embed .emb-thumb { position: absolute; top: 12px; right: 14px; width: 80px; height: 80px; }
+.msg-embed .emb-thumb img { width: 100%; height: 100%; object-fit: cover; border-radius: 4px; }
+.msg-embed .emb-footer { font-size: 11.5px; color: var(--text-muted); }
 
 .embed { margin-top: 6px; max-width: 432px; border-left: 4px solid var(--brand); background: #2b2d31; border-radius: 4px; padding: 8px 16px 16px 12px; display: flex; gap: 16px; }
 .embed .embed-content { flex: 1; min-width: 0; }
@@ -4064,6 +4107,7 @@ body[data-theme="light"] .update-card { box-shadow: 0 24px 70px rgba(0, 0, 0, .2
 .ec-wh-toggle:hover { border-color: transparent; background: transparent; }
 .ec-wh-body { padding: 16px; display: flex; flex-direction: column; gap: 14px; }
 .ec-wh-row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.ec-wh-namelabel { display: inline-flex; align-items: center; gap: 7px; }
 .ec-wh-urlrow { display: flex; gap: 8px; align-items: stretch; }
 .ec-wh-urlrow input { flex: 1; min-width: 0; font-family: ui-monospace, monospace; font-size: 12.5px; }
 .ec-wh-urlrow .btn { flex: 0 0 auto; padding: 8px 12px; font-size: 13px; white-space: nowrap; }

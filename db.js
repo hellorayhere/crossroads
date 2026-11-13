@@ -287,6 +287,11 @@ function migrate() {
   if (!msgCols.includes('pinned')) {
     try { db.exec('ALTER TABLE messages ADD COLUMN pinned INTEGER DEFAULT 0'); } catch (e) {}
   }
+  // 1b-2b. Additive migration: rich embed payload (webhook / link embeds).
+  //        Stored as JSON so a webhook can send a custom embed card.
+  if (!msgCols.includes('embed')) {
+    try { db.exec('ALTER TABLE messages ADD COLUMN embed TEXT'); } catch (e) {}
+  }
   // 1b-3. Additive migration: store attachment byte size (for "2.4 MB" labels).
   if (!msgCols.includes('attachment_size')) {
     try { db.exec('ALTER TABLE messages ADD COLUMN attachment_size INTEGER'); } catch (e) {}

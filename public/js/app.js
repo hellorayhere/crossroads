@@ -392,7 +392,10 @@ const ICONS = {
   'caret-down': '<polyline points="6 9 12 15 18 9"/>',
   'mic': '<path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/>',
   'settings': '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>',
-  'hash': '<line x1="4" y1="9" x2="20" y2="9"/><line x1="4" y1="15" x2="20" y2="15"/><line x1="10" y1="3" x2="8" y2="21"/><line x1="16" y1="3" x2="14" y2="21"/>',
+  'hash': '<path d="M9.5 3.5 7.5 20.5"/><path d="M16.5 3.5 14.5 20.5"/><path d="M4 8.75h16"/><path d="M3.5 15.25h16"/>',
+  /* Verified / bot badge: a rounded starburst with a tick, used for the BOT
+     tag next to webhook and bot names. */
+  'check-badge': '<path d="M12 2.6l2.05 1.5 2.53-.27 1.06 2.32 2.32 1.06-.27 2.53L21.4 12l-1.5 2.05.27 2.53-2.32 1.06-1.06 2.32-2.53-.27L12 21.4l-2.05-1.5-2.53.27-1.06-2.32-2.32-1.06.27-2.53L2.6 12l1.5-2.05-.27-2.53 2.32-1.06 1.06-2.32 2.53.27z"/><polyline points="8.6 12.2 11 14.6 15.6 9.6"/>',
   'bell': '<path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/>',
   'users': '<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>',
   'user-group': '<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>',
@@ -4793,15 +4796,19 @@ function callEventNode(m) {
 
 function messageNode(m, grouped, animate) {
   if (m && m.kind === 'call') return callEventNode(m);
+  /* Discord highlights a message when it is a reply to *you*: a soft tint plus
+     an accent bar down the left edge. */
+  const replyToMe = !!(m.reply_to && m.reply_to.author && me && m.reply_to.author.id === me.id);
   const node = document.createElement('div');
-  node.className = 'msg-group' + (grouped ? ' compact' : '');
+  node.className = 'msg-group' + (grouped ? ' compact' : '') + (replyToMe ? ' reply-to-me' : '');
   node.dataset.mid = m.id;
   node.dataset.uid = m.author.id;
   const a = m.author;
   const gutter = grouped
     ? `<div class="gutter"><span class="mini-time">${shortTime(m.created_at)}</span></div>`
     : `<div class="gutter">${avatarHTML(a, 40)}</div>`;
-  const head = grouped ? '' : `<div class="head"><span class="author">${escapeHtml(a.display_name || a.username)}</span><span class="time">${formatTime(m.created_at)}</span></div>`;
+  const botTag = a.bot ? `<span class="bot-tag" title="Verified bot">${icon('check-badge')}<span>BOT</span></span>` : '';
+  const head = grouped ? '' : `<div class="head"><span class="author">${escapeHtml(a.display_name || a.username)}</span>${botTag}<span class="time">${formatTime(m.created_at)}</span></div>`;
   const toolbar = `<div class="msg-toolbar">
       <button data-act="react" title="Add Reaction">${icon('smile-plus')}</button>
       <button data-act="reply" title="Reply">${icon('reply')}</button>
@@ -4842,6 +4849,7 @@ function messageNode(m, grouped, animate) {
 
   if (m.attachment_url) node.querySelector('.attachment-slot').appendChild(attachmentNode(m));
   const slot = node.querySelector('.embed-slot');
+  if (m.embed) slot.appendChild(embedCardNode(m.embed));
   const inviteCodes = extractInviteCodes(m.content);
   if (inviteCodes.length) {
     inviteCodes.slice(0, 1).forEach(c => slot.appendChild(inviteEmbedNode(c)));
@@ -5392,18 +5400,56 @@ function richFileCardHTML(m, url, sizeText, opts = {}) {
   const sub = missing
     ? escapeHtml(opts.missingText || 'File unavailable')
     : [info.label, sizeText].filter(Boolean).map(escapeHtml).join(' \u2022 ');
+  /* Discord-style attachment card: a tall file-type tile on the left, the
+     filename and size stacked beside it, and a download button that only
+     appears on hover. */
   const actions = missing
     ? `<a class="fc-act" href="${escapeHtml(url)}" target="_blank" rel="noopener" title="Open">${icon('external-link')}</a>`
-    : `<a class="fc-act" href="${escapeHtml(url)}" target="_blank" rel="noopener" title="Open in new tab">${icon('external-link')}</a>
-       <a class="fc-act" href="${escapeHtml(url)}" download="${escapeHtml(name)}" title="Download">${icon('download')}</a>`;
+    : `<a class="fc-act" href="${escapeHtml(url)}" download="${escapeHtml(name)}" title="Download">${icon('download')}</a>
+       <a class="fc-act fc-open" href="${escapeHtml(url)}" target="_blank" rel="noopener" title="Open in new tab">${icon('external-link')}</a>`;
   return `<div class="file-card rich${missing ? ' missing' : ''}">
-    <div class="fc-icon ${info.cls}"><span class="fc-ext">${escapeHtml(info.ext)}</span>${icon(info.icon)}</div>
+    <div class="fc-icon ${info.cls}">${icon(info.icon)}<span class="fc-ext">${escapeHtml(info.ext)}</span></div>
     <div class="fc-main">
-      <div class="fc-name" title="${escapeHtml(name)}">${escapeHtml(name)}</div>
+      <a class="fc-name" href="${escapeHtml(url)}" target="_blank" rel="noopener" title="${escapeHtml(name)}">${escapeHtml(name)}</a>
       <div class="fc-sub">${sub}</div>
     </div>
     <div class="fc-actions">${actions}</div>
   </div>`;
+}
+
+/* Rich embed card, used by webhook messages and anything else that supplies a
+   structured `embed` payload. Mirrors the Discord embed look: accent stripe,
+   optional author line, title, description, fields, image/thumbnail, footer. */
+function embedCardNode(e) {
+  const wrap = document.createElement('div');
+  wrap.className = 'msg-embed';
+  const accent = e.color || '#5865F2';
+  wrap.style.setProperty('--embed-accent', accent);
+  const parts = [];
+  if (e.author_name) parts.push(`<div class="emb-author">${escapeHtml(e.author_name)}</div>`);
+  if (e.title) {
+    parts.push(e.url
+      ? `<a class="emb-title" href="${escapeHtml(e.url)}" target="_blank" rel="noopener">${escapeHtml(e.title)}</a>`
+      : `<div class="emb-title">${escapeHtml(e.title)}</div>`);
+  }
+  if (e.description) parts.push(`<div class="emb-desc">${formatContent(e.description)}</div>`);
+  if (Array.isArray(e.fields) && e.fields.length) {
+    parts.push(`<div class="emb-fields">${e.fields.map(f =>
+      `<div class="emb-field${f.inline ? ' inline' : ''}"><div class="emb-fname">${escapeHtml(f.name)}</div><div class="emb-fval">${formatContent(f.value)}</div></div>`
+    ).join('')}</div>`);
+  }
+  if (e.image) parts.push(`<div class="emb-image"><img src="${escapeHtml(e.image)}" alt="" loading="lazy" decoding="async"></div>`);
+  if (e.footer) parts.push(`<div class="emb-footer">${escapeHtml(e.footer)}</div>`);
+  wrap.innerHTML = `<div class="emb-accent"></div><div class="emb-body">${parts.join('')}</div>`;
+  if (e.thumbnail) {
+    const th = document.createElement('div');
+    th.className = 'emb-thumb';
+    th.innerHTML = `<img src="${escapeHtml(e.thumbnail)}" alt="" loading="lazy" decoding="async">`;
+    wrap.querySelector('.emb-body').appendChild(th);
+  }
+  const img = wrap.querySelector('.emb-image img');
+  if (img) img.addEventListener('click', () => lightbox(e.image, 'image', e.title || '', ''));
+  return wrap;
 }
 
 function attachmentNode(m) {
@@ -7522,7 +7568,7 @@ function openEditChannel(c) {
           <div class="hint">Paste this URL wherever you want messages to come from \u2014 GitHub, Zapier, a bot, or a simple curl request.</div>
         </div>
         <div class="ec-wh-row">
-          <div class="field"><label>Webhook Name</label>
+          <div class="field"><label class="ec-wh-namelabel">Webhook Name <span class="bot-tag" title="Verified bot">${icon('check-badge')}<span>BOT</span></span></label>
             <input id="ec-wh-name" placeholder="Crossroads" maxlength="80">
             <div class="hint">The name messages appear under in this channel.</div></div>
           <div class="field"><label>Profile Picture</label>
@@ -7676,7 +7722,6 @@ function openEditChannel(c) {
           return;
         }
       }
-      closeModal();
       toast('Channel updated', 'success');
     } catch (e) { toast(e.message, 'error'); }
   });
@@ -7955,7 +8000,7 @@ function renderOtherProfile(user, ctx) {
       <div class="dp-head">
         <div class="dp-avatar">${avatarHTML(user, 120, user.status || 'offline')}</div>
         <div class="dp-identity">
-          <div class="dp-name">${escapeHtml(displayName)}${badgeChips(user)}</div>
+          <div class="dp-name">${escapeHtml(displayName)}${user.bot ? `<span class="bot-tag" title="Verified bot">${icon('check-badge')}<span>BOT</span></span>` : ''}${badgeChips(user)}</div>
           <div class="dp-handle">${escapeHtml(fullTag(user))}${user.pronouns ? ` <span class="dp-pronoun">\u00b7 ${escapeHtml(user.pronouns)}</span>` : ''}</div>
           ${serverRolePills(user)}
           ${user.custom_status ? `<div class="dp-custom">${escapeHtml(user.custom_status)}</div>` : ''}
@@ -8220,7 +8265,6 @@ function openSettings(section) {
     if (!ok2) return;
     setSettingsDirty(false);
     toast('Settings saved', 'success');
-    closeModal();
   });
   $('set-discard').addEventListener('click', () => {
     if (!settingsDirty) return;
@@ -10321,7 +10365,7 @@ function admBadgeDialog(badge) {
       if (resolvedUser && savedBadge) {
         await api('/api/admin/users/' + resolvedUser.id + '/badges', { method: 'POST', body: JSON.stringify({ badge_id: savedBadge.id, assigned: true }) });
       }
-      done();
+      if (!badge) done();
       toast(resolvedUser ? 'Badge saved and given to ' + (resolvedUser.username || 'user') : (badge ? 'Badge updated' : 'Badge created'), 'success');
       renderAdminTab('badges');
     } catch (e) { toast(e.message, 'error'); }
@@ -11758,7 +11802,7 @@ function openRoleEditor(s, role) {
     try {
       if (role) await api('/api/servers/' + s.id + '/roles/' + role.id, { method: 'PATCH', body: JSON.stringify(payload) });
       else await api('/api/servers/' + s.id + '/roles', { method: 'POST', body: JSON.stringify(payload) });
-      done();
+      if (!role) done();
       toast(role ? 'Role updated' : 'Role created', 'success');
       await refreshRoles();
       renderServerTab('roles', state.server, state.server.owner_id === me.id);
