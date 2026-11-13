@@ -5033,6 +5033,19 @@ function attachmentNode(m) {
        Swap in a clear card so the attachment is always visible. */
     imgEl.addEventListener('error', () => {
       if (!imgEl.isConnected) return;
+      /* Transient failures (cold CDN/disk wake-up, flaky network) are common on
+         free hosting, so retry a couple of times with a cache-busting query
+         before we give up and show the "unavailable" card. */
+      const tries = Number(imgEl.dataset.retries || 0);
+      if (tries < 2) {
+        imgEl.dataset.retries = String(tries + 1);
+        const base = url.split('?')[0];
+        setTimeout(() => {
+          if (!imgEl.isConnected) return;
+          imgEl.src = `${base}?r=${tries + 1}&t=${Date.now()}`;
+        }, 700 * (tries + 1));
+        return;
+      }
       wrap.classList.remove('media', 'gif');
       wrap.classList.add('attachment-missing');
       wrap.innerHTML = `<div class="file-card missing"><div class="fi">${icon('image')}</div><div class="fc-meta"><span class="missing-name">${escapeHtml(m.attachment_name || 'image')}</span><div class="fsize">Image unavailable \u2022 ${escapeHtml(sizeText || 'file missing')}</div></div></div>`;
