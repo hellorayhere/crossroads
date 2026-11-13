@@ -153,6 +153,9 @@ app.use('/uploads', async (req, res) => {
   uploadMissCache.delete(name);
   res.set('X-Content-Type-Options', 'nosniff');
   res.set('Content-Security-Policy', "default-src 'none'; img-src 'self'; media-src 'self'; style-src 'unsafe-inline'");
+  if (DANGEROUS_EXT.has(path.extname(name).toLowerCase())) {
+    res.set('Content-Disposition', `attachment; filename="${name}"`);
+  }
   res.sendFile(path.join(UPLOAD_DIR, name), {
     maxAge: '365d',
     immutable: true,
