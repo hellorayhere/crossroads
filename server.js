@@ -1767,6 +1767,11 @@ app.post('/api/notifications/read', auth, (req, res) => {
   res.json({ ok: true });
 });
 
+app.delete('/api/notifications', auth, (req, res) => {
+  db.prepare('DELETE FROM notifications WHERE user_id = ?').run(req.user.id);
+  res.json({ ok: true });
+});
+
 app.delete('/api/notifications/:id', auth, (req, res) => {
   db.prepare('DELETE FROM notifications WHERE id = ? AND user_id = ?').run(req.params.id, req.user.id);
   res.json({ ok: true });

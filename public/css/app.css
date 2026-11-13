@@ -136,7 +136,10 @@ button:active, .rail-item:active, .channel:active, .dm-item:active, .member:acti
   position: relative; width: 48px; height: 48px; border-radius: 16px;
   background: var(--chat-bg); display: grid; place-items: center;
   font-size: 19px; color: var(--text-normal); cursor: pointer;
-  overflow: hidden; flex: 0 0 auto; user-select: none;
+  /* Visible so the unread/call badges can sit just outside the tile corner
+     instead of covering the server artwork. The icon image keeps its own
+     inherited border-radius, so the tile still reads as a rounded square. */
+  overflow: visible; flex: 0 0 auto; user-select: none;
 }
 /* Discord keeps the rail icons on their own artwork and never paints a blue
    highlight behind them; hover/selected simply squash the tile slightly and
@@ -145,9 +148,10 @@ button:active, .rail-item:active, .channel:active, .dm-item:active, .member:acti
 .rail-item.active { background: #404249; }
 .rail-item img { width: 100%; height: 100%; object-fit: cover; border-radius: inherit; }
 .rail-item .badge {
-  position: absolute; bottom: -2px; right: -2px; min-width: 20px; height: 20px;
+  position: absolute; bottom: -4px; right: -4px; min-width: 20px; height: 20px;
   border-radius: 10px; background: var(--red); border: 3px solid var(--rail-bg);
   color: #fff; font-size: 11px; font-weight: 700; display: grid; place-items: center; padding: 0 4px;
+  pointer-events: none; z-index: 2;
 }
 .rail-divider { width: 32px; height: 2px; background: color-mix(in srgb, var(--rail-bg) 70%, #fff); opacity: .25; border-radius: 1px; margin: 2px 0; flex: 0 0 auto; }
 .rail-item.add, .rail-item.explore { color: #fff; }
@@ -182,19 +186,18 @@ button:active, .rail-item:active, .channel:active, .dm-item:active, .member:acti
    Discord-style: a slim, inset card rather than a full-width block. */
 .sidebar-banner {
   flex: 0 0 auto;
-  /* Full-bleed: spans the entire sidebar width, edge to edge, so the artwork
-     reads as a real server banner instead of a small inset card. */
-  width: 100%;
-  height: 260px;
-  min-height: 260px;
-  margin: 0 0 6px;
-  border-radius: 0;
+  /* Inset card: a touch narrower than the sidebar so the banner reads as a
+     framed piece of artwork rather than a full-bleed block. */
+  width: calc(100% - 24px);
+  height: 244px;
+  min-height: 244px;
+  margin: 0 12px 8px;
+  border-radius: 10px;
   background-size: cover;
   background-position: center;
   background-repeat: no-repeat;
   background-color: var(--sidebar-bg);
-  border: 0;
-  border-bottom: 1px solid var(--divider);
+  border: 1px solid var(--divider);
   position: relative;
   overflow: hidden;
 }
@@ -300,11 +303,12 @@ button:active, .rail-item:active, .channel:active, .dm-item:active, .member:acti
 .chat-header .hdr-icons { display: flex; gap: 6px; color: var(--text-muted); font-size: 17px; align-items: center; }
 .chat-header .hdr-icons button { color: var(--text-muted); width: 34px; height: 34px; border-radius: var(--radius-sm); display: grid; place-items: center; }
 .chat-header .hdr-icons button:hover { color: var(--text-header); background: var(--hover); }
-.hdr-notif { position: relative; }
+.hdr-notif { position: relative; overflow: visible; }
 .notif-badge {
-  position: absolute; top: 1px; right: 1px; min-width: 17px; height: 17px; padding: 0 4px;
+  position: absolute; top: -3px; right: -3px; min-width: 17px; height: 17px; padding: 0 4px;
   border-radius: 9px; background: var(--red); color: #fff; font-size: 10px; font-weight: 700;
   display: grid; place-items: center; border: 2px solid var(--chat-bg);
+  pointer-events: none; z-index: 2;
 }
 .notif-badge.hidden { display: none; }
 
@@ -339,44 +343,41 @@ button:active, .rail-item:active, .channel:active, .dm-item:active, .member:acti
 .msg-group.fade-in { animation: none; }
 .msg-group.flash { animation: flashHighlight 1.4s ease; }
 
-/* Inline "X started a call" event row.
-   A quiet centred rule with a small neutral glyph - it reads as a system
-   event in the transcript, not as a coloured card competing with messages. */
+/* Inline "X started a voice call" event row.
+   A quiet, centred system line with the caller's avatar so it feels personal
+   and part of the transcript rather than a cartoonish card. */
 .call-event {
-  display: flex; align-items: center; gap: 12px;
-  margin: 10px 16px; padding: 0;
+  display: flex; align-items: center; justify-content: center;
+  margin: 9px 16px; padding: 0;
   font-size: 13px; color: var(--text-muted);
 }
-.call-event .ce-rule {
-  flex: 1 1 auto; height: 1px; background: var(--divider); opacity: .55;
-}
 .call-event .ce-body {
-  flex: 0 0 auto; display: flex; align-items: center; gap: 8px;
-  max-width: 78%; padding: 5px 12px; border-radius: 6px;
-  background: color-mix(in srgb, var(--text-normal) 7%, transparent);
-  border: 1px solid var(--divider);
+  display: inline-flex; align-items: center; gap: 8px;
+  max-width: 88%; padding: 4px 12px 4px 5px; border-radius: 999px;
+  background: color-mix(in srgb, var(--text-normal) 5%, transparent);
+  border: 1px solid color-mix(in srgb, var(--divider) 70%, transparent);
+  transition: background .14s ease, border-color .14s ease;
 }
-.call-event .ce-ico {
-  display: inline-flex; align-items: center; justify-content: center;
-  width: 15px; height: 15px; color: var(--text-faint); flex: 0 0 auto;
+.call-event:hover .ce-body {
+  background: color-mix(in srgb, var(--text-normal) 8%, transparent);
+  border-color: var(--divider);
 }
-.call-event .ce-ico .ic { width: 15px; height: 15px; }
-.call-event .ce-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-normal); }
+.call-event .ce-avatar { flex: 0 0 auto; display: inline-flex; width: 22px; height: 22px; }
+.call-event .ce-avatar .avatar { width: 22px; height: 22px; font-size: 9px; border-radius: 50%; }
+.call-event .ce-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-muted); }
 .call-event .ce-text b { color: var(--text-normal); font-weight: 600; }
 .call-event .ce-time { flex: 0 0 auto; font-size: 11px; color: var(--text-faint); }
 .call-event .ce-call {
-  flex: 0 0 auto; margin-left: 2px; padding: 3px 9px; border-radius: 4px;
-  border: 1px solid var(--divider); background: transparent;
-  color: var(--text-muted); font: inherit; font-size: 11.5px; font-weight: 600;
-  cursor: pointer; transition: background .12s ease, color .12s ease, border-color .12s ease;
+  flex: 0 0 auto; margin-left: 2px; padding: 2px 8px; border-radius: 999px;
+  border: 0; background: transparent;
+  color: var(--link); font: inherit; font-size: 12px; font-weight: 600;
+  cursor: pointer; transition: background .12s ease, color .12s ease;
 }
-.call-event .ce-call:hover { background: var(--hover); color: var(--text-normal); border-color: transparent; }
-.call-event:hover .ce-rule { opacity: 1; }
+.call-event .ce-call:hover { background: color-mix(in srgb, var(--brand) 18%, transparent); color: var(--text-header); }
 @media (max-width: 560px) {
-  .call-event { margin: 8px 10px; gap: 8px; }
-  .call-event .ce-body { max-width: 88%; }
+  .call-event { margin: 8px 10px; }
+  .call-event .ce-body { max-width: 96%; }
   .call-event .ce-time { display: none; }
-}
 }
 @keyframes flashHighlight { 0%,100% { background: transparent; } 15% { background: rgba(88,101,242,.22); } }
 
@@ -598,45 +599,59 @@ button:active, .rail-item:active, .channel:active, .dm-item:active, .member:acti
 .composer-box .send-btn:hover { color: color-mix(in srgb, var(--brand) 70%, #fff); }
 .composer-hint { font-size: 12px; color: var(--text-faint); margin-top: 8px; padding: 0 4px; }
 
-/* Revamped emoji / reaction picker — aligned with the app's surfaces. */
+/* Revamped emoji / reaction picker — a compact, polished surface. */
 .emoji-picker {
-  background: var(--card); border-radius: 12px; padding: 0; box-shadow: var(--elevation-lg);
-  z-index: 60; width: 360px; max-height: 430px; display: flex; flex-direction: column;
-  overflow: hidden; border: 1px solid var(--divider); animation: pop .12s ease;
+  background: var(--card); border-radius: 14px; padding: 0; box-shadow: var(--elevation-lg);
+  z-index: 60; width: 372px; max-height: 452px; display: flex; flex-direction: column;
+  overflow: hidden; border: 1px solid var(--divider); animation: epIn .16s cubic-bezier(.22,.61,.36,1);
 }
-.ep-top { padding: 12px 12px 8px; }
-.ep-title { font-size: 13px; font-weight: 700; color: var(--text-header); letter-spacing: .01em; }
+@keyframes epIn { from { opacity: 0; transform: translateY(6px) scale(.98); } to { opacity: 1; transform: none; } }
+.ep-top { padding: 12px 12px 9px; background: linear-gradient(180deg, color-mix(in srgb, var(--brand) 10%, var(--card)), var(--card)); }
+.ep-head { display: flex; align-items: center; justify-content: space-between; }
+.ep-title { font-size: 13.5px; font-weight: 800; color: var(--text-header); letter-spacing: .01em; }
+.ep-close { width: 24px; height: 24px; border-radius: 6px; display: grid; place-items: center; color: var(--text-muted); background: transparent; }
+.ep-close:hover { background: var(--hover); color: var(--text-header); }
+.ep-close .ic { width: 13px; height: 13px; }
 .ep-search {
-  display: flex; align-items: center; gap: 7px; margin-top: 9px; padding: 6px 9px;
-  background: var(--input-bg); border-radius: 7px; border: 1px solid transparent;
-  transition: border-color .14s;
+  display: flex; align-items: center; gap: 7px; margin-top: 9px; padding: 7px 10px;
+  background: var(--input-bg); border-radius: 9px; border: 1px solid transparent;
+  transition: border-color .14s, box-shadow .14s;
 }
-.ep-search:focus-within { border-color: var(--brand); }
+.ep-search:focus-within { border-color: var(--brand); box-shadow: 0 0 0 3px color-mix(in srgb, var(--brand) 16%, transparent); }
 .ep-search .ic { width: 14px; height: 14px; color: var(--text-faint); flex: 0 0 auto; }
 .ep-search input { flex: 1; min-width: 0; background: none; border: none; outline: none; color: var(--text-normal); font-size: 13px; }
 .ep-search input::placeholder { color: var(--text-faint); }
-.ep-tabs { display: flex; gap: 2px; padding: 0 8px; border-bottom: 1px solid var(--divider); }
+.ep-clear { flex: 0 0 auto; width: 18px; height: 18px; border-radius: 50%; display: grid; place-items: center; color: var(--text-faint); background: color-mix(in srgb, var(--text-normal) 12%, transparent); }
+.ep-clear:hover { color: var(--text-header); }
+.ep-clear .ic { width: 10px; height: 10px; }
+.ep-clear[hidden] { display: none; }
+.ep-tabs { display: flex; gap: 3px; padding: 8px 10px; border-bottom: 1px solid var(--divider); }
 .ep-tab {
-  flex: 1; font-size: 16px; line-height: 1; padding: 7px 0; border-radius: 7px 7px 0 0;
-  opacity: .55; transition: opacity .12s, background .12s; position: relative;
+  flex: 1; font-size: 16px; line-height: 1; padding: 6px 0; border-radius: 8px;
+  opacity: .55; transition: opacity .12s, background .12s, transform .1s; position: relative;
 }
-.ep-tab:hover { opacity: .9; background: var(--hover); }
-.ep-tab.active { opacity: 1; background: var(--hover); box-shadow: inset 0 -2px 0 var(--brand); }
-.ep-scroll { overflow-y: auto; padding: 4px 10px 12px; min-height: 0; }
+.ep-tab:hover { opacity: .95; background: var(--hover); transform: translateY(-1px); }
+.ep-tab.active { opacity: 1; background: color-mix(in srgb, var(--brand) 18%, transparent); box-shadow: inset 0 -2px 0 var(--brand); }
+.ep-scroll { overflow-y: auto; padding: 2px 10px 8px; min-height: 0; scrollbar-width: thin; }
+.ep-scroll::-webkit-scrollbar { width: 8px; }
+.ep-scroll::-webkit-scrollbar-thumb { background: color-mix(in srgb, var(--text-normal) 22%, transparent); border-radius: 4px; }
 .ep-cat { padding-top: 6px; }
 .ep-cat-label {
-  font-size: 10.5px; font-weight: 800; text-transform: uppercase; letter-spacing: .05em;
-  color: var(--text-faint); padding: 6px 4px 5px; position: sticky; top: 0;
+  font-size: 10.5px; font-weight: 800; text-transform: uppercase; letter-spacing: .06em;
+  color: var(--text-faint); padding: 7px 4px 5px; position: sticky; top: 0;
   background: var(--card); z-index: 1;
 }
 .ep-grid { display: grid; grid-template-columns: repeat(8, 1fr); gap: 2px; }
 .ep-emoji {
-  font-size: 21px; line-height: 1; padding: 5px 0; border-radius: 6px;
+  font-size: 21px; line-height: 1; padding: 5px 0; border-radius: 7px;
   display: flex; align-items: center; justify-content: center;
   transition: transform .1s ease, background .1s ease;
 }
 .ep-emoji img { width: 24px; height: 24px; display: block; pointer-events: none; }
-.ep-emoji:hover { background: var(--hover); transform: scale(1.18); }
+.ep-emoji:hover { background: var(--hover); transform: scale(1.2); }
+.ep-emoji:active { transform: scale(1.05); }
+.ep-foot { display: flex; align-items: center; justify-content: space-between; padding: 8px 14px; border-top: 1px solid var(--divider); font-size: 11px; color: var(--text-faint); background: color-mix(in srgb, var(--chat-bg) 40%, var(--card)); }
+.ep-count { font-weight: 600; color: var(--text-muted); }
 
 /* mention autocomplete */
 .mention-pop {
@@ -837,6 +852,8 @@ button:active, .rail-item:active, .channel:active, .dm-item:active, .member:acti
   position: relative; z-index: 10; border-radius: 50%;
 }
 .dp-avatar .avatar .status-dot { z-index: 11; }
+.dp-avatar .avatar.zoomable { cursor: zoom-in; transition: transform .16s ease, box-shadow .16s ease; }
+.dp-avatar .avatar.zoomable:hover { transform: scale(1.04); box-shadow: 0 8px 26px rgba(0,0,0,.4); }
 .dp-identity { flex: 1 1 auto; min-width: 0; padding-top: 8px; }
 .dp-name {
   font-size: 30px; font-weight: 700; line-height: 1.2; color: #f2f3f5;
@@ -1318,8 +1335,11 @@ button:active, .rail-item:active, .channel:active, .dm-item:active, .member:acti
 }
 .notif-panel .np-head { display: flex; align-items: center; justify-content: space-between; padding: 14px 16px; border-bottom: 1px solid var(--divider); }
 .notif-panel .np-head h4 { font-size: 15px; font-weight: 700; color: var(--text-header); }
+.notif-panel .np-actions { display: flex; align-items: center; gap: 12px; }
 .notif-panel .np-head button { font-size: 12px; color: var(--link); font-weight: 600; }
 .notif-panel .np-head button:hover { text-decoration: underline; }
+.notif-panel .np-head button.np-clear { color: var(--red); }
+.notif-panel .np-head button.np-clear:hover { color: color-mix(in srgb, var(--red) 78%, #fff); }
 .notif-list { overflow-y: auto; padding: 6px; }
 .notif-item { display: flex; gap: 12px; padding: 10px; border-radius: var(--radius); cursor: pointer; position: relative; }
 .notif-item:hover { background: var(--hover); }
@@ -1375,8 +1395,14 @@ button:active, .rail-item:active, .channel:active, .dm-item:active, .member:acti
 .msg-undecryptable svg { width: 12px; height: 12px; }
 
 /* ============ CUSTOM CONFIRM / PROMPT ============ */
-.confirm-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.6); z-index: 600; display: grid; place-items: center; padding: 20px; }
-.confirm-box { width: min(440px, 94vw); background: var(--chat-bg); border-radius: var(--radius-lg); padding: 24px; box-shadow: var(--elevation-lg); }
+.confirm-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.6); z-index: 600; display: grid; place-items: center; padding: 20px; animation: confirmFade .18s ease; }
+.confirm-box { width: min(440px, 94vw); background: var(--chat-bg); border-radius: var(--radius-lg); padding: 24px; box-shadow: var(--elevation-lg); animation: confirmPop .2s cubic-bezier(.22,.61,.36,1); }
+.confirm-overlay.closing { animation: confirmFadeOut .18s ease forwards; }
+.confirm-overlay.closing .confirm-box { animation: confirmPopOut .18s ease forwards; }
+@keyframes confirmFade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes confirmPop { from { opacity: 0; transform: scale(.94) translateY(8px); } to { opacity: 1; transform: none; } }
+@keyframes confirmFadeOut { to { opacity: 0; } }
+@keyframes confirmPopOut { to { opacity: 0; transform: scale(.96) translateY(4px); } }
 .confirm-box h3 { font-size: 19px; font-weight: 700; color: var(--text-header); margin-bottom: 10px; }
 .confirm-box p { font-size: 14px; color: var(--text-muted); line-height: 1.5; margin-bottom: 20px; }
 .confirm-box .field { margin-bottom: 18px; }
@@ -4213,7 +4239,7 @@ body[data-theme="light"] .update-card { box-shadow: 0 24px 70px rgba(0, 0, 0, .2
 .ic-status.bad { color: #ed4245; }
 
 /* Red call indicator on the home rail icon */
-.rail-item .call-badge { position: absolute; right: -2px; bottom: -2px; width: 14px; height: 14px; border-radius: 50%; background: #ed4245; border: 3px solid var(--rail-bg, #1e1f22); animation: call-blink 1s infinite; }
+.rail-item .call-badge { position: absolute; right: -4px; bottom: -4px; width: 14px; height: 14px; border-radius: 50%; background: #ed4245; border: 3px solid var(--rail-bg, #1e1f22); animation: call-blink 1s infinite; pointer-events: none; z-index: 2; }
 @keyframes call-blink { 0%,100% { opacity: 1; } 50% { opacity: .35; } }
 
 /* ---------- Blocked account panel (flat, information-dense) ---------- */
@@ -4327,6 +4353,17 @@ body[data-theme="light"] .update-card { box-shadow: 0 24px 70px rgba(0, 0, 0, .2
   color: var(--text-normal);
   background: color-mix(in srgb, var(--red) 10%, transparent);
   border-left-color: var(--red);
+}
+/* "You are already a member" deserves more presence than a quiet footnote. */
+.icf-note.already {
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.5;
+  padding: 14px 16px;
+  border-left-width: 3px;
+  border-left-color: var(--brand);
+  background: color-mix(in srgb, var(--brand) 13%, transparent);
+  color: var(--text-header);
 }
 .icf-actions { display: flex; gap: 10px; margin-top: 18px; }
 .icf-btn {

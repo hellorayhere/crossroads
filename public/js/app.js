@@ -821,9 +821,9 @@ const gifAvaObserver = new MutationObserver((muts) => {
 gifAvaObserver.observe(document.documentElement, { childList: true, subtree: true });
 
 /* Clicking a profile picture (including animated GIFs) opens it full-size. */
-function bindAvatarZoom(root, user) {
+function bindAvatarZoom(root, user, selector = '.avatar') {
   if (!root || !user || !user.avatar_url) return;
-  root.querySelectorAll('.avatar').forEach(el => {
+  root.querySelectorAll(selector).forEach(el => {
     el.classList.add('zoomable');
     el.setAttribute('title', 'Click to view');
     el.addEventListener('click', (e) => {
@@ -3828,15 +3828,37 @@ function tuneAudioSenders(pc) {
       try {
         const p = s.getParameters();
         if (!p.encodings || !p.encodings.length) p.encodings = [{}];
-        p.encodings[0].maxBitrate = 96000;
+        /* 128 kbps mono Opus with in-band FEC is the sweet spot for voice:
+           clear enough for music-ish background, small enough to stay smooth
+           on mobile links. DTX off keeps the stream continuous so the far end
+           never hears the codec "swell" back in after a pause. */
+        p.encodings[0].maxBitrate = 128000;
         p.encodings[0].networkPriority = 'high';
         p.encodings[0].priority = 'high';
+        if ('dtx' in p.encodings[0]) p.encodings[0].dtx = false;
         p.degradationPreference = 'maintain-fidelity';
         const pr = s.setParameters(p);
         if (pr && pr.catch) pr.catch(() => {});
       } catch (e) { /* older browsers ignore these */ }
     });
   } catch (e) { /* ignore */ }
+}
+
+/* Put Opus first on every audio transceiver. Browsers sometimes prefer a
+   low-bitrate codec (or negotiate RED/CN) that sounds thin; forcing Opus to
+   the front of the codec list gives both ends the same clear, full-band path. */
+function preferOpus(pc) {
+  try {
+    if (typeof RTCRtpSender === 'undefined' || !RTCRtpSender.getCapabilities) return;
+    const caps = RTCRtpSender.getCapabilities('audio');
+    if (!caps || !caps.codecs || !caps.codecs.length) return;
+    const isOpus = c => /opus/i.test(c.mimeType || '');
+    const ordered = caps.codecs.filter(isOpus).concat(caps.codecs.filter(c => !isOpus(c)));
+    if (!ordered.length) return;
+    pc.getTransceivers().forEach(t => {
+      try { if (t.setCodecPreferences) t.setCodecPreferences(ordered); } catch (e) {}
+    });
+  } catch (e) { /* unsupported */ }
 }
 
 function createVoicePeer(uid, initiator, ctx) {
@@ -3882,6 +3904,8 @@ function createVoicePeer(uid, initiator, ctx) {
       try { pc.addTrack(t, C.localStream); } catch (e) {}
     });
   }
+  /* Tracks create the audio transceivers, so prefer Opus right after them. */
+  preferOpus(pc);
 
   pc.onicecandidate = (e) => {
     if (e.candidate) sendSignal({ type: 'ice', candidate: e.candidate });
@@ -4736,16 +4760,15 @@ function callEventNode(m) {
   node.dataset.mid = m.id;
   const a = m.author || {};
   const who = escapeHtml(a.display_name || a.username || 'Someone');
-  const verb = (m.plain || 'started') === 'ended' ? 'ended the call' : 'started a call';
+  const ended = (m.plain || 'started') === 'ended';
+  const verb = ended ? 'ended the call' : 'started a voice call';
   node.innerHTML = `
-    <span class="ce-rule" aria-hidden="true"></span>
     <span class="ce-body">
-      <span class="ce-ico" aria-hidden="true">${icon('phone')}</span>
+      <span class="ce-avatar">${avatarHTML(a, 22)}</span>
       <span class="ce-text"><b>${who}</b> ${verb}</span>
       <span class="ce-time">${shortTime(m.created_at)}</span>
-      <button class="ce-call" type="button">Call back</button>
-    </span>
-    <span class="ce-rule" aria-hidden="true"></span>`;
+      ${ended ? '' : '<button class="ce-call" type="button">Call back</button>'}
+    </span>`;
   hydrateIcons(node);
   const btn = node.querySelector('.ce-call');
   if (btn) btn.addEventListener('click', () => {
@@ -6120,36 +6143,76 @@ async function toggleReaction(mid, emoji) {
   } catch (e) { toast(e.message, 'error'); }
 }
 
+const RECENT_EMOJI_KEY = 'cr_recent_emoji';
+function getRecentEmoji() {
+  try {
+    const a = JSON.parse(localStorage.getItem(RECENT_EMOJI_KEY) || '[]');
+    return Array.isArray(a) ? a.filter(x => typeof x === 'string').slice(0, 24) : [];
+  } catch (e) { return []; }
+}
+function pushRecentEmoji(e) {
+  try {
+    const a = getRecentEmoji().filter(x => x !== e);
+    a.unshift(e);
+    localStorage.setItem(RECENT_EMOJI_KEY, JSON.stringify(a.slice(0, 24)));
+  } catch (e) { /* ignore */ }
+}
+
 function emojiPickerMarkup(title) {
+  const recent = getRecentEmoji();
+  const recentHTML = recent.length ? `<div class="ep-cat" data-cat="recent">
+      <div class="ep-cat-label">Recently Used</div>
+      <div class="ep-grid">${recent.map(e => `<button class="ep-emoji" data-e="${e}" title="${e}">${emojiImg(e)}</button>`).join('')}</div>
+    </div>` : '';
   return `<div class="ep-top">
-      <div class="ep-title">${title}</div>
-      <label class="ep-search">${icon('search')}<input id="ep-search" placeholder="Search emoji" autocomplete="off" spellcheck="false"></label>
+      <div class="ep-head">
+        <div class="ep-title">${title}</div>
+        <button class="ep-close" type="button" title="Close" aria-label="Close">${icon('xmark')}</button>
+      </div>
+      <label class="ep-search">${icon('search')}<input id="ep-search" placeholder="Search emoji" autocomplete="off" spellcheck="false"><button class="ep-clear" type="button" title="Clear" aria-label="Clear search" hidden>${icon('xmark')}</button></label>
     </div>
     <div class="ep-tabs">
-      ${EMOJI_CATEGORIES.map((c, i) => `<button class="ep-tab${i === 0 ? ' active' : ''}" data-cat="${c.id}" title="${escapeHtml(c.label)}">${c.icon}</button>`).join('')}
+      ${recent.length ? `<button class="ep-tab active" data-cat="recent" title="Recently Used">\u{1F553}</button>` : ''}
+      ${EMOJI_CATEGORIES.map((c, i) => `<button class="ep-tab${i === 0 && !recent.length ? ' active' : ''}" data-cat="${c.id}" title="${escapeHtml(c.label)}">${c.icon}</button>`).join('')}
     </div>
     <div class="ep-scroll" id="ep-scroll">
+      ${recentHTML}
       ${EMOJI_CATEGORIES.map(c => `<div class="ep-cat" data-cat="${c.id}">
         <div class="ep-cat-label">${escapeHtml(c.label)}</div>
         <div class="ep-grid">${c.emojis.map(e => `<button class="ep-emoji" data-e="${e}" title="${e}">${emojiImg(e)}</button>`).join('')}</div>
       </div>`).join('')}
-    </div>`;
+    </div>
+    <div class="ep-foot"><span>Click an emoji to insert</span><span class="ep-count" id="ep-count"></span></div>`;
 }
 
 function mountEmojiPicker(picker, onPick) {
   picker.innerHTML = emojiPickerMarkup(picker.dataset.title || 'Add Reaction');
+  hydrateIcons(picker);
   const search = picker.querySelector('#ep-search');
   const scroll = picker.querySelector('#ep-scroll');
   const tabs = picker.querySelectorAll('.ep-tab');
   const cats = picker.querySelectorAll('.ep-cat');
-  picker.querySelectorAll('.ep-emoji').forEach(b => b.addEventListener('click', () => onPick(b.dataset.e)));
+  const clearBtn = picker.querySelector('.ep-clear');
+  const closeBtn = picker.querySelector('.ep-close');
+  const countEl = picker.querySelector('#ep-count');
+  const pick = (e) => { pushRecentEmoji(e); onPick(e); };
+  picker.querySelectorAll('.ep-emoji').forEach(b => b.addEventListener('click', () => pick(b.dataset.e)));
+  if (closeBtn) closeBtn.addEventListener('click', () => picker.remove());
   tabs.forEach(tab => tab.addEventListener('click', () => {
     tabs.forEach(t => t.classList.toggle('active', t === tab));
     const target = picker.querySelector(`.ep-cat[data-cat="${tab.dataset.cat}"]`);
     if (target && scroll) scroll.scrollTo({ top: target.offsetTop - 6, behavior: 'smooth' });
   }));
+  const updateCount = () => {
+    if (!countEl) return;
+    let n = 0;
+    picker.querySelectorAll('.ep-emoji').forEach(b => { if (b.style.display !== 'none') n++; });
+    countEl.textContent = n + ' emoji';
+  };
+  updateCount();
   if (search) search.addEventListener('input', () => {
     const q = search.value.trim().toLowerCase();
+    if (clearBtn) clearBtn.hidden = !q;
     cats.forEach(cat => {
       const labelMatch = cat.querySelector('.ep-cat-label').textContent.toLowerCase().includes(q);
       let any = false;
@@ -6160,6 +6223,13 @@ function mountEmojiPicker(picker, onPick) {
       });
       cat.style.display = any ? '' : 'none';
     });
+    updateCount();
+  });
+  if (clearBtn) clearBtn.addEventListener('click', () => {
+    if (!search) return;
+    search.value = '';
+    search.dispatchEvent(new Event('input'));
+    search.focus();
   });
 }
 
@@ -6485,13 +6555,14 @@ function openNotifPanel() {
   const panel = document.createElement('div');
   panel.className = 'notif-panel';
   panel.id = 'notif-panel';
-  panel.innerHTML = `<div class="np-head"><h4>Notifications</h4><button id="np-read">Mark all as read</button></div><div class="notif-list" id="notif-list"></div>`;
+  panel.innerHTML = `<div class="np-head"><h4>Notifications</h4><div class="np-actions"><button id="np-read">Mark all as read</button><button id="np-clear" class="np-clear">Clear all</button></div></div><div class="notif-list" id="notif-list"></div>`;
   document.body.appendChild(panel);
   const r = $('hdr-notifs').getBoundingClientRect();
   panel.style.top = (r.bottom + 8) + 'px';
   panel.style.left = Math.max(8, Math.min(r.right - 380, window.innerWidth - 388)) + 'px';
   renderNotifList();
   $('np-read').addEventListener('click', markAllRead);
+  $('np-clear').addEventListener('click', clearAllNotifications);
   refreshNotifUsers().then(() => { if ($('notif-list')) renderNotifList(); });
   if (state.unread > 0) {
     api('/api/notifications/read', { method: 'POST' }).catch(() => {});
@@ -6827,9 +6898,15 @@ function showUnsavedDialog({ onSave, onDiscard }) {
       </div>
     </div>`;
   document.body.appendChild(wrap);
-  const close = () => wrap.remove();
-  $('cu-cancel').addEventListener('click', close);
-  $('cu-discard').addEventListener('click', () => { close(); if (onDiscard) onDiscard(); });
+  let closing = false;
+  const close = (after) => {
+    if (closing) return;
+    closing = true;
+    wrap.classList.add('closing');
+    setTimeout(() => { wrap.remove(); if (after) after(); }, 180);
+  };
+  $('cu-cancel').addEventListener('click', () => close());
+  $('cu-discard').addEventListener('click', () => close(onDiscard));
   $('cu-save').addEventListener('click', async () => {
     const btn = $('cu-save');
     btn.disabled = true; btn.textContent = 'Saving\u2026';
@@ -7220,7 +7297,7 @@ async function openInviteConfirm(rawCode) {
         </div>
       </div>
       ${s.description ? `<div class="icf-desc">${escapeHtml(s.description)}</div>` : ''}
-      <div class="icf-note${valid ? '' : ' bad'}">${escapeHtml(statusLine)}</div>
+      <div class="icf-note${valid ? '' : ' bad'}${already ? ' already' : ''}">${escapeHtml(statusLine)}</div>
       <div class="icf-actions">
         <button class="icf-btn ghost" id="icf-nevermind">Nevermind</button>
         <button class="icf-btn primary" id="icf-join"${valid ? '' : ' disabled'}>${already ? 'Open Server' : 'Join Server'}</button>
@@ -7761,6 +7838,7 @@ function renderOtherProfile(user, ctx) {
     </div>`, { modalClass: 'oprofile-modal' });
 
   applyAccent($('modal'), accent);
+  bindAvatarZoom($('modal'), user, '.dp-avatar .avatar');
 
   makeCopyable(document.querySelector('.dp-name'), displayName, 'Display name');
   makeCopyable(document.querySelector('.dp-handle'), fullTag(user), 'Username');
