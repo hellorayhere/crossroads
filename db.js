@@ -277,6 +277,13 @@ function migrate() {
   if (!msgCols.includes('attachment_size')) {
     try { db.exec('ALTER TABLE messages ADD COLUMN attachment_size INTEGER'); } catch (e) {}
   }
+  /* 1b-4. Additive migration: plaintext mirror. The E2E layer still stores
+     ciphertext in `content`, but a readable copy is kept here so replies,
+     notifications and every device can show the real message instead of a
+     placeholder. Additive only: existing rows simply keep NULL. */
+  if (!msgCols.includes('content_plain')) {
+    try { db.exec('ALTER TABLE messages ADD COLUMN content_plain TEXT'); } catch (e) {}
+  }
   // The pinned index must be created AFTER the column exists (safe for old DBs).
   try { db.exec('CREATE INDEX IF NOT EXISTS idx_messages_pinned ON messages(pinned)'); } catch (e) {}
 

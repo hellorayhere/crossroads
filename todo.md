@@ -31,5 +31,18 @@ Hard rule: never wipe/delete data. Additive changes only. Do not touch DATA_DIR 
 
 ## 6. Verify & deploy
 - [x] Local smoke test (reply, video, fullscreen, maintenance)
-- [ ] Commit + push to main
-- [ ] Render deploy + verify live, data preserved
+- [x] Commit + push to main
+- [x] Render deploy + verify live, data preserved
+
+## 7. Show real text everywhere (no "Encrypted message")
+- [x] Server: additive `content_plain` column on messages (never destructive)
+- [x] Server: accept + store `plain` on channel and DM send
+- [x] Server: return `plain` on messages and reply previews
+- [x] Server: `GET /api/messages/:id` so out-of-page quotes can resolve
+- [x] Server: `POST /api/messages/:id/plain` backfill (additive, never overwrites)
+- [x] Client: send readable text instead of ciphertext; mirror it in `plain`
+- [x] Client: render `plain` first, so no device ever shows a placeholder
+- [x] Client: backfill decrypted text for older encrypted messages
+- [x] Client: reply preview + reply bar show the real quoted text
+- [x] Client: remove every "Encrypted message" label
+- [x] Verified locally: reply preview, reply bar, backfill, sent reply

@@ -808,9 +808,10 @@ function replyPreviewOf(m) {
   const enc = isEncryptedContent(orig.content);
   return {
     id: orig.id,
-    /* Never leak the raw E2E envelope into a reply preview. The client paints
-       the real text once it decrypts the quoted message. */
+    /* Never leak the raw E2E envelope into a reply preview. `plain` carries the
+       readable mirror when we have one, so the quote shows real text. */
     content: enc ? null : orig.content,
+    plain: orig.content_plain || null,
     encrypted: enc,
     attachment_url: orig.attachment_url,
     attachment_name: orig.attachment_name,
@@ -828,6 +829,7 @@ function messageWithMeta(m, currentUserId) {
     channel_id: m.channel_id,
     dm_id: m.dm_id,
     content: m.content,
+    plain: m.content_plain || null,
     attachment_url: m.attachment_url,
     attachment_name: m.attachment_name,
     attachment_type: m.attachment_type,
@@ -878,6 +880,7 @@ function messagesWithMeta(rows, currentUserId) {
       replyMap[o.id] = {
         id: o.id,
         content: enc ? null : o.content,
+        plain: o.content_plain || null,
         encrypted: enc,
         attachment_url: o.attachment_url,
         attachment_name: o.attachment_name,
@@ -891,6 +894,7 @@ function messagesWithMeta(rows, currentUserId) {
     channel_id: m.channel_id,
     dm_id: m.dm_id,
     content: m.content,
+    plain: m.content_plain || null,
     attachment_url: m.attachment_url,
     attachment_name: m.attachment_name,
     attachment_type: m.attachment_type,
@@ -2219,7 +2223,7 @@ app.post('/api/channels/:id/messages', auth, (req, res) => {
       }
     }
   }
-  const { content, attachment_url, attachment_name, attachment_type, attachment_size, reply_to_id, mentions: mentionsIn, broadcast: broadcastIn } = req.body || {};
+  const { content, plain: plainIn, attachment_url, attachment_name, attachment_type, attachment_size, reply_to_id, mentions: mentionsIn, broadcast: broadcastIn } = req.body || {};
   if ((!content || !content.trim()) && !attachment_url) return res.status(400).json({ error: 'Message cannot be empty' });
 
   const sSettings = getServerSettings(srv.id);
@@ -2238,9 +2242,12 @@ app.post('/api/channels/:id/messages', auth, (req, res) => {
   const id = newId();
   const now = Date.now();
   const mentionIds = resolveMentionIds(content, mentionsIn, req.user.id);
-  db.prepare(`INSERT INTO messages (id, channel_id, user_id, content, attachment_url, attachment_name, attachment_type, attachment_size, created_at, reply_to_id, mentions)
-              VALUES (?,?,?,?,?,?,?,?,?,?,?)`)
-    .run(id, ch.id, req.user.id, (content || '').trim(), attachment_url || null, attachment_name || null, attachment_type || null, Number.isFinite(attachment_size) ? attachment_size : null, now, reply_to_id || null, JSON.stringify(mentionIds));
+  /* Only encrypted bodies need a separate readable copy. Plaintext messages
+     already store their text in `content`. */
+  const plainText = encryptedBody && typeof plainIn === 'string' && plainIn.trim() ? plainIn.slice(0, 4000) : null;
+  db.prepare(`INSERT INTO messages (id, channel_id, user_id, content, content_plain, attachment_url, attachment_name, attachment_type, attachment_size, created_at, reply_to_id, mentions)
+              VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`)
+    .run(id, ch.id, req.user.id, (content || '').trim(), plainText, attachment_url || null, attachment_name || null, attachment_type || null, Number.isFinite(attachment_size) ? attachment_size : null, now, reply_to_id || null, JSON.stringify(mentionIds));
   const m = db.prepare('SELECT * FROM messages WHERE id = ?').get(id);
   const full = messageWithMeta(m, req.user.id);
   io.to(`channel:${ch.id}`).emit('message', full);
@@ -2438,14 +2445,15 @@ app.post('/api/dms/:id/messages', auth, (req, res) => {
   const dm = db.prepare('SELECT * FROM dm_channels WHERE id = ?').get(req.params.id);
   if (!dm || (dm.user1_id !== req.user.id && dm.user2_id !== req.user.id)) return res.status(404).json({ error: 'DM not found' });
   if (req.user.muted) return res.status(403).json({ error: 'You are muted by a platform administrator.' });
-  const { content, attachment_url, attachment_name, attachment_type, attachment_size, reply_to_id, mentions: mentionsIn } = req.body || {};
+  const { content, plain: plainIn, attachment_url, attachment_name, attachment_type, attachment_size, reply_to_id, mentions: mentionsIn } = req.body || {};
   if ((!content || !content.trim()) && !attachment_url) return res.status(400).json({ error: 'Message cannot be empty' });
   const id = newId();
   const now = Date.now();
   const mentionIds = resolveMentionIds(content, mentionsIn, req.user.id);
-  db.prepare(`INSERT INTO messages (id, dm_id, user_id, content, attachment_url, attachment_name, attachment_type, attachment_size, created_at, reply_to_id, mentions)
-              VALUES (?,?,?,?,?,?,?,?,?,?,?)`)
-    .run(id, dm.id, req.user.id, (content || '').trim(), attachment_url || null, attachment_name || null, attachment_type || null, Number.isFinite(attachment_size) ? attachment_size : null, now, reply_to_id || null, JSON.stringify(mentionIds));
+  const plainText = isEncryptedContent(content) && typeof plainIn === 'string' && plainIn.trim() ? plainIn.slice(0, 4000) : null;
+  db.prepare(`INSERT INTO messages (id, dm_id, user_id, content, content_plain, attachment_url, attachment_name, attachment_type, attachment_size, created_at, reply_to_id, mentions)
+              VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`)
+    .run(id, dm.id, req.user.id, (content || '').trim(), plainText, attachment_url || null, attachment_name || null, attachment_type || null, Number.isFinite(attachment_size) ? attachment_size : null, now, reply_to_id || null, JSON.stringify(mentionIds));
   const m = db.prepare('SELECT * FROM messages WHERE id = ?').get(id);
   const full = messageWithMeta(m, req.user.id);
   // A new message un-hides the conversation for everyone in it.
@@ -2534,6 +2542,47 @@ app.get('/api/e2e/keys', auth, (req, res) => {
    after a member joins, rotates their key, or reads from a new browser - the
    server still never sees the key or the plaintext, it only stores the extra
    wrapped copies. Additive only: existing entries are never removed. */
+/* Single message lookup. Used by reply previews when the quoted message is not
+   part of the loaded page, so the quote can still show its real text. */
+app.get('/api/messages/:id', auth, (req, res) => {
+  const m = db.prepare('SELECT * FROM messages WHERE id = ?').get(req.params.id);
+  if (!m) return res.status(404).json({ error: 'Message not found' });
+  if (m.channel_id) {
+    const ch = db.prepare('SELECT * FROM channels WHERE id = ?').get(m.channel_id);
+    if (!ch || !getServerForUser(ch.server_id, req.user.id)) return res.status(403).json({ error: 'Not allowed' });
+  } else if (m.dm_id) {
+    const dm = db.prepare('SELECT * FROM dm_channels WHERE id = ?').get(m.dm_id);
+    if (!dm || (dm.user1_id !== req.user.id && dm.user2_id !== req.user.id)) return res.status(403).json({ error: 'Not allowed' });
+  } else {
+    return res.status(403).json({ error: 'Not allowed' });
+  }
+  res.json({ message: messageWithMeta(m, req.user.id) });
+});
+
+/* Plaintext backfill. A device that has successfully decrypted an older
+   message can publish the readable text so every other device (and every
+   future device) shows the real message instead of a placeholder. Additive
+   only: the ciphertext in `content` is never touched and an existing
+   plaintext is never overwritten. */
+app.post('/api/messages/:id/plain', auth, (req, res) => {
+  const m = db.prepare('SELECT * FROM messages WHERE id = ?').get(req.params.id);
+  if (!m) return res.status(404).json({ error: 'Message not found' });
+  if (m.channel_id) {
+    const ch = db.prepare('SELECT * FROM channels WHERE id = ?').get(m.channel_id);
+    if (!ch || !getServerForUser(ch.server_id, req.user.id)) return res.status(403).json({ error: 'Not allowed' });
+  } else if (m.dm_id) {
+    const dm = db.prepare('SELECT * FROM dm_channels WHERE id = ?').get(m.dm_id);
+    if (!dm || (dm.user1_id !== req.user.id && dm.user2_id !== req.user.id)) return res.status(403).json({ error: 'Not allowed' });
+  } else {
+    return res.status(403).json({ error: 'Not allowed' });
+  }
+  const text = req.body && typeof req.body.plain === 'string' ? req.body.plain : '';
+  if (!text.trim()) return res.status(400).json({ error: 'plain required' });
+  if (m.content_plain) return res.json({ ok: true, already: true });
+  db.prepare('UPDATE messages SET content_plain = ? WHERE id = ?').run(text.slice(0, 4000), m.id);
+  res.json({ ok: true });
+});
+
 app.post('/api/messages/:id/keys', auth, (req, res) => {
   const m = db.prepare('SELECT * FROM messages WHERE id = ?').get(req.params.id);
   if (!m) return res.status(404).json({ error: 'Message not found' });

@@ -1380,6 +1380,14 @@ async function e2eShareKeys(m, raw, env) {
    later instead of permanently blanking the message. */
 async function e2eDecryptMessage(m) {
   if (!m) return m;
+  /* A readable mirror is authoritative: no key needed, no placeholder. */
+  if (typeof m.plain === 'string' && m.plain.trim() && (!m.content || isE2EContent(m.content))) {
+    m.content = m.plain;
+    m.encrypted = false;
+    m.decrypt_failed = false;
+    if (m.reply_to) await e2eDecryptMessage(m.reply_to);
+    return m;
+  }
   if (!m._e2eRaw && typeof m.content === 'string' && m.content.startsWith(E2E_PREFIX)) m._e2eRaw = m.content;
   if (m._e2eRaw) {
     m.encrypted = true;
@@ -1387,14 +1395,30 @@ async function e2eDecryptMessage(m) {
        finished loading. Successful results are cached in m.content. */
     const res = await e2eDecryptFull(m._e2eRaw);
     if (res == null) { m.content = ''; m.decrypt_failed = true; }
-    else if (typeof res === 'string') { m.content = res; m.decrypt_failed = false; }
+    else if (typeof res === 'string') { m.content = res; m.decrypt_failed = false; e2eBackfillPlain(m, res); }
     else {
       m.content = res.text; m.decrypt_failed = false;
+      e2eBackfillPlain(m, res.text);
       e2eShareKeys(m, res.raw, res.env);
     }
   }
   if (m.reply_to) await e2eDecryptMessage(m.reply_to);
   return m;
+}
+
+/* Publish decrypted text back to the server so the message stops being a
+   ciphertext-only row. Runs once per message per session; failures retry on the
+   next render pass. */
+const e2eBackfilled = new Set();
+function e2eBackfillPlain(m, text) {
+  if (!m || !m.id || !text || e2eBackfilled.has(m.id)) return;
+  if (typeof m.plain === 'string' && m.plain.trim()) return;
+  e2eBackfilled.add(m.id);
+  try {
+    api('/api/messages/' + encodeURIComponent(m.id) + '/plain', {
+      method: 'POST', body: JSON.stringify({ plain: text })
+    }).then(() => { m.plain = text; }).catch(() => { e2eBackfilled.delete(m.id); });
+  } catch (e) { e2eBackfilled.delete(m.id); }
 }
 async function e2eDecryptAll(list) {
   if (!Array.isArray(list)) return list;
@@ -1988,7 +2012,7 @@ function connectSocket() {
       const who = fullTag(data.message.author);
       bumpDmUnread(data.dm_id);
       await e2eDecryptMessage(data.message);
-      maybeDesktopNotify('New message from ' + who, isE2EContent(data.message.content) ? 'Sent you an encrypted message' : (data.message.content || ''));
+      maybeDesktopNotify('New message from ' + who, replyPreviewText(data.message));
       if (setting('notifSounds') !== false) playPing();
     }
   });
@@ -3937,15 +3961,23 @@ function isE2EContent(s) {
    of the raw envelope; the real text is painted in once decryption finishes. */
 function replyPreviewText(r) {
   if (!r) return 'Message';
-  if (r.encrypted || isE2EContent(r.content)) return 'Encrypted message';
-  if (r.content) return r.content;
+  /* Readable mirror first, then the stored text, then the live copy already in
+     the channel (which is decrypted in place), and only then the attachment. */
+  if (typeof r.plain === 'string' && r.plain.trim()) return r.plain;
+  if (r.content && !isE2EContent(r.content)) return r.content;
+  if (r.id) {
+    const live = (state.messages || []).find(x => x && x.id === r.id);
+    if (live && typeof live.plain === 'string' && live.plain.trim()) return live.plain;
+    if (live && live.content && !isE2EContent(live.content)) return live.content;
+  }
   if (r.attachment_name) return r.attachment_name;
   return r.attachment_url ? 'Attachment' : 'Message';
 }
 
 function replyRefHTML(r) {
   const name = r.author ? (r.author.display_name || r.author.username) : 'Unknown';
-  const enc = !!(r.encrypted || isE2EContent(r.content));
+  const hasText = !!(typeof r.plain === 'string' && r.plain.trim()) || !!(r.content && !isE2EContent(r.content));
+  const enc = !hasText && !!(r.encrypted || isE2EContent(r.content));
   const txt = replyPreviewText(r);
   const ava = r.author ? `<span class="rr-ava">${r.author.avatar_url ? `<img src="${escapeHtml(r.author.avatar_url)}" alt="">` : ''}</span>` : '';
   const att = (!enc && r.attachment_url) ? `<span class="rr-att">${icon('paperclip')}</span>` : '';
@@ -3962,7 +3994,8 @@ function updateReplyRef(node, m) {
   const r = m.reply_to;
   const txtEl = ref.querySelector('.rr-text');
   if (!txtEl) return;
-  const enc = !!(r.encrypted || isE2EContent(r.content));
+  const hasText = !!(typeof r.plain === 'string' && r.plain.trim()) || !!(r.content && !isE2EContent(r.content));
+  const enc = !hasText && !!(r.encrypted || isE2EContent(r.content));
   const next = replyPreviewText(r);
   if (txtEl.textContent !== next) txtEl.textContent = next;
   txtEl.classList.toggle('rr-enc', enc);
@@ -3976,6 +4009,32 @@ function updateReplyRef(node, m) {
   if (ava && r.author && r.author.avatar_url && !ava.querySelector('img')) {
     ava.innerHTML = `<img src="${escapeHtml(r.author.avatar_url)}" alt="">`;
   }
+}
+
+/* A reply can point at a message that is not in the loaded page (older
+   history). Fetch it once so the quote shows the real text instead of a
+   generic label. */
+async function hydrateReplyRef(m, node) {
+  const r = m && m.reply_to;
+  if (!r || !r.id || r._hydrating) return;
+  const hasText = (typeof r.plain === 'string' && r.plain.trim()) || (r.content && !isE2EContent(r.content));
+  if (hasText) return;
+  r._hydrating = true;
+  try {
+    const d = await api('/api/messages/' + encodeURIComponent(r.id));
+    if (d && d.message) {
+      const q = d.message;
+      r.content = q.content;
+      r.plain = q.plain;
+      r.encrypted = q.encrypted;
+      r.attachment_name = q.attachment_name;
+      r.attachment_url = q.attachment_url;
+      if (q.author) r.author = q.author;
+      await e2eDecryptMessage(r);
+      updateReplyRef(node, m);
+    }
+  } catch (e) { /* keep the neutral label */ }
+  finally { r._hydrating = false; }
 }
 
 function messageNode(m, grouped, animate) {
@@ -3994,18 +4053,22 @@ function messageNode(m, grouped, animate) {
       <button data-act="more" title="More">${icon('ellipsis-vertical')}</button>
     </div>`;
   /* A message that is nothing but a GIF link should show only the GIF. */
-  const failed = !!m.decrypt_failed;
+  /* A readable mirror always wins, so a message never renders as a placeholder
+     just because this device is missing a key. */
+  const hasPlain = typeof m.plain === 'string' && m.plain.trim();
+  const failed = !hasPlain && !!m.decrypt_failed;
   /* Arrived over the socket but not decrypted yet - never flash ciphertext. */
-  const pending = !failed && typeof m.content === 'string' && m.content.startsWith(E2E_PREFIX);
-  const bodyText = (failed || pending) ? '' : (isEmbeddableMediaUrl((extractUrls(m.content || '')[0] || ''))
-    ? stripEmbeddableUrls(m.content)
-    : m.content);
+  const pending = !hasPlain && !failed && typeof m.content === 'string' && m.content.startsWith(E2E_PREFIX);
+  const shownText = hasPlain ? m.plain : m.content;
+  const bodyText = (failed || pending) ? '' : (isEmbeddableMediaUrl((extractUrls(shownText || '')[0] || ''))
+    ? stripEmbeddableUrls(shownText)
+    : shownText);
   /* Discord enlarges messages that are nothing but emoji ("jumbo" emoji). */
   const emojiOnly = isEmojiOnly(bodyText || '');
   const nEmoji = emojiOnly ? emojiCount(bodyText || '') : 0;
   const jumboCls = emojiOnly ? (nEmoji <= 3 ? ' jumbo' : (nEmoji <= 6 ? ' jumbo lg' : '')) : '';
   node.innerHTML = `${toolbar}${gutter}<div class="body">${m.reply_to ? replyRefHTML(m.reply_to) : ''}${head}
-    <div class="text" data-content>${m.pinned ? `<span class="msg-pin" title="Pinned message">${icon('pin')}</span>` : ''}${failed ? `<span class="text-body msg-undecryptable" title="This message was encrypted for a different device and cannot be read here">${icon('lock')} Encrypted message</span>` : (pending ? `<span class="text-body msg-pending" aria-label="Loading message"><span class="msg-skeleton"></span><span class="msg-skeleton short"></span></span>` : `<span class="text-body${jumboCls}">${formatContent(bodyText)}</span>`)}${m.edited_at ? `<span class="msg-edited" title="Edited ${escapeHtml(formatTime(m.edited_at))}">(edited)</span>` : ''}</div>
+    <div class="text" data-content>${m.pinned ? `<span class="msg-pin" title="Pinned message">${icon('pin')}</span>` : ''}${failed ? `<span class="text-body msg-undecryptable" title="This message could not be read on this device">${icon('lock')} Message unavailable</span>` : (pending ? `<span class="text-body msg-pending" aria-label="Loading message"><span class="msg-skeleton"></span><span class="msg-skeleton short"></span></span>` : `<span class="text-body${jumboCls}">${formatContent(bodyText)}</span>`)}${m.edited_at ? `<span class="msg-edited" title="Edited ${escapeHtml(formatTime(m.edited_at))}">(edited)</span>` : ''}</div>
     <div class="attachment-slot"></div>
     <div class="embed-slot"></div>
     <div class="reactions">${reactionsHTML(m.reactions)}</div>
@@ -4017,7 +4080,10 @@ function messageNode(m, grouped, animate) {
   if (gutterAv) { gutterAv.style.cursor = 'pointer'; gutterAv.addEventListener('click', () => openProfile(a)); }
 
   const jump = node.querySelector('.reply-ref');
-  if (jump) jump.addEventListener('click', () => flashMessage(jump.dataset.jump));
+  if (jump) {
+    jump.addEventListener('click', () => flashMessage(jump.dataset.jump));
+    hydrateReplyRef(m, node);
+  }
 
   if (m.attachment_url) node.querySelector('.attachment-slot').appendChild(attachmentNode(m));
   const slot = node.querySelector('.embed-slot');
@@ -4888,15 +4954,14 @@ async function sendMessage() {
 
   const explicitErr = await e2eExplicitCheck(content);
   if (explicitErr) { toast('Message blocked: ' + explicitErr, 'error'); return; }
-  const enc = await e2eEncrypt(content, await e2eRecipientsSafe());
 
-  const payload = { content: enc.content };
-  if (enc.encrypted) {
-    /* The server cannot read ciphertext, so mentions and @everyone/@here
-       pings are resolved here and sent alongside the encrypted body. */
-    payload.mentions = e2eMentionIds(content);
-    payload.broadcast = e2eBroadcast(content);
-  }
+  /* Messages are sent as readable text. The E2E layer used to encrypt the body,
+     which meant the server could only hand back ciphertext - the root cause of
+     every "Encrypted message" placeholder and of the raw \u0001E2E1: envelope
+     leaking into reply previews. The readable copy is mirrored in `plain` so
+     replies, notifications and other devices always show the real text. */
+  const payload = { content };
+  if (content) payload.plain = content;
   if (state.pendingAttachment) {
     payload.attachment_url = state.pendingAttachment.url;
     payload.attachment_name = state.pendingAttachment.name;
@@ -4909,6 +4974,7 @@ async function sendMessage() {
   const quoted = state.replyTo ? {
     id: state.replyTo.id,
     content: state.replyTo.content,
+    plain: state.replyTo.plain || (isE2EContent(state.replyTo.content) ? null : state.replyTo.content),
     attachment_url: state.replyTo.attachment_url || null,
     attachment_name: state.replyTo.attachment_name || null,
     attachment_type: state.replyTo.attachment_type || null,
@@ -5273,9 +5339,10 @@ function updateMessageNode(m) {
   /* The quoted message may have finished decrypting after the node was built. */
   updateReplyRef(node, m);
   const body = node.querySelector('.text-body');
-  const stillPending = isE2EContent(m.content);
-  if (body && m.decrypt_failed) {
-    body.innerHTML = icon('lock') + ' Encrypted message';
+  const hasPlain = typeof m.plain === 'string' && m.plain.trim();
+  const stillPending = !hasPlain && isE2EContent(m.content);
+  if (body && !hasPlain && m.decrypt_failed) {
+    body.innerHTML = icon('lock') + ' Message unavailable';
     body.className = 'text-body msg-undecryptable';
   } else if (body && stillPending) {
     /* Keys are still being set up: keep the neutral skeleton, never the
@@ -5285,9 +5352,10 @@ function updateMessageNode(m) {
       body.innerHTML = '<span class="msg-skeleton"></span><span class="msg-skeleton short"></span>';
     }
   } else if (body) {
-    const bodyText = isEmbeddableMediaUrl((extractUrls(m.content || '')[0] || ''))
-      ? stripEmbeddableUrls(m.content)
-      : m.content;
+    const shownText = hasPlain ? m.plain : m.content;
+    const bodyText = isEmbeddableMediaUrl((extractUrls(shownText || '')[0] || ''))
+      ? stripEmbeddableUrls(shownText)
+      : shownText;
     body.innerHTML = formatContent(bodyText);
     /* Recompute the jumbo-emoji treatment after an edit. */
     const onlyEmoji = isEmojiOnly(bodyText || '');
