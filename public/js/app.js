@@ -864,7 +864,7 @@ function roleIconHTML(icon, cls = 'role-ico-img') {
 function badgeChips(user, opts = {}) {
   const list = (user && user.badges) || [];
   if (!list.length) return '';
-  const cls = opts.compact ? 'badge-chip compact' : 'badge-chip';
+  const cls = opts.size === 'lg' ? 'badge-chip lg' : (opts.compact ? 'badge-chip compact' : 'badge-chip');
   return `<span class="badge-row">${list.map(b => `<span class="${cls}" title="${escapeHtml(b.name)}"><img src="${escapeHtml(b.icon_url)}" alt="${escapeHtml(b.name)}" loading="lazy"><span class="badge-chip-name">${escapeHtml(b.name)}</span></span>`).join('')}</span>`;
 }
 
@@ -8162,8 +8162,9 @@ function renderOwnProfile(user) {
         </div>
         <div class="profile-idcard">
           <div class="pic-avatar">${avatarHTML(user, 96, user.status || 'offline')}</div>
-          <div class="pic-name">${escapeHtml(displayName)}${badgeChips(user)}</div>
+          <div class="pic-name">${escapeHtml(displayName)}</div>
           <div class="pic-tag">${escapeHtml(fullTag(user))}</div>
+          ${(user.badges || []).length ? `<div class="profile-badges">${badgeChips(user, { size: 'lg' })}</div>` : ''}
           ${serverRolePills(user)}
           <div class="pic-status"><span class="dot ${user.status || 'online'}"></span>${escapeHtml(user.custom_status || statusLabel(user.status))}</div>
           ${user.pronouns ? `<div class="pic-date">${escapeHtml(user.pronouns)}</div>` : ''}
@@ -8319,8 +8320,9 @@ function renderOtherProfile(user, ctx) {
       <div class="dp-head">
         <div class="dp-avatar">${avatarHTML(user, 120, user.status || 'offline')}</div>
         <div class="dp-identity">
-          <div class="dp-name">${escapeHtml(displayName)}${user.bot ? `<span class="bot-tag" title="Verified bot">${icon('check-badge')}<span>BOT</span></span>` : ''}${badgeChips(user)}</div>
+          <div class="dp-name">${escapeHtml(displayName)}${user.bot ? `<span class="bot-tag" title="Verified bot">${icon('check-badge')}<span>BOT</span></span>` : ''}</div>
           <div class="dp-handle">${escapeHtml(fullTag(user))}${user.pronouns ? ` <span class="dp-pronoun">\u00b7 ${escapeHtml(user.pronouns)}</span>` : ''}</div>
+          ${(user.badges || []).length ? `<div class="dp-badges">${badgeChips(user, { size: 'lg' })}</div>` : ''}
           ${serverRolePills(user)}
           ${user.custom_status ? `<div class="dp-custom">${escapeHtml(user.custom_status)}</div>` : ''}
         </div>

@@ -3912,9 +3912,27 @@ body[data-theme="light"] .update-card { box-shadow: 0 24px 70px rgba(0, 0, 0, .2
   font-size: 11px; font-weight: 700; color: var(--text-normal); line-height: 1.4;
 }
 .badge-chip img { width: 16px; height: 16px; border-radius: 50%; object-fit: cover; flex: 0 0 auto; background: var(--card); }
-.badge-chip.compact { font-size: 10px; padding: 1px 6px 1px 2px; gap: 4px; }
-.badge-chip.compact img { width: 13px; height: 13px; }
+.badge-chip.compact { font-size: 11px; padding: 2px 8px 2px 3px; gap: 5px; }
+.badge-chip.compact img { width: 17px; height: 17px; }
 .badge-chip-name { white-space: nowrap; }
+
+/* Large badge chips used on profile popouts. These are the badges platform
+   admins assign in the admin panel, so they need to be genuinely readable
+   rather than a 13px speck next to the username. */
+.badge-chip.lg {
+  gap: 8px; padding: 5px 14px 5px 5px; font-size: 13px; font-weight: 700;
+  background: color-mix(in srgb, var(--brand) 16%, transparent);
+  border-color: color-mix(in srgb, var(--brand) 42%, var(--divider));
+  box-shadow: 0 1px 2px rgba(0,0,0,.18);
+}
+.badge-chip.lg img { width: 28px; height: 28px; border: 1px solid color-mix(in srgb, var(--brand) 30%, var(--divider)); }
+.profile-badges { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.profile-badges .badge-row { margin-left: 0; gap: 8px; }
+.dp-badges { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 9px; }
+.dp-badges .badge-row { margin-left: 0; gap: 8px; }
+/* Keep member-list chips from stretching the row: the name is truncated, the
+   badge icon stays at full size so it is still recognisable at a glance. */
+.member-body .badge-chip.compact .badge-chip-name { max-width: 82px; overflow: hidden; text-overflow: ellipsis; }
 .member-body { display: flex; flex-direction: column; min-width: 0; gap: 1px; flex: 1; }
 .member-body .mname { min-width: 0; display: inline-flex; align-items: center; flex-wrap: wrap; gap: 3px; }
 .member-body .mname .badge-row { margin-left: 4px; }
