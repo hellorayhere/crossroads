@@ -859,13 +859,15 @@ function roleIconHTML(icon, cls = 'role-ico-img') {
   return `<span class="role-ico">${escapeHtml(icon)}</span>`;
 }
 
-/* Render a user's profile badges as small image+name chips. Badges are
-   assigned by platform admins and arrive on the public user payload. */
+/* Render a user's profile badges. Badges are assigned by platform admins and
+   arrive on the public user payload. We show ONLY the badge artwork - no pill,
+   no circular crop and no visible name. The badge name is exposed through the
+   native tooltip (title) and aria-label so it appears on hover. */
 function badgeChips(user, opts = {}) {
   const list = (user && user.badges) || [];
   if (!list.length) return '';
   const cls = opts.size === 'lg' ? 'badge-chip lg' : (opts.compact ? 'badge-chip compact' : 'badge-chip');
-  return `<span class="badge-row">${list.map(b => `<span class="${cls}" title="${escapeHtml(b.name)}"><img src="${escapeHtml(b.icon_url)}" alt="${escapeHtml(b.name)}" loading="lazy"><span class="badge-chip-name">${escapeHtml(b.name)}</span></span>`).join('')}</span>`;
+  return `<span class="badge-row">${list.map(b => `<span class="${cls}" title="${escapeHtml(b.name)}" aria-label="${escapeHtml(b.name)}"><img src="${escapeHtml(b.icon_url)}" alt="${escapeHtml(b.name)}" loading="lazy"></span>`).join('')}</span>`;
 }
 
 function serverRolePills(user) {
@@ -8133,8 +8135,8 @@ function renderOwnProfile(user) {
           <div class="pnav-preview">
             <div class="pnav-avatar">${avatarHTML(user, 40, user.status || 'online')}</div>
             <div class="pnav-text">
-              <div class="n1">${escapeHtml(displayName)}</div>
-              <div class="n2">${escapeHtml(fullTag(user))}${badgeChips(user)}</div>
+              <div class="n1">${escapeHtml(displayName)}${badgeChips(user)}</div>
+              <div class="n2">${escapeHtml(fullTag(user))}</div>
             </div>
           </div>
         </div>
@@ -8162,9 +8164,8 @@ function renderOwnProfile(user) {
         </div>
         <div class="profile-idcard">
           <div class="pic-avatar">${avatarHTML(user, 96, user.status || 'offline')}</div>
-          <div class="pic-name">${escapeHtml(displayName)}</div>
+          <div class="pic-name">${escapeHtml(displayName)}${(user.badges || []).length ? badgeChips(user, { size: 'lg' }) : ''}</div>
           <div class="pic-tag">${escapeHtml(fullTag(user))}</div>
-          ${(user.badges || []).length ? `<div class="profile-badges">${badgeChips(user, { size: 'lg' })}</div>` : ''}
           ${serverRolePills(user)}
           <div class="pic-status"><span class="dot ${user.status || 'online'}"></span>${escapeHtml(user.custom_status || statusLabel(user.status))}</div>
           ${user.pronouns ? `<div class="pic-date">${escapeHtml(user.pronouns)}</div>` : ''}
@@ -8320,9 +8321,8 @@ function renderOtherProfile(user, ctx) {
       <div class="dp-head">
         <div class="dp-avatar">${avatarHTML(user, 120, user.status || 'offline')}</div>
         <div class="dp-identity">
-          <div class="dp-name">${escapeHtml(displayName)}${user.bot ? `<span class="bot-tag" title="Verified bot">${icon('check-badge')}<span>BOT</span></span>` : ''}</div>
+          <div class="dp-name"><span class="dp-name-text">${escapeHtml(displayName)}</span>${user.bot ? `<span class="bot-tag" title="Verified bot">${icon('check-badge')}<span>BOT</span></span>` : ''}${(user.badges || []).length ? badgeChips(user, { size: 'lg' }) : ''}</div>
           <div class="dp-handle">${escapeHtml(fullTag(user))}${user.pronouns ? ` <span class="dp-pronoun">\u00b7 ${escapeHtml(user.pronouns)}</span>` : ''}</div>
-          ${(user.badges || []).length ? `<div class="dp-badges">${badgeChips(user, { size: 'lg' })}</div>` : ''}
           ${serverRolePills(user)}
           ${user.custom_status ? `<div class="dp-custom">${escapeHtml(user.custom_status)}</div>` : ''}
         </div>

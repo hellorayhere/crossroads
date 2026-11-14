@@ -215,8 +215,8 @@ button:active, .rail-item:active, .channel:active, .dm-item:active, .member:acti
   /* Inset card: a touch narrower than the sidebar so the banner reads as a
      framed piece of artwork rather than a full-bleed block. */
   width: calc(100% - 24px);
-  height: 244px;
-  min-height: 244px;
+  height: 150px;
+  min-height: 150px;
   margin: 0 12px 8px;
   border-radius: 10px;
   background-size: cover;
@@ -964,7 +964,7 @@ button:active, .rail-item:active, .channel:active, .dm-item:active, .member:acti
 }
 .oprofile-modal { position: relative; }
 .oprofile-banner {
-  position: relative; z-index: 0; height: 208px; width: 100%; flex: 0 0 auto;
+  position: relative; z-index: 0; height: 300px; width: 100%; flex: 0 0 auto;
   background: var(--accent); background-size: cover; background-position: center;
 }
 .oprofile-banner::after {
@@ -987,7 +987,9 @@ button:active, .rail-item:active, .channel:active, .dm-item:active, .member:acti
    and the avatar alone is offset upward, so the name, handle and custom status
    always render on clean background below the banner. */
 .dp-head { display: flex; align-items: flex-start; gap: 22px; margin-top: 0; position: relative; z-index: 5; }
-.dp-avatar { flex: 0 0 auto; position: relative; z-index: 10; margin-top: -66px; left: -12px; }
+/* The avatar sits fully BELOW the banner now - it keeps its size but no longer
+   climbs into the artwork, so the circle never overlaps the banner. */
+.dp-avatar { flex: 0 0 auto; position: relative; z-index: 10; margin-top: 0; left: 0; }
 .dp-avatar .avatar {
   /* No accent ring around the profile picture: the border stays 7px wide so
      the avatar's size and position are unchanged, but it is transparent. */
@@ -1622,10 +1624,10 @@ button:active, .rail-item:active, .channel:active, .dm-item:active, .member:acti
 @media (max-width: 900px) { .members { display: none; } .profile-body-grid, .settings-body { grid-template-columns: 1fr; } .profile-nav, .settings-nav { display: none; } }
 @media (max-width: 720px) {
   .oprofile-modal { max-width: 100%; }
-  .oprofile-banner { height: 140px; }
+  .oprofile-banner { height: 200px; }
   .dp-body { padding: 0 16px 18px; }
   .dp-head { flex-wrap: wrap; margin-top: 0; gap: 12px; }
-  .dp-avatar { margin-top: -50px; left: -8px; }
+  .dp-avatar { margin-top: 0; left: 0; }
   .dp-avatar .avatar { width: 88px !important; height: 88px !important; }
   .dp-identity { flex: 1 1 140px; }
   .dp-name { font-size: 23px; }
@@ -1766,7 +1768,7 @@ input:focus::placeholder, textarea:focus::placeholder { color: color-mix(in srgb
 .ss-body { overflow-y: auto; }
 
 /* banner */
-.ss-banner { position: relative; height: 440px; border-radius: 12px; overflow: hidden; background-size: cover; background-position: center; display: flex; align-items: flex-start; justify-content: flex-end; border: 1px solid var(--divider); }
+.ss-banner { position: relative; height: auto; aspect-ratio: 4 / 1; min-height: 150px; max-height: 260px; border-radius: 12px; overflow: hidden; background-size: cover; background-position: center; display: flex; align-items: flex-start; justify-content: flex-end; border: 1px solid var(--divider); }
 .ss-banner-shade { position: absolute; inset: 0; background: linear-gradient(180deg, rgba(0,0,0,.28), rgba(0,0,0,0) 60%); pointer-events: none; }
 .ss-banner-actions { position: relative; z-index: 1; display: flex; gap: 8px; padding: 14px; }
 .ss-banner-btn { display: flex; align-items: center; gap: 8px; padding: 8px 14px; border-radius: 8px; font-size: 13px; font-weight: 700; color: #fff; background: rgba(0,0,0,.55); backdrop-filter: blur(3px); border: 1px solid rgba(255,255,255,.15); transition: background .15s, transform .1s; }
@@ -3904,35 +3906,22 @@ body[data-theme="light"] .update-card { box-shadow: 0 24px 70px rgba(0, 0, 0, .2
 .ra-owner-tag { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; font-weight: 700; color: var(--yellow); }
 
 /* Profile badges */
-.badge-row { display: inline-flex; flex-wrap: wrap; gap: 5px; margin-left: 7px; vertical-align: middle; }
+.badge-row { display: inline-flex; flex-wrap: wrap; gap: 5px; margin-left: 7px; vertical-align: middle; align-items: center; }
+/* Only the badge artwork is shown: no pill background, no border and no
+   circular crop. The badge name lives in the native tooltip (title) and is
+   revealed on hover, so nothing sits next to the artwork itself. */
 .badge-chip {
-  display: inline-flex; align-items: center; gap: 5px; padding: 2px 8px 2px 3px;
-  border-radius: 999px; background: color-mix(in srgb, var(--brand) 12%, transparent);
-  border: 1px solid color-mix(in srgb, var(--brand) 32%, var(--divider));
-  font-size: 11px; font-weight: 700; color: var(--text-normal); line-height: 1.4;
+  display: inline-flex; align-items: center; padding: 0;
+  background: none; border: 0; border-radius: 0; line-height: 0;
 }
-.badge-chip img { width: 16px; height: 16px; border-radius: 50%; object-fit: cover; flex: 0 0 auto; background: var(--card); }
-.badge-chip.compact { font-size: 11px; padding: 2px 8px 2px 3px; gap: 5px; }
-.badge-chip.compact img { width: 17px; height: 17px; }
-.badge-chip-name { white-space: nowrap; }
-
-/* Large badge chips used on profile popouts. These are the badges platform
-   admins assign in the admin panel, so they need to be genuinely readable
-   rather than a 13px speck next to the username. */
-.badge-chip.lg {
-  gap: 8px; padding: 5px 14px 5px 5px; font-size: 13px; font-weight: 700;
-  background: color-mix(in srgb, var(--brand) 16%, transparent);
-  border-color: color-mix(in srgb, var(--brand) 42%, var(--divider));
-  box-shadow: 0 1px 2px rgba(0,0,0,.18);
+.badge-chip img {
+  width: 18px; height: 18px; border-radius: 0; object-fit: contain;
+  flex: 0 0 auto; background: transparent; display: block;
 }
-.badge-chip.lg img { width: 28px; height: 28px; border: 1px solid color-mix(in srgb, var(--brand) 30%, var(--divider)); }
-.profile-badges { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
-.profile-badges .badge-row { margin-left: 0; gap: 8px; }
-.dp-badges { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 9px; }
-.dp-badges .badge-row { margin-left: 0; gap: 8px; }
-/* Keep member-list chips from stretching the row: the name is truncated, the
-   badge icon stays at full size so it is still recognisable at a glance. */
-.member-body .badge-chip.compact .badge-chip-name { max-width: 82px; overflow: hidden; text-overflow: ellipsis; }
+.badge-chip.compact img { width: 18px; height: 18px; }
+/* Large badges used on profile popouts sit inline next to the display name. */
+.badge-chip.lg img { width: 30px; height: 30px; }
+/* Keep member-list rows from stretching: only the artwork is shown anyway. */
 .member-body { display: flex; flex-direction: column; min-width: 0; gap: 1px; flex: 1; }
 .member-body .mname { min-width: 0; display: inline-flex; align-items: center; flex-wrap: wrap; gap: 3px; }
 .member-body .mname .badge-row { margin-left: 4px; }
@@ -4072,7 +4061,7 @@ body[data-theme="light"] .update-card { box-shadow: 0 24px 70px rgba(0, 0, 0, .2
     radial-gradient(80% 50% at 100% 100%, color-mix(in srgb, var(--accent) 18%, transparent) 0%, transparent 70%);
 }
 /* Banner is deliberately taller so the profile art has room to breathe. */
-.oprofile-banner { height: 224px; }
+.oprofile-banner { height: 300px; }
 .oprofile-banner::after {
   background: linear-gradient(180deg, rgba(0,0,0,0) 42%, color-mix(in srgb, var(--accent) 34%, rgba(0,0,0,.55)) 100%);
 }
@@ -4253,7 +4242,7 @@ body[data-theme="light"] .update-card { box-shadow: 0 24px 70px rgba(0, 0, 0, .2
 @media (max-width: 640px) { .ec-grid { grid-template-columns: 1fr; gap: 16px; } .ec-wh-row { grid-template-columns: 1fr; } .ec-wh-head { flex-wrap: wrap; } .ec-wh-compose-row { flex-direction: column; align-items: stretch; } .ec-wh-compose-row .btn { width: 100%; } }
 
 /* ---------- Server banner image layer + scale tools ---------- */
-.ss-banner-img { position: absolute; inset: 0; background-repeat: no-repeat; transform-origin: center center; transition: transform .08s linear; pointer-events: none; will-change: transform; }
+.ss-banner-img { position: absolute; inset: 0; background-repeat: no-repeat; background-size: cover; background-position: center; transform-origin: center center; transition: transform .08s linear; pointer-events: none; will-change: transform; border-radius: inherit; }
 .ss-banner-tools { display: flex; align-items: flex-end; gap: 16px; flex-wrap: wrap; padding: 14px 16px; margin-top: 10px; border-radius: 10px; background: color-mix(in srgb, var(--chat-bg) 70%, #000); border: 1px solid var(--divider); }
 .ss-tool { flex: 1 1 140px; min-width: 120px; }
 .ss-tool label { display: flex; justify-content: space-between; align-items: center; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--text-muted); margin-bottom: 7px; }
@@ -4407,7 +4396,7 @@ body[data-theme="light"] .update-card { box-shadow: 0 24px 70px rgba(0, 0, 0, .2
 @media (max-width: 700px) {
   .dm-call-layer { right: 10px; left: 10px; bottom: 10px; align-items: stretch; }
   .dm-call-incoming, .dm-call-bar { width: auto; }
-  .sidebar-banner { height: 200px; min-height: 200px; }
+  .sidebar-banner { height: 120px; min-height: 120px; }
 }
 @media (prefers-reduced-motion: reduce) {
   .dci-ring, .dcb-ring, .dci-live-dot { animation: none; }
@@ -4421,7 +4410,7 @@ body[data-theme="light"] .update-card { box-shadow: 0 24px 70px rgba(0, 0, 0, .2
 @media (max-width: 700px) {
   .dm-call-layer { right: 10px; left: 10px; bottom: 10px; align-items: stretch; }
   .dm-call-incoming, .dm-call-bar { width: auto; }
-  .sidebar-banner { height: 200px; min-height: 200px; }
+  .sidebar-banner { height: 120px; min-height: 120px; }
 }
 
 /* ---------- Custom invite links ---------- */
